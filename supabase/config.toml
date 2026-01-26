@@ -1,0 +1,10 @@
+project_id = "flbeeduimzyjecdlonde"
+
+[functions.run-enrichment]
+verify_jwt = false
+
+[functions.test-apollo]
+verify_jwt = false
+
+[functions.test-bullhorn]
+verify_jwt = false
