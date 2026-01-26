@@ -93,11 +93,16 @@ export default function RunsHistory() {
     );
     const csvContent = [csvHeader, ...csvRows].join('\n');
 
+    // Generate filename with date, time, and CV name
+    const runDate = format(new Date(run.created_at), 'yyyy-MM-dd_HH-mm');
+    const cvName = getCandidateName(run).replace(/[^a-zA-Z0-9]/g, '_');
+    const fileName = `${runDate}_${cvName}.csv`;
+
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `contacts-${run.id.slice(0, 8)}.csv`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
   };
