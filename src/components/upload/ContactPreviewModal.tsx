@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, Search, Download, ArrowRight, Trash2, Building2, MapPin, Mail } from "lucide-react";
 import {
   Dialog,
@@ -57,6 +57,16 @@ export function ContactPreviewModal({
   const [searchQuery, setSearchQuery] = useState("");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [excludedEmails, setExcludedEmails] = useState<Set<string>>(new Set());
+
+  // Keep internal state in sync with incoming results.
+  // (This component is mounted even when closed, so without this it can get stuck with the initial empty array.)
+  useEffect(() => {
+    if (!isOpen) return;
+    setContacts(initialContacts);
+    setSearchQuery("");
+    setCompanyFilter("all");
+    setExcludedEmails(new Set());
+  }, [isOpen, initialContacts]);
 
   // Get unique companies for filter dropdown
   const uniqueCompanies = useMemo(() => {
