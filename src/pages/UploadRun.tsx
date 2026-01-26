@@ -361,59 +361,60 @@ export default function UploadRun() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Saved Profiles Selector */}
-            <SavedProfilesSelector
-              onSelectProfile={handleSelectSavedProfile}
-            />
-            
             <div className="grid gap-6 md:grid-cols-2">
               {/* CV Upload or Loaded Profile Display */}
-              {loadedFromHistory && cvData ? (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">Selected Candidate</label>
-                  <div className="rounded-lg border-2 border-success bg-success/5 p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
-                          <Users className="h-5 w-5 text-success" />
+              <div className="space-y-3">
+                {loadedFromHistory && cvData ? (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">Selected Candidate</label>
+                    <div className="rounded-lg border-2 border-success bg-success/5 p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
+                            <Users className="h-5 w-5 text-success" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">{cvData.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {cvData.current_title} • {cvData.location}
+                            </p>
+                            <p className="text-xs text-success mt-1">Loaded from history</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-foreground">{cvData.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {cvData.current_title} • {cvData.location}
-                          </p>
-                          <p className="text-xs text-success mt-1">Loaded from history</p>
-                        </div>
+                        <button
+                          onClick={handleCvClear}
+                          className="rounded-full p-1 hover:bg-muted transition-colors"
+                        >
+                          <span className="sr-only">Clear</span>
+                          ×
+                        </button>
                       </div>
-                      <button
-                        onClick={handleCvClear}
-                        className="rounded-full p-1 hover:bg-muted transition-colors"
-                      >
-                        <span className="sr-only">Clear</span>
-                        ×
-                      </button>
+                      {cvData.work_history && cvData.work_history.length > 0 && (
+                        <div className="mt-3 p-2 rounded-md bg-muted/50 text-sm">
+                          <span className="text-muted-foreground">Recent:</span>{" "}
+                          <span className="text-foreground">
+                            {cvData.work_history[0]?.title} @ {cvData.work_history[0]?.company}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    {cvData.work_history && cvData.work_history.length > 0 && (
-                      <div className="mt-3 p-2 rounded-md bg-muted/50 text-sm">
-                        <span className="text-muted-foreground">Recent:</span>{" "}
-                        <span className="text-foreground">
-                          {cvData.work_history[0]?.title} @ {cvData.work_history[0]?.company}
-                        </span>
-                      </div>
-                    )}
                   </div>
-                </div>
-              ) : (
-                <CVUploadZone
-                  onFileSelect={handleCvFileSelect}
-                  onClear={handleCvClear}
-                  onParsed={setCvData}
-                  file={cvFile}
-                  parsedData={cvData}
-                  error={cvError}
-                  isProcessing={isParsingCV}
+                ) : (
+                  <CVUploadZone
+                    onFileSelect={handleCvFileSelect}
+                    onClear={handleCvClear}
+                    onParsed={setCvData}
+                    file={cvFile}
+                    parsedData={cvData}
+                    error={cvError}
+                    isProcessing={isParsingCV}
+                  />
+                )}
+                {/* Saved Profiles Selector - smaller, below upload */}
+                <SavedProfilesSelector
+                  onSelectProfile={handleSelectSavedProfile}
                 />
-              )}
+              </div>
               <IndustrySelector
                 selectedIndustries={selectedIndustries}
                 onSelectionChange={setSelectedIndustries}
