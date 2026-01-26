@@ -51,7 +51,16 @@ export default function PreviousCVs() {
         created_at: p.created_at,
       }));
 
-      setProfiles(transformedData);
+      // Deduplicate by name+email, keeping only the most recent
+      const seen = new Map<string, SavedProfile>();
+      for (const profile of transformedData) {
+        const key = `${profile.name}|${profile.email || ''}`;
+        if (!seen.has(key)) {
+          seen.set(key, profile);
+        }
+      }
+      
+      setProfiles(Array.from(seen.values()));
     } catch (error) {
       console.error("Error fetching profiles:", error);
       toast({
