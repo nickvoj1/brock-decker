@@ -592,6 +592,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         contactsFound: allContacts.length,
+        contacts: allContacts, // Return actual contacts for immediate use
         status,
         bullhornExport: bullhornResult,
       }),
