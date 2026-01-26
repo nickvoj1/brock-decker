@@ -320,19 +320,53 @@ Deno.serve(async (req) => {
                   // Get job title from enrichment
                   const jobTitle = person.title || personData.title || 'Unknown'
                   
-                  // Keyword-style sector matching: flexible partial matching like Apollo keywords
+                  // Flexible sector matching using keywords
                   const sectors = pref.sectors || []
                   if (sectors.length > 0) {
                     const orgIndustry = (person.organization?.industry || '').toLowerCase()
                     const orgKeywords: string[] = (person.organization?.keywords || []).map((k: string) => k.toLowerCase())
                     const orgName = companyName.toLowerCase()
                     
-                    // Extract individual words from sectors for flexible matching
-                    const sectorWords = sectors.flatMap(sector => 
-                      sector.toLowerCase().split(/[\s&,\-\/]+/).filter(w => w.length > 2)
-                    )
+                    // Map common sector slugs/labels to search keywords
+                    const sectorKeywordMap: Record<string, string[]> = {
+                      'energy-utilities': ['energy', 'utility', 'utilities', 'power', 'oil', 'gas', 'renewable', 'solar', 'wind', 'electric'],
+                      'energy & utilities': ['energy', 'utility', 'utilities', 'power', 'oil', 'gas', 'renewable', 'solar', 'wind', 'electric'],
+                      'technology': ['technology', 'tech', 'software', 'saas', 'it', 'computer', 'digital'],
+                      'healthcare': ['healthcare', 'health', 'medical', 'pharma', 'biotech', 'hospital', 'clinical'],
+                      'financial-services': ['financial', 'finance', 'banking', 'insurance', 'investment', 'capital'],
+                      'financial services': ['financial', 'finance', 'banking', 'insurance', 'investment', 'capital'],
+                      'industrial': ['industrial', 'manufacturing', 'machinery', 'equipment', 'engineering'],
+                      'consumer': ['consumer', 'retail', 'cpg', 'fmcg', 'brand'],
+                      'media-entertainment': ['media', 'entertainment', 'content', 'streaming', 'gaming'],
+                      'media & entertainment': ['media', 'entertainment', 'content', 'streaming', 'gaming'],
+                      'real-estate-construction': ['real estate', 'property', 'construction', 'building', 'housing'],
+                      'real estate & construction': ['real estate', 'property', 'construction', 'building', 'housing'],
+                      'transportation-logistics': ['transportation', 'logistics', 'shipping', 'freight', 'supply chain'],
+                      'transportation & logistics': ['transportation', 'logistics', 'shipping', 'freight', 'supply chain'],
+                      'retail-ecommerce': ['retail', 'ecommerce', 'e-commerce', 'shopping', 'store'],
+                      'retail & e-commerce': ['retail', 'ecommerce', 'e-commerce', 'shopping', 'store'],
+                      'telecommunications': ['telecom', 'telecommunications', 'wireless', 'mobile', 'network'],
+                      'manufacturing': ['manufacturing', 'factory', 'production', 'industrial'],
+                      'education': ['education', 'edtech', 'school', 'university', 'learning'],
+                      'agriculture': ['agriculture', 'agri', 'farming', 'agtech', 'food'],
+                      'government-public': ['government', 'public sector', 'federal', 'municipal'],
+                      'government & public sector': ['government', 'public sector', 'federal', 'municipal'],
+                    }
                     
-                    // Check if any sector word appears in company data (keyword-style matching)
+                    // Get keywords for each selected sector
+                    const sectorWords: string[] = []
+                    for (const sector of sectors) {
+                      const sectorLower = sector.toLowerCase()
+                      const mappedKeywords = sectorKeywordMap[sectorLower]
+                      if (mappedKeywords) {
+                        sectorWords.push(...mappedKeywords)
+                      } else {
+                        // Fallback: split the sector into words
+                        sectorWords.push(...sectorLower.split(/[\s&,\-\/]+/).filter(w => w.length > 2))
+                      }
+                    }
+                    
+                    // Check if any sector keyword appears in company data
                     const sectorMatched = sectorWords.some(word => 
                       orgIndustry.includes(word) ||
                       orgKeywords.some(k => k.includes(word)) ||
@@ -340,7 +374,7 @@ Deno.serve(async (req) => {
                     )
                     
                     if (!sectorMatched) {
-                      console.log(`Skipping contact - no sector keyword match: ${companyName} (industry: ${orgIndustry}) for keywords: ${sectorWords.join(', ')}`)
+                      console.log(`Skipping - no sector match: ${companyName} (industry: ${orgIndustry}) for: ${sectorWords.slice(0, 5).join(', ')}...`)
                       continue
                     }
                   }
