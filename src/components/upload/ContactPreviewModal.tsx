@@ -163,7 +163,7 @@ export function ContactPreviewModal({
         </div>
 
         {/* Table */}
-        <ScrollArea className="flex-1 border rounded-md">
+        <ScrollArea className="flex-1 min-h-0 max-h-[50vh] border rounded-md">
           <Table>
             <TableHeader className="sticky top-0 bg-background z-10">
               <TableRow>
