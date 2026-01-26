@@ -287,14 +287,8 @@ export default function UploadRun() {
         throw enrichError;
       }
 
-      // Fetch the enriched data for preview
-      const { data: runData } = await supabase
-        .from('enrichment_runs')
-        .select('enriched_data')
-        .eq('id', run.id)
-        .single();
-
-      const contacts = (runData?.enriched_data as unknown as Contact[]) || [];
+      // Use contacts directly from edge function response (no extra DB fetch needed)
+      const contacts = (enrichResult?.contacts as Contact[]) || [];
       
       if (contacts.length > 0) {
         setPreviewContacts(contacts);
