@@ -33,6 +33,7 @@ interface Preference {
 
 interface ApolloContact {
   name: string
+  title: string
   location: string
   email: string
   company: string
@@ -209,7 +210,7 @@ Deno.serve(async (req) => {
           const people = apolloData.people || []
           
           // Collect person IDs to enrich (get emails)
-          const peopleToEnrich: Array<{id: string, name: string, company: string, location: string}> = []
+          const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
           
           for (const person of people) {
             if (peopleToEnrich.length >= remainingNeeded) break
@@ -243,6 +244,7 @@ Deno.serve(async (req) => {
               peopleToEnrich.push({
                 id: person.id,
                 name: person.name || 'Unknown',
+                title: person.title || 'Unknown',
                 company: companyName,
                 location: personLocation,
               })
@@ -286,10 +288,14 @@ Deno.serve(async (req) => {
                   // Get company from enrichment if available
                   const companyName = person.organization?.name || personData.company
                   
+                  // Get job title from enrichment
+                  const jobTitle = person.title || personData.title || 'Unknown'
+                  
                   // Only add if we got an email and a valid name
                   if (email && fullName && fullName !== 'Unknown') {
                     allContacts.push({
                       name: fullName,
+                      title: jobTitle,
                       location: fullLocation,
                       email: email,
                       company: companyName,
@@ -333,9 +339,9 @@ Deno.serve(async (req) => {
     }
 
     // Generate CSV content
-    const csvHeader = 'Name,Location,Email,Company'
+    const csvHeader = 'Name,Title,Location,Email,Company'
     const csvRows = allContacts.map(c => 
-      `"${escapeCSV(c.name)}","${escapeCSV(c.location)}","${escapeCSV(c.email)}","${escapeCSV(c.company)}"`
+      `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.location)}","${escapeCSV(c.email)}","${escapeCSV(c.company)}"`
     )
     const csvContent = [csvHeader, ...csvRows].join('\n')
 
