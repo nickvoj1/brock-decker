@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Play, Loader2, FileText, Settings2, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -42,6 +42,8 @@ interface ParsedCandidate {
 // Re-export for CVUploadZone compatibility
 export type { ParsedCandidate, WorkExperience, Education };
 
+const ROLES_STORAGE_KEY = 'apollo-search-selected-roles';
+
 export default function UploadRun() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -58,16 +60,20 @@ export default function UploadRun() {
   // Location selection
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   
-  // Target roles selection - default to HR/Recruiting roles
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([
-    "Recruiter", "Talent Acquisition", "HR Manager", "Human Resources",
-    "Hiring Manager", "Head of Talent", "People Operations", "HR Director",
-    "Talent Partner", "HR Business Partner"
-  ]);
+  // Target roles selection - load from localStorage or start empty
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(() => {
+    const saved = localStorage.getItem(ROLES_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
   
   // Run configuration
   const [maxContacts, setMaxContacts] = useState(50);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Save selected roles to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem(ROLES_STORAGE_KEY, JSON.stringify(selectedRoles));
+  }, [selectedRoles]);
 
   const handleCvFileSelect = async (file: File) => {
     setCvFile(file);
