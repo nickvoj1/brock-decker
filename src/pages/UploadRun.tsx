@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, Loader2, FileText, Settings2 } from "lucide-react";
+import { Play, Loader2, FileText, Settings2, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
 import { LocationSelector } from "@/components/upload/LocationSelector";
+import { RoleSelector } from "@/components/upload/RoleSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,6 +57,13 @@ export default function UploadRun() {
   
   // Location selection
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+  
+  // Target roles selection - default to HR/Recruiting roles
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([
+    "Recruiter", "Talent Acquisition", "HR Manager", "Human Resources",
+    "Hiring Manager", "Head of Talent", "People Operations", "HR Director",
+    "Talent Partner", "HR Business Partner"
+  ]);
   
   // Run configuration
   const [maxContacts, setMaxContacts] = useState(50);
@@ -112,7 +120,7 @@ export default function UploadRun() {
     setCvError(null);
   };
 
-  const canRun = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && !isRunning && !isParsingCV;
+  const canRun = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning && !isParsingCV;
 
   // Convert selected industries to preferences data format for backend
   const getPreferencesData = () => {
@@ -120,7 +128,8 @@ export default function UploadRun() {
       industry,
       companies: '',
       exclusions: '',
-      locations: selectedLocations, // Include selected locations
+      locations: selectedLocations,
+      targetRoles: selectedRoles, // Include selected roles
     }));
   };
 
@@ -244,15 +253,36 @@ export default function UploadRun() {
           </CardContent>
         </Card>
 
-        {/* Step 3: Configure Search */}
+        {/* Step 3: Select Target Roles */}
         <Card className="animate-slide-up" style={{ animationDelay: '0.2s' }}>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Users className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Step 3: Select Target Roles</CardTitle>
+                <CardDescription>Choose which job titles to search for</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <RoleSelector
+              selectedRoles={selectedRoles}
+              onRolesChange={setSelectedRoles}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Step 4: Configure Search */}
+        <Card className="animate-slide-up" style={{ animationDelay: '0.3s' }}>
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Settings2 className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 3: Configure Search</CardTitle>
+                <CardTitle className="text-lg">Step 4: Configure Search</CardTitle>
                 <CardDescription>Set how many contacts you want to find</CardDescription>
               </div>
             </div>
@@ -279,8 +309,8 @@ export default function UploadRun() {
               <div className="space-y-2">
                 <Label>What you'll get</Label>
                 <div className="text-sm text-muted-foreground space-y-1">
-                  <p>• CSV with: Name, Title, Company, Email, Phone</p>
-                  <p>• Hiring contacts (Recruiters, HR, Talent Acquisition)</p>
+                  <p>• CSV with: Name, Location, Email, Company</p>
+                  <p>• Contacts matching your selected roles</p>
                   <p>• Based on selected locations & industries</p>
                 </div>
               </div>
@@ -288,15 +318,15 @@ export default function UploadRun() {
           </CardContent>
         </Card>
 
-        {/* Step 4: Run */}
-        <Card className="animate-slide-up" style={{ animationDelay: '0.3s' }}>
+        {/* Step 5: Run */}
+        <Card className="animate-slide-up" style={{ animationDelay: '0.4s' }}>
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Play className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 4: Find Contacts</CardTitle>
+                <CardTitle className="text-lg">Step 5: Find Contacts</CardTitle>
                 <CardDescription>
                   {canRun 
                     ? `Ready to find up to ${maxContacts} contacts for ${cvData?.name} in ${selectedLocations.length} location(s)`
