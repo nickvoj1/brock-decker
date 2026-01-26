@@ -145,7 +145,9 @@ async function extractTextFromFile(file: File, buffer: ArrayBuffer): Promise<str
   return ''
 }
 
-async function parseWithAI(cvText: string, apiKey: string): Promise<ParsedCandidate> {
+async function parseWithAI(cvText: string, apiKey: string, retryCount = 0): Promise<ParsedCandidate> {
+  const maxRetries = 2
+  
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -153,7 +155,7 @@ async function parseWithAI(cvText: string, apiKey: string): Promise<ParsedCandid
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'google/gemini-3-flash-preview',
+      model: 'google/gemini-2.5-flash', // Using more stable model
       messages: [
         {
           role: 'system',
@@ -246,11 +248,30 @@ If information is not clearly present, leave that field empty or use "Not specif
   if (!response.ok) {
     const errorText = await response.text()
     console.error('AI API error:', response.status, errorText)
+    
+    // Retry on 500 errors
+    if (response.status >= 500 && retryCount < maxRetries) {
+      console.log(`Retrying AI request (attempt ${retryCount + 2}/${maxRetries + 1})...`)
+      await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
+      return parseWithAI(cvText, apiKey, retryCount + 1)
+    }
+    
     throw new Error('Failed to parse CV with AI')
   }
 
   const data = await response.json()
-  console.log('AI response:', JSON.stringify(data, null, 2))
+  
+  // Check if response has an error field (gateway error)
+  if (data.error) {
+    console.error('AI gateway error:', data.error)
+    if (retryCount < maxRetries) {
+      console.log(`Retrying AI request (attempt ${retryCount + 2}/${maxRetries + 1})...`)
+      await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
+      return parseWithAI(cvText, apiKey, retryCount + 1)
+    }
+  }
+  
+  console.log('AI response received, processing...')
   
   // Try to get tool call first
   let toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
