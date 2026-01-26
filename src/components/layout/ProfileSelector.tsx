@@ -16,6 +16,7 @@ const PROFILE_NAMES = [
   "Nick Bulmeistar",
   "Rainer Grote",
   "Vadzim Valasevich",
+  "Nikita Vojevoda",
 ];
 
 const PROFILE_NAME_KEY = "apollo-search-profile-name";
