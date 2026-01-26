@@ -5,8 +5,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 const PROFILE_NAMES = [
   "Denis Radchenko",
@@ -20,23 +23,42 @@ const PROFILE_NAMES = [
 ];
 
 const PROFILE_NAME_KEY = "apollo-search-profile-name";
+const REMEMBER_ME_KEY = "apollo-search-remember-me";
 
 interface ProfileSelectorProps {
   onProfileChange?: (name: string) => void;
 }
 
 export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
-  const [selectedProfile, setSelectedProfile] = useState<string>(() => {
-    return localStorage.getItem(PROFILE_NAME_KEY) || "";
+  const [rememberMe, setRememberMe] = useState<boolean>(() => {
+    return localStorage.getItem(REMEMBER_ME_KEY) === "true";
   });
+  
+  const [selectedProfile, setSelectedProfile] = useState<string>(() => {
+    // Only load saved profile if "remember me" was checked
+    const savedRemember = localStorage.getItem(REMEMBER_ME_KEY) === "true";
+    if (savedRemember) {
+      return localStorage.getItem(PROFILE_NAME_KEY) || "";
+    }
+    return "";
+  });
+  
   const [isOpen, setIsOpen] = useState(!selectedProfile);
 
   useEffect(() => {
     if (selectedProfile) {
-      localStorage.setItem(PROFILE_NAME_KEY, selectedProfile);
+      if (rememberMe) {
+        localStorage.setItem(PROFILE_NAME_KEY, selectedProfile);
+      } else {
+        localStorage.removeItem(PROFILE_NAME_KEY);
+      }
       onProfileChange?.(selectedProfile);
     }
-  }, [selectedProfile, onProfileChange]);
+  }, [selectedProfile, rememberMe, onProfileChange]);
+
+  useEffect(() => {
+    localStorage.setItem(REMEMBER_ME_KEY, rememberMe.toString());
+  }, [rememberMe]);
 
   // Auto-open dropdown if no profile selected
   useEffect(() => {
@@ -65,12 +87,12 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
           <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[200px]">
+      <DropdownMenuContent align="end" className="w-[220px] bg-popover z-50">
         {PROFILE_NAMES.map((name) => (
           <DropdownMenuItem
             key={name}
             onClick={() => handleSelect(name)}
-            className="flex items-center justify-between"
+            className="flex items-center justify-between cursor-pointer"
           >
             <span>{name}</span>
             {selectedProfile === name && (
@@ -78,6 +100,23 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
             )}
           </DropdownMenuItem>
         ))}
+        <DropdownMenuSeparator />
+        <div 
+          className="flex items-center gap-2 px-2 py-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Checkbox
+            id="remember-me"
+            checked={rememberMe}
+            onCheckedChange={(checked) => setRememberMe(checked === true)}
+          />
+          <Label 
+            htmlFor="remember-me" 
+            className="text-sm text-muted-foreground cursor-pointer"
+          >
+            Remember me
+          </Label>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );
