@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users, Trash2 } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import type { Json } from "@/integrations/supabase/types";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
@@ -55,12 +56,19 @@ interface EnrichmentRun {
   enriched_csv_url: string | null;
   candidates_data: Json;
   preferences_data: Json;
+  bullhorn_list_name: string | null;
+  bullhorn_list_id: number | null;
+  bullhorn_exported_at: string | null;
 }
 
 export default function RunsHistory() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRun, setSelectedRun] = useState<EnrichmentRun | null>(null);
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
+  const [exportingRunId, setExportingRunId] = useState<string | null>(null);
+  
   const { data: runs, isLoading } = useQuery({
     queryKey: ['enrichment-runs', statusFilter],
     queryFn: async () => {
@@ -76,6 +84,35 @@ export default function RunsHistory() {
       const { data, error } = await query;
       if (error) throw error;
       return data as EnrichmentRun[];
+    },
+  });
+
+  const exportTooBullhornMutation = useMutation({
+    mutationFn: async (runId: string) => {
+      setExportingRunId(runId);
+      const { data, error } = await supabase.functions.invoke('export-to-bullhorn', {
+        body: { runId }
+      });
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Exported to Bullhorn",
+        description: `Distribution list "${data.listName}" created with ${data.contactsExported} contacts.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['enrichment-runs'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Export failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setExportingRunId(null);
     },
   });
 
@@ -247,6 +284,30 @@ export default function RunsHistory() {
                           >
                             <Download className="h-4 w-4" />
                           </Button>
+                          {run.bullhorn_exported_at ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled
+                              className="text-green-600"
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => exportTooBullhornMutation.mutate(run.id)}
+                              disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
+                              title="Export to Bullhorn"
+                            >
+                              {exportingRunId === run.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Upload className="h-4 w-4" />
+                              )}
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -388,15 +449,41 @@ export default function RunsHistory() {
                   </Card>
                 )}
 
-                {/* Download Button */}
-                <Button
-                  onClick={() => downloadCSV(selectedRun, removedContacts)}
-                  disabled={getContactCount(selectedRun, removedContacts) === 0}
-                  className="w-full"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Download Contacts CSV ({getContactCount(selectedRun, removedContacts)} contacts)
-                </Button>
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => downloadCSV(selectedRun, removedContacts)}
+                    disabled={getContactCount(selectedRun, removedContacts) === 0}
+                    className="flex-1"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download CSV ({getContactCount(selectedRun, removedContacts)})
+                  </Button>
+                  {selectedRun.bullhorn_exported_at ? (
+                    <Button
+                      variant="outline"
+                      disabled
+                      className="flex-1 text-green-600"
+                    >
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Exported: {selectedRun.bullhorn_list_name}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      onClick={() => exportTooBullhornMutation.mutate(selectedRun.id)}
+                      disabled={getContactCount(selectedRun, removedContacts) === 0 || exportingRunId === selectedRun.id}
+                      className="flex-1"
+                    >
+                      {exportingRunId === selectedRun.id ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="mr-2 h-4 w-4" />
+                      )}
+                      Export to Bullhorn
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </DialogContent>

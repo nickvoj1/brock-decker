@@ -401,11 +401,39 @@ Deno.serve(async (req) => {
       })
       .eq('id', runId)
 
+    // Auto-export to Bullhorn if enabled and contacts found
+    let bullhornResult = null
+    if (run.bullhorn_enabled && allContacts.length > 0) {
+      try {
+        console.log('Auto-exporting to Bullhorn...')
+        const bullhornUrl = `${supabaseUrl}/functions/v1/export-to-bullhorn`
+        const bullhornResponse = await fetch(bullhornUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({ runId }),
+        })
+        
+        if (bullhornResponse.ok) {
+          bullhornResult = await bullhornResponse.json()
+          console.log('Bullhorn auto-export complete:', bullhornResult)
+        } else {
+          const errorText = await bullhornResponse.text()
+          console.error('Bullhorn auto-export failed:', errorText)
+        }
+      } catch (bhError: any) {
+        console.error('Bullhorn auto-export error:', bhError.message)
+      }
+    }
+
     return new Response(
       JSON.stringify({ 
         success: true, 
         contactsFound: allContacts.length,
-        status 
+        status,
+        bullhornExport: bullhornResult,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
