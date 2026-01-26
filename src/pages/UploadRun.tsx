@@ -57,6 +57,12 @@ export default function UploadRun() {
   // Industry selection
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   
+  // Industry sectors (optional, broad categories)
+  const [selectedSectors, setSelectedSectors] = useState<string[]>(() => {
+    const saved = localStorage.getItem('apollo-search-sectors');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
   // Location selection
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   
@@ -234,6 +240,8 @@ export default function UploadRun() {
             <IndustrySelector
               selectedIndustries={selectedIndustries}
               onSelectionChange={setSelectedIndustries}
+              selectedSectors={selectedSectors}
+              onSectorsChange={setSelectedSectors}
             />
           </CardContent>
         </Card>

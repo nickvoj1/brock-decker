@@ -29,6 +29,25 @@ interface IndustryCategory {
   industries: Industry[];
 }
 
+// Broad industry sectors for additional filtering
+const INDUSTRY_SECTORS = [
+  { value: "technology", label: "Technology" },
+  { value: "healthcare", label: "Healthcare" },
+  { value: "industrial", label: "Industrial" },
+  { value: "consumer", label: "Consumer" },
+  { value: "financial-services", label: "Financial Services" },
+  { value: "energy-utilities", label: "Energy & Utilities" },
+  { value: "media-entertainment", label: "Media & Entertainment" },
+  { value: "retail-ecommerce", label: "Retail & E-commerce" },
+  { value: "real-estate-construction", label: "Real Estate & Construction" },
+  { value: "transportation-logistics", label: "Transportation & Logistics" },
+  { value: "education", label: "Education" },
+  { value: "government-public", label: "Government & Public Sector" },
+  { value: "telecommunications", label: "Telecommunications" },
+  { value: "manufacturing", label: "Manufacturing" },
+  { value: "agriculture", label: "Agriculture" },
+];
+
 const INDUSTRY_CATEGORIES: IndustryCategory[] = [
   {
     name: "Investment & Asset Management",
@@ -134,18 +153,54 @@ const ALL_INDUSTRIES = INDUSTRY_CATEGORIES.flatMap((cat) => cat.industries);
 interface IndustrySelectorProps {
   selectedIndustries: string[];
   onSelectionChange: (industries: string[]) => void;
+  selectedSectors?: string[];
+  onSectorsChange?: (sectors: string[]) => void;
 }
 
 export function IndustrySelector({
   selectedIndustries,
   onSelectionChange,
+  selectedSectors = [],
+  onSectorsChange,
 }: IndustrySelectorProps) {
   const [open, setOpen] = useState(false);
+  const [sectorOpen, setSectorOpen] = useState(false);
 
   // Persist to localStorage
   useEffect(() => {
     localStorage.setItem('apollo-search-industries', JSON.stringify(selectedIndustries));
   }, [selectedIndustries]);
+
+  // Persist sectors to localStorage
+  useEffect(() => {
+    if (selectedSectors.length > 0) {
+      localStorage.setItem('apollo-search-sectors', JSON.stringify(selectedSectors));
+    }
+  }, [selectedSectors]);
+
+  const toggleSector = (value: string) => {
+    if (!onSectorsChange) return;
+    if (selectedSectors.includes(value)) {
+      onSectorsChange(selectedSectors.filter((s) => s !== value));
+    } else {
+      onSectorsChange([...selectedSectors, value]);
+    }
+  };
+
+  const removeSector = (value: string) => {
+    if (!onSectorsChange) return;
+    onSectorsChange(selectedSectors.filter((s) => s !== value));
+  };
+
+  const getSectorLabel = (value: string) => {
+    return INDUSTRY_SECTORS.find((s) => s.value === value)?.label || value;
+  };
+
+  const clearAllSectors = () => {
+    if (onSectorsChange) {
+      onSectorsChange([]);
+    }
+  };
 
   const toggleIndustry = (value: string) => {
     if (selectedIndustries.includes(value)) {
@@ -308,6 +363,103 @@ export function IndustrySelector({
       <p className="text-xs text-muted-foreground">
         Select industries to find hiring contacts in
       </p>
+
+      {/* Optional Sector Filter */}
+      {onSectorsChange && (
+        <div className="mt-4 pt-4 border-t border-border space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-foreground flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-muted-foreground" />
+              Industry Sector
+              <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+            </label>
+            {selectedSectors.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearAllSectors}
+                className="h-auto py-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
+          <Popover open={sectorOpen} onOpenChange={setSectorOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={sectorOpen}
+                className="w-full justify-between h-auto min-h-10 px-3 py-2"
+              >
+                <span className={selectedSectors.length === 0 ? "text-muted-foreground" : ""}>
+                  {selectedSectors.length === 0
+                    ? "Select broad sectors (tech, healthcare...)"
+                    : `${selectedSectors.length} sector${selectedSectors.length === 1 ? '' : 's'} selected`}
+                </span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[350px] p-0 bg-popover" align="start" sideOffset={4}>
+              <Command>
+                <CommandInput placeholder="Search sectors..." />
+                <CommandList>
+                  <ScrollArea className="h-[250px]">
+                    <CommandEmpty>No sector found.</CommandEmpty>
+                    <CommandGroup>
+                      {INDUSTRY_SECTORS.map((sector) => (
+                        <CommandItem
+                          key={sector.value}
+                          value={sector.label}
+                          onSelect={() => toggleSector(sector.value)}
+                          className="cursor-pointer"
+                        >
+                          <div className={cn(
+                            "mr-2 h-4 w-4 border rounded flex items-center justify-center",
+                            selectedSectors.includes(sector.value)
+                              ? "bg-primary border-primary text-primary-foreground"
+                              : "border-muted-foreground/30"
+                          )}>
+                            {selectedSectors.includes(sector.value) && (
+                              <Check className="h-3 w-3" />
+                            )}
+                          </div>
+                          {sector.label}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </ScrollArea>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          {selectedSectors.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-2">
+              {selectedSectors.map((value) => (
+                <Badge
+                  key={value}
+                  variant="outline"
+                  className="gap-1 pr-1 text-xs"
+                >
+                  {getSectorLabel(value)}
+                  <button
+                    onClick={() => removeSector(value)}
+                    className="ml-1 rounded-full p-0.5 hover:bg-muted-foreground/20 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            Narrow results by broad industry sector
+          </p>
+        </div>
+      )}
     </div>
   );
 }
