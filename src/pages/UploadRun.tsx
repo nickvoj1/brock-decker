@@ -8,6 +8,7 @@ import { LocationSelector } from "@/components/upload/LocationSelector";
 import { RoleSelector } from "@/components/upload/RoleSelector";
 import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
 import { SearchDebugPanel } from "@/components/upload/SearchDebugPanel";
+import { ContactPreviewModal, Contact } from "@/components/upload/ContactPreviewModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,6 +76,11 @@ export default function UploadRun() {
   // Run configuration
   const [maxContacts, setMaxContacts] = useState(50);
   const [isRunning, setIsRunning] = useState(false);
+  
+  // Contact preview modal state
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewContacts, setPreviewContacts] = useState<Contact[]>([]);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
   // Role suggestions based on CV and industries
   const roleSuggestions = useRoleSuggestions(cvData, selectedIndustries);
@@ -158,11 +164,10 @@ export default function UploadRun() {
     
     try {
       // Create a new run record with single candidate
-      // Note: search_counter is now used as maxContacts
       const { data: run, error: runError } = await supabase
         .from('enrichment_runs')
         .insert([{
-          search_counter: maxContacts, // Using this field for max contacts
+          search_counter: maxContacts,
           candidates_count: 1,
           preferences_count: selectedIndustries.length,
           status: 'running' as const,
@@ -186,21 +191,33 @@ export default function UploadRun() {
       });
 
       if (enrichError) {
-        // Update run status to failed
         await supabase
           .from('enrichment_runs')
           .update({ status: 'failed', error_message: enrichError.message })
           .eq('id', run.id);
-          
         throw enrichError;
       }
 
-      toast({
-        title: "Search complete",
-        description: `Found ${enrichResult.contactsFound || 0} contacts. View in Runs History to download.`,
-      });
+      // Fetch the enriched data for preview
+      const { data: runData } = await supabase
+        .from('enrichment_runs')
+        .select('enriched_data')
+        .eq('id', run.id)
+        .single();
 
-      navigate('/history');
+      const contacts = (runData?.enriched_data as unknown as Contact[]) || [];
+      
+      if (contacts.length > 0) {
+        setPreviewContacts(contacts);
+        setCurrentRunId(run.id);
+        setShowPreview(true);
+      } else {
+        toast({
+          title: "No contacts found",
+          description: "Try adjusting your search criteria",
+          variant: "destructive",
+        });
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -212,7 +229,35 @@ export default function UploadRun() {
     }
   };
 
+  const handleDownloadCSV = (contacts: Contact[]) => {
+    if (contacts.length === 0) return;
+    
+    const csvHeader = "Name,Title,Location,Email,Company\n";
+    const csvRows = contacts.map(c => 
+      `"${c.name}","${c.title}","${c.location}","${c.email}","${c.company}"`
+    ).join("\n");
+    
+    const blob = new Blob([csvHeader + csvRows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contacts-${cvData?.name?.replace(/\s+/g, '-') || 'export'}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    toast({
+      title: "CSV Downloaded",
+      description: `Exported ${contacts.length} contacts`,
+    });
+  };
+
+  const handleProceedToHistory = () => {
+    setShowPreview(false);
+    navigate('/history');
+  };
+
   return (
+    <>
     <AppLayout 
       title="Find Hiring Contacts" 
       description="Upload a CV and find relevant hiring contacts on Apollo.io"
@@ -407,5 +452,16 @@ export default function UploadRun() {
         </Card>
       </div>
     </AppLayout>
+    
+    {/* Contact Preview Modal */}
+    <ContactPreviewModal
+      isOpen={showPreview}
+      onClose={() => setShowPreview(false)}
+      contacts={previewContacts}
+      candidateName={cvData?.name || "Candidate"}
+      onProceed={handleProceedToHistory}
+      onDownload={handleDownloadCSV}
+    />
+    </>
   );
 }
