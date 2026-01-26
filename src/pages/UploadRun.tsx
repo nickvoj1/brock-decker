@@ -141,7 +141,8 @@ export default function UploadRun() {
       companies: '',
       exclusions: '',
       locations: selectedLocations,
-      targetRoles: selectedRoles, // Include selected roles
+      targetRoles: selectedRoles,
+      sectors: selectedSectors, // Include selected sectors for Apollo filtering
     }));
   };
 

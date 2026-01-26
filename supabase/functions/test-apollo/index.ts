@@ -18,12 +18,12 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Test the Apollo API with a simple search
-    const response = await fetch('https://api.apollo.io/v1/mixed_people/search', {
+    // Test the Apollo API with a simple search using the correct endpoint
+    const response = await fetch('https://api.apollo.io/api/v1/mixed_people/api_search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Api-Key': apiKey,
+        'x-api-key': apiKey,
       },
       body: JSON.stringify({
         page: 1,

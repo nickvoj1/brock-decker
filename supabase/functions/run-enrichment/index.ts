@@ -29,6 +29,7 @@ interface Preference {
   exclusions: string
   locations?: string[]
   targetRoles?: string[]
+  sectors?: string[]
 }
 
 interface ApolloContact {
@@ -203,11 +204,27 @@ Deno.serve(async (req) => {
           apolloLocations.forEach(loc => queryParams.append('person_locations[]', loc))
         }
         
+        // Add industry sectors if specified (broad categories like Tech, Healthcare, etc.)
+        const sectors = pref.sectors || []
+        if (sectors.length > 0) {
+          // Apollo uses organization_industry_tag_ids or q_organization_keyword_tags
+          // Using keyword tags for broader matching
+          sectors.forEach(sector => queryParams.append('q_organization_keyword_tags[]', sector))
+          console.log('Filtering by sectors:', sectors)
+        }
+        
+        // Add industry keyword for filtering
+        if (pref.industry) {
+          queryParams.append('q_keywords', pref.industry)
+          console.log('Filtering by industry keyword:', pref.industry)
+        }
+        
         queryParams.append('per_page', String(perPage))
         queryParams.append('page', '1')
 
         // Use the new api_search endpoint (note: /api/v1/ not /v1/)
         const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
+        console.log('Apollo search URL params:', queryParams.toString())
         
         const apolloResponse = await fetch(searchUrl, {
           method: 'POST',
