@@ -250,10 +250,57 @@ If information is not clearly present, leave that field empty or use "Not specif
   }
 
   const data = await response.json()
+  console.log('AI response:', JSON.stringify(data, null, 2))
   
-  const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
-  if (!toolCall || toolCall.function.name !== 'extract_candidate_info') {
-    throw new Error('AI did not return expected format')
+  // Try to get tool call first
+  let toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
+  
+  // If no tool call, try to parse from content (fallback)
+  if (!toolCall || toolCall.function?.name !== 'extract_candidate_info') {
+    console.log('No tool call found, attempting to parse from content')
+    const content = data.choices?.[0]?.message?.content
+    
+    // Try to extract JSON from content if present
+    if (content) {
+      try {
+        // Look for JSON in the content
+        const jsonMatch = content.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0])
+          const candidateId = `CV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+          return {
+            candidate_id: candidateId,
+            name: parsed.name || 'Unknown',
+            current_title: parsed.current_title || parsed.position || 'Not specified',
+            location: parsed.location || 'Not specified',
+            email: parsed.email || undefined,
+            phone: parsed.phone || undefined,
+            summary: parsed.summary || undefined,
+            skills: parsed.skills || [],
+            work_history: parsed.work_history || [],
+            education: parsed.education || []
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse JSON from content:', e)
+      }
+    }
+    
+    // If all else fails, return a minimal result with extracted text info
+    console.error('AI did not return expected format, returning minimal result')
+    const candidateId = `CV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    return {
+      candidate_id: candidateId,
+      name: 'Could not parse',
+      current_title: 'Not specified',
+      location: 'Not specified',
+      email: undefined,
+      phone: undefined,
+      summary: 'CV parsing encountered an issue. Please try a different file format.',
+      skills: [],
+      work_history: [],
+      education: []
+    }
   }
 
   const parsed = JSON.parse(toolCall.function.arguments)
