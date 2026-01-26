@@ -320,12 +320,34 @@ Deno.serve(async (req) => {
                   // Get job title from enrichment
                   const jobTitle = person.title || personData.title || 'Unknown'
                   
+                  // Strict sector matching: verify company industry matches selected sectors
+                  const sectors = pref.sectors || []
+                  if (sectors.length > 0) {
+                    const orgIndustry = (person.organization?.industry || '').toLowerCase()
+                    const orgKeywords: string[] = (person.organization?.keywords || []).map((k: string) => k.toLowerCase())
+                    const orgName = companyName.toLowerCase()
+                    
+                    // Check if any selected sector matches the company's industry, keywords, or name
+                    const sectorMatched = sectors.some(sector => {
+                      const sectorLower = sector.toLowerCase()
+                      return orgIndustry.includes(sectorLower) ||
+                             orgKeywords.some(k => k.includes(sectorLower) || sectorLower.includes(k)) ||
+                             orgName.includes(sectorLower)
+                    })
+                    
+                    if (!sectorMatched) {
+                      console.log(`Skipping contact - sector mismatch: ${companyName} (industry: ${orgIndustry}) doesn't match sectors: ${sectors.join(', ')}`)
+                      continue
+                    }
+                  }
+                  
                   // Only add if we got an email and a valid name
                   if (email && fullName && fullName !== 'Unknown') {
                     // Check if this contact was recently used
                     if (usedEmails.has(email.toLowerCase())) {
                       console.log(`Skipping recently used contact: ${fullName} (${email})`)
                     } else {
+                      console.log(`Adding contact: ${fullName} at ${companyName} (industry: ${person.organization?.industry || 'unknown'})`)
                       allContacts.push({
                         name: fullName,
                         title: jobTitle,
