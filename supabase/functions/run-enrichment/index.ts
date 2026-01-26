@@ -269,15 +269,33 @@ Deno.serve(async (req) => {
                   const enriched = await enrichResponse.json()
                   const person = enriched.person || {}
                   
-                  // Only add if we got an email
+                  // Get full details from enrichment response
                   const email = person.email || ''
-                  if (email) {
+                  const fullName = person.name || (person.first_name && person.last_name 
+                    ? `${person.first_name} ${person.last_name}`.trim() 
+                    : personData.name)
+                  
+                  // Build location from enrichment data
+                  const locationParts = [
+                    person.city,
+                    person.state,
+                    person.country
+                  ].filter(Boolean)
+                  const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+                  
+                  // Get company from enrichment if available
+                  const companyName = person.organization?.name || personData.company
+                  
+                  // Only add if we got an email and a valid name
+                  if (email && fullName && fullName !== 'Unknown') {
                     allContacts.push({
-                      name: personData.name,
-                      location: personData.location,
+                      name: fullName,
+                      location: fullLocation,
                       email: email,
-                      company: personData.company,
+                      company: companyName,
                     })
+                  } else {
+                    console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
                   }
                 } else {
                   // Skip contacts without email
