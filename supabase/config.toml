@@ -1,5 +1,8 @@
 project_id = "flbeeduimzyjecdlonde"
 
+[functions.parse-cv]
+verify_jwt = false
+
 [functions.run-enrichment]
 verify_jwt = false
 

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, Loader2, FileSpreadsheet, Settings2 } from "lucide-react";
+import { Play, Loader2, FileText, Settings2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { FileUploadZone } from "@/components/upload/FileUploadZone";
+import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,25 +11,30 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import type { Json } from "@/integrations/supabase/types";
 
 interface ParsedCandidate {
   candidate_id: string;
   name: string;
   position: string;
   location: string;
-  [key: string]: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  skills?: string[];
 }
 
 export default function UploadRun() {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  // File states
+  // CV file states
   const [cvFile, setCvFile] = useState<File | null>(null);
-  const [cvData, setCvData] = useState<ParsedCandidate[] | null>(null);
+  const [cvData, setCvData] = useState<ParsedCandidate | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
+  const [isParsingCV, setIsParsingCV] = useState(false);
   
-  // Industry selection (replaces preferences CSV)
+  // Industry selection
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   
   // Run configuration
@@ -37,18 +42,58 @@ export default function UploadRun() {
   const [bullhornEnabled, setBullhornEnabled] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
 
-  const handleCvFileSelect = (file: File, parsed: Record<string, string>[]) => {
+  const handleCvFileSelect = async (file: File) => {
     setCvFile(file);
-    if (parsed.length > 0) {
-      setCvData(parsed as ParsedCandidate[]);
-      setCvError(null);
-    } else {
-      setCvData(null);
-      setCvError("Invalid file or missing required columns");
+    setCvError(null);
+    setCvData(null);
+    setIsParsingCV(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-cv`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: formData,
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'Failed to parse CV');
+      }
+
+      setCvData(result.data);
+      toast({
+        title: "CV parsed successfully",
+        description: `Extracted info for ${result.data.name}`,
+      });
+    } catch (error: any) {
+      console.error('CV parsing error:', error);
+      setCvError(error.message || 'Failed to parse CV');
+      toast({
+        title: "Error parsing CV",
+        description: error.message || 'Failed to extract information from CV',
+        variant: "destructive",
+      });
+    } finally {
+      setIsParsingCV(false);
     }
   };
 
-  const canRun = cvData && cvData.length > 0 && selectedIndustries.length > 0 && !isRunning;
+  const handleCvClear = () => {
+    setCvFile(null);
+    setCvData(null);
+    setCvError(null);
+  };
+
+  const canRun = cvData && selectedIndustries.length > 0 && !isRunning && !isParsingCV;
 
   // Convert selected industries to preferences data format for backend
   const getPreferencesData = () => {
@@ -67,18 +112,18 @@ export default function UploadRun() {
     setIsRunning(true);
     
     try {
-      // Create a new run record
+      // Create a new run record with single candidate
       const { data: run, error: runError } = await supabase
         .from('enrichment_runs')
-        .insert({
+        .insert([{
           search_counter: searchCounter,
-          candidates_count: cvData.length,
+          candidates_count: 1,
           preferences_count: selectedIndustries.length,
-          status: 'running',
+          status: 'running' as const,
           bullhorn_enabled: bullhornEnabled,
-          candidates_data: cvData,
-          preferences_data: preferencesData,
-        })
+          candidates_data: JSON.parse(JSON.stringify([cvData])) as Json,
+          preferences_data: JSON.parse(JSON.stringify(preferencesData)) as Json,
+        }])
         .select()
         .single();
 
@@ -86,7 +131,7 @@ export default function UploadRun() {
 
       toast({
         title: "Enrichment started",
-        description: `Processing ${cvData.length} candidates...`,
+        description: `Processing candidate: ${cvData.name}`,
       });
 
       // Call the enrichment edge function
@@ -124,36 +169,31 @@ export default function UploadRun() {
   return (
     <AppLayout 
       title="Upload & Run" 
-      description="Upload CSV files and run Apollo.io enrichment"
+      description="Upload a CV and run Apollo.io enrichment"
     >
       <div className="max-w-4xl space-y-6">
-        {/* Step 1: Upload Files */}
+        {/* Step 1: Upload CV & Select Industries */}
         <Card className="animate-slide-up">
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <FileSpreadsheet className="h-4 w-4" />
+                <FileText className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 1: Upload Files</CardTitle>
-                <CardDescription>Upload your candidate and preference CSV files</CardDescription>
+                <CardTitle className="text-lg">Step 1: Upload CV & Select Industries</CardTitle>
+                <CardDescription>Upload a candidate CV and select target industries</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="grid gap-6 md:grid-cols-2">
-            <FileUploadZone
-              label="Candidates CSV"
-              description="Upload CVs.csv with candidate data"
-              expectedColumns={['candidate_id', 'name', 'position', 'location']}
+            <CVUploadZone
               onFileSelect={handleCvFileSelect}
-              onClear={() => {
-                setCvFile(null);
-                setCvData(null);
-                setCvError(null);
-              }}
+              onClear={handleCvClear}
+              onParsed={setCvData}
               file={cvFile}
               parsedData={cvData}
               error={cvError}
+              isProcessing={isParsingCV}
             />
             <IndustrySelector
               selectedIndustries={selectedIndustries}
@@ -222,8 +262,8 @@ export default function UploadRun() {
                 <CardTitle className="text-lg">Step 3: Run Enrichment</CardTitle>
                 <CardDescription>
                   {canRun 
-                    ? `Ready to process ${cvData?.length} candidates with ${selectedIndustries.length} industries`
-                    : "Upload CSV and select industries to enable enrichment"
+                    ? `Ready to enrich ${cvData?.name} with ${selectedIndustries.length} industries`
+                    : "Upload a CV and select industries to enable enrichment"
                   }
                 </CardDescription>
               </div>
