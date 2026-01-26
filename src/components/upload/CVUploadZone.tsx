@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2, Eye } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2, Eye, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CVPreviewModal } from "./CVPreviewModal";
@@ -57,6 +57,7 @@ export function CVUploadZone({
 }: CVUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [expandedWorkHistory, setExpandedWorkHistory] = useState(false);
 
   const isValidFile = (file: File): boolean => {
     const hasValidType = ACCEPTED_TYPES.includes(file.type);
@@ -183,16 +184,30 @@ export function CVUploadZone({
                     <div className="space-y-1">
                       <span className="text-muted-foreground">Work History ({parsedData.work_history.length}):</span>
                       <div className="pl-2 space-y-1">
-                        {parsedData.work_history.slice(0, 2).map((exp, i) => (
+                        {(expandedWorkHistory ? parsedData.work_history : parsedData.work_history.slice(0, 2)).map((exp, i) => (
                           <div key={i} className="text-xs">
                             <span className="font-medium">{exp.title}</span>
                             <span className="text-muted-foreground"> @ {exp.company}</span>
                           </div>
                         ))}
                         {parsedData.work_history.length > 2 && (
-                          <span className="text-xs text-muted-foreground">
-                            +{parsedData.work_history.length - 2} more
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedWorkHistory(!expandedWorkHistory)}
+                            className="text-xs text-primary hover:text-primary/80 flex items-center gap-1 transition-colors"
+                          >
+                            {expandedWorkHistory ? (
+                              <>
+                                <ChevronUp className="h-3 w-3" />
+                                Show less
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3 w-3" />
+                                +{parsedData.work_history.length - 2} more
+                              </>
+                            )}
+                          </button>
                         )}
                       </div>
                     </div>
