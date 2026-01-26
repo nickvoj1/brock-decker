@@ -172,31 +172,40 @@ Deno.serve(async (req) => {
       const perPage = Math.min(remainingNeeded * 2, 100) // Get extra to account for filtering
 
       try {
-        const searchPayload: ApolloSearchPayload = {
-          person_titles: hiringTitles,
-          person_locations: apolloLocations.length > 0 ? apolloLocations : undefined,
-          per_page: perPage,
-          page: 1,
-        }
-
-        // Add industry-based search parameters
-        // Apollo uses different industry mappings, so we search by title relevance
+        // Build query params for new API search endpoint
+        const queryParams = new URLSearchParams()
         
-        const apolloResponse = await fetch('https://api.apollo.io/v1/mixed_people/search', {
+        // Add titles
+        hiringTitles.forEach(title => queryParams.append('person_titles[]', title))
+        
+        // Add locations
+        if (apolloLocations.length > 0) {
+          apolloLocations.forEach(loc => queryParams.append('person_locations[]', loc))
+        }
+        
+        queryParams.append('per_page', String(perPage))
+        queryParams.append('page', '1')
+
+        // Use the new api_search endpoint (note: /api/v1/ not /v1/)
+        const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
+        
+        const apolloResponse = await fetch(searchUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Api-Key': apolloApiKey,
+            'x-api-key': apolloApiKey,
           },
-          body: JSON.stringify(searchPayload),
         })
 
         if (apolloResponse.ok) {
           const apolloData = await apolloResponse.json()
           const people = apolloData.people || []
           
+          // Collect person IDs to enrich (get emails/phones)
+          const peopleToEnrich: Array<{id: string, name: string, title: string, company: string}> = []
+          
           for (const person of people) {
-            if (allContacts.length >= maxContacts) break
+            if (peopleToEnrich.length >= remainingNeeded) break
             
             const companyName = person.organization?.name || person.organization_name || 'Unknown'
             
@@ -205,26 +214,78 @@ Deno.serve(async (req) => {
               continue
             }
             
-            // Check if we already have this contact (by email or name+company)
+            // Check if we already have this contact
             const isDuplicate = allContacts.some(c => 
-              (c.email && c.email === person.email) ||
-              (c.name === person.name && c.company === companyName)
+              c.name === person.name && c.company === companyName
             )
             
             if (isDuplicate) continue
             
-            allContacts.push({
-              name: person.name || 'Unknown',
-              title: person.title || 'Unknown',
-              company: companyName,
-              email: person.email || '',
-              phone: person.phone_numbers?.[0]?.raw_number || person.phone || '',
-            })
+            if (person.id) {
+              peopleToEnrich.push({
+                id: person.id,
+                name: person.name || 'Unknown',
+                title: person.title || 'Unknown',
+                company: companyName,
+              })
+              companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+            }
+          }
+          
+          // Enrich people to get email/phone (batch of up to 10)
+          for (let i = 0; i < peopleToEnrich.length; i += 10) {
+            const batch = peopleToEnrich.slice(i, i + 10)
             
-            companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+            for (const personData of batch) {
+              try {
+                const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apolloApiKey,
+                  },
+                  body: JSON.stringify({ id: personData.id }),
+                })
+                
+                if (enrichResponse.ok) {
+                  const enriched = await enrichResponse.json()
+                  const person = enriched.person || {}
+                  
+                  allContacts.push({
+                    name: personData.name,
+                    title: personData.title,
+                    company: personData.company,
+                    email: person.email || '',
+                    phone: person.phone_numbers?.[0]?.raw_number || person.sanitized_phone || '',
+                  })
+                } else {
+                  // Add without email/phone if enrichment fails
+                  allContacts.push({
+                    name: personData.name,
+                    title: personData.title,
+                    company: personData.company,
+                    email: '',
+                    phone: '',
+                  })
+                }
+                
+                // Small delay between enrichment calls
+                await new Promise(resolve => setTimeout(resolve, 100))
+              } catch (enrichError) {
+                console.error('Enrichment error for', personData.name, enrichError)
+                allContacts.push({
+                  name: personData.name,
+                  title: personData.title,
+                  company: personData.company,
+                  email: '',
+                  phone: '',
+                })
+              }
+            }
           }
         } else {
-          console.error('Apollo API error:', apolloResponse.status, await apolloResponse.text())
+          const errorText = await apolloResponse.text()
+          console.error('Apollo API error:', apolloResponse.status, errorText)
         }
 
         processedCount++
