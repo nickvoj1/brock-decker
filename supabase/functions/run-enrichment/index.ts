@@ -103,6 +103,18 @@ Deno.serve(async (req) => {
       throw new Error('No candidate data found')
     }
 
+    // Extract companies from candidate's work history to exclude
+    const excludedCompanies = new Set<string>()
+    if (candidateData.work_history && Array.isArray(candidateData.work_history)) {
+      candidateData.work_history.forEach(job => {
+        if (job.company) {
+          // Add normalized company name (lowercase, trimmed)
+          excludedCompanies.add(job.company.toLowerCase().trim())
+        }
+      })
+    }
+    console.log('Excluding contacts from candidate\'s previous employers:', Array.from(excludedCompanies))
+
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
     const companyContactCount: Record<string, number> = {}
@@ -204,6 +216,16 @@ Deno.serve(async (req) => {
             
             const companyName = person.organization?.name || person.organization_name || 'Unknown'
             const personLocation = person.city || person.state || person.country || 'Unknown'
+            
+            // Skip contacts from candidate's previous employers
+            const normalizedCompany = companyName.toLowerCase().trim()
+            const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
+              normalizedCompany.includes(excluded) || excluded.includes(normalizedCompany)
+            )
+            if (isExcludedCompany) {
+              console.log(`Skipping contact from excluded company: ${companyName}`)
+              continue
+            }
             
             // Check max per company limit
             if ((companyContactCount[companyName] || 0) >= maxPerCompany) {
