@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -60,7 +60,7 @@ interface EnrichmentRun {
 export default function RunsHistory() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRun, setSelectedRun] = useState<EnrichmentRun | null>(null);
-
+  const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const { data: runs, isLoading } = useQuery({
     queryKey: ['enrichment-runs', statusFilter],
     queryFn: async () => {
@@ -79,12 +79,16 @@ export default function RunsHistory() {
     },
   });
 
-  const downloadCSV = (run: EnrichmentRun) => {
+  const downloadCSV = (run: EnrichmentRun, excludedEmails: Set<string> = new Set()) => {
     const contacts = (run.enriched_data as unknown) as ApolloContact[];
     if (!contacts || !Array.isArray(contacts) || contacts.length === 0) return;
 
+    // Filter out removed contacts
+    const filteredContacts = contacts.filter(c => !excludedEmails.has(c.email));
+    if (filteredContacts.length === 0) return;
+
     const csvHeader = 'Name,Title,Company,Email,Phone';
-    const csvRows = contacts.map(c => 
+    const csvRows = filteredContacts.map(c => 
       `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(c.email)}","${escapeCSV(c.phone)}"`
     );
     const csvContent = [csvHeader, ...csvRows].join('\n');
@@ -103,10 +107,33 @@ export default function RunsHistory() {
     return value.replace(/"/g, '""');
   };
 
-  const getContactCount = (run: EnrichmentRun): number => {
+  const getContactCount = (run: EnrichmentRun, excludedEmails: Set<string> = new Set()): number => {
+    const contacts = (run.enriched_data as unknown) as ApolloContact[];
+    if (!Array.isArray(contacts)) return 0;
+    return contacts.filter(c => !excludedEmails.has(c.email)).length;
+  };
+
+  const getTotalContactCount = (run: EnrichmentRun): number => {
     const contacts = (run.enriched_data as unknown) as ApolloContact[];
     if (!Array.isArray(contacts)) return 0;
     return contacts.length;
+  };
+
+  const removeContact = (email: string) => {
+    setRemovedContacts(prev => new Set([...prev, email]));
+  };
+
+  const restoreContact = (email: string) => {
+    setRemovedContacts(prev => {
+      const next = new Set(prev);
+      next.delete(email);
+      return next;
+    });
+  };
+
+  const openRunDetails = (run: EnrichmentRun) => {
+    setSelectedRun(run);
+    setRemovedContacts(new Set()); // Reset removed contacts when opening a new run
   };
 
   const getCandidateName = (run: EnrichmentRun): string => {
@@ -191,7 +218,7 @@ export default function RunsHistory() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Users className="h-4 w-4 text-muted-foreground" />
-                          {getContactCount(run)}
+                          {getTotalContactCount(run)}
                         </div>
                       </TableCell>
                       <TableCell>{run.search_counter}</TableCell>
@@ -203,7 +230,7 @@ export default function RunsHistory() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setSelectedRun(run)}
+                            onClick={() => openRunDetails(run)}
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -211,7 +238,7 @@ export default function RunsHistory() {
                             variant="ghost"
                             size="sm"
                             onClick={() => downloadCSV(run)}
-                            disabled={getContactCount(run) === 0}
+                            disabled={getTotalContactCount(run) === 0}
                           >
                             <Download className="h-4 w-4" />
                           </Button>
@@ -236,8 +263,8 @@ export default function RunsHistory() {
         </Card>
 
         {/* Run Details Dialog */}
-        <Dialog open={!!selectedRun} onOpenChange={() => setSelectedRun(null)}>
-          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <Dialog open={!!selectedRun} onOpenChange={() => { setSelectedRun(null); setRemovedContacts(new Set()); }}>
+          <DialogContent className="max-w-5xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Search Details</DialogTitle>
               <DialogDescription>
@@ -248,11 +275,17 @@ export default function RunsHistory() {
             {selectedRun && (
               <div className="space-y-6">
                 {/* Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-4 gap-4">
                   <Card>
                     <CardContent className="pt-4">
-                      <div className="text-2xl font-bold">{getContactCount(selectedRun)}</div>
-                      <div className="text-sm text-muted-foreground">Contacts Found</div>
+                      <div className="text-2xl font-bold">{getTotalContactCount(selectedRun)}</div>
+                      <div className="text-sm text-muted-foreground">Total Found</div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-4">
+                      <div className="text-2xl font-bold text-primary">{getContactCount(selectedRun, removedContacts)}</div>
+                      <div className="text-sm text-muted-foreground">For Download</div>
                     </CardContent>
                   </Card>
                   <Card>
@@ -282,10 +315,21 @@ export default function RunsHistory() {
                 )}
 
                 {/* Contacts Preview */}
-                {getContactCount(selectedRun) > 0 && (
+                {getTotalContactCount(selectedRun) > 0 && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-sm">Contacts Preview (First 10)</CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm">All Contacts</CardTitle>
+                        {removedContacts.size > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setRemovedContacts(new Set())}
+                          >
+                            Restore All ({removedContacts.size})
+                          </Button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent className="overflow-x-auto">
                       <Table>
@@ -296,18 +340,43 @@ export default function RunsHistory() {
                             <TableHead>Company</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead>Phone</TableHead>
+                            <TableHead className="w-[80px]">Action</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {((selectedRun.enriched_data as unknown) as ApolloContact[]).slice(0, 10).map((contact, i) => (
-                            <TableRow key={i}>
-                              <TableCell className="font-medium">{contact.name || '-'}</TableCell>
-                              <TableCell>{contact.title || '-'}</TableCell>
-                              <TableCell>{contact.company || '-'}</TableCell>
-                              <TableCell className="text-primary">{contact.email || '-'}</TableCell>
-                              <TableCell>{contact.phone || '-'}</TableCell>
-                            </TableRow>
-                          ))}
+                          {((selectedRun.enriched_data as unknown) as ApolloContact[]).map((contact, i) => {
+                            const isRemoved = removedContacts.has(contact.email);
+                            return (
+                              <TableRow key={i} className={isRemoved ? 'opacity-40 bg-muted/50' : ''}>
+                                <TableCell className="font-medium">{contact.name || '-'}</TableCell>
+                                <TableCell>{contact.title || '-'}</TableCell>
+                                <TableCell>{contact.company || '-'}</TableCell>
+                                <TableCell className="text-primary">{contact.email || '-'}</TableCell>
+                                <TableCell>{contact.phone || '-'}</TableCell>
+                                <TableCell>
+                                  {isRemoved ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => restoreContact(contact.email)}
+                                      className="text-primary hover:text-primary"
+                                    >
+                                      Restore
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => removeContact(contact.email)}
+                                      className="text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </CardContent>
@@ -316,12 +385,12 @@ export default function RunsHistory() {
 
                 {/* Download Button */}
                 <Button
-                  onClick={() => downloadCSV(selectedRun)}
-                  disabled={getContactCount(selectedRun) === 0}
+                  onClick={() => downloadCSV(selectedRun, removedContacts)}
+                  disabled={getContactCount(selectedRun, removedContacts) === 0}
                   className="w-full"
                 >
                   <Download className="mr-2 h-4 w-4" />
-                  Download Contacts CSV ({getContactCount(selectedRun)} contacts)
+                  Download Contacts CSV ({getContactCount(selectedRun, removedContacts)} contacts)
                 </Button>
               </div>
             )}
