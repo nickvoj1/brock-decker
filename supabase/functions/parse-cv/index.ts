@@ -48,9 +48,16 @@ Deno.serve(async (req) => {
 
     console.log('Processing file:', file.name, 'Size:', file.size, 'Type:', file.type)
 
-    // Get file as base64 for multimodal AI
+    // Get file as base64 for multimodal AI (chunked to avoid stack overflow)
     const fileBuffer = await file.arrayBuffer()
-    const base64Data = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)))
+    const bytes = new Uint8Array(fileBuffer)
+    let binary = ''
+    const chunkSize = 8192
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize)
+      binary += String.fromCharCode(...chunk)
+    }
+    const base64Data = btoa(binary)
     
     // Use AI to parse the CV content
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
