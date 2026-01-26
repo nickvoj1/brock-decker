@@ -191,19 +191,30 @@ export function RoleSelector({ selectedRoles, onRolesChange }: RoleSelectorProps
       </Popover>
 
       {selectedRoles.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {selectedRoles.map((role) => (
-            <Badge key={role} variant="secondary" className="text-xs">
-              {getRoleLabel(role)}
-              <button
-                type="button"
-                className="ml-1 hover:text-destructive"
-                onClick={() => removeRole(role)}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-1">
+            {selectedRoles.map((role) => (
+              <Badge key={role} variant="secondary" className="text-xs">
+                {getRoleLabel(role)}
+                <button
+                  type="button"
+                  className="ml-1 hover:text-destructive"
+                  onClick={() => removeRole(role)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onRolesChange([])}
+            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+          >
+            <X className="h-3 w-3 mr-1" />
+            Clear all roles
+          </Button>
         </div>
       )}
     </div>
