@@ -115,19 +115,20 @@ export function SavedProfilesSelector({
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger asChild>
           <Button
-            variant="outline"
-            className="w-full justify-between"
+            variant="ghost"
+            size="sm"
+            className="w-full justify-between h-8 text-xs text-muted-foreground hover:text-foreground"
             onClick={() => {
               if (!isOpen) fetchProfiles();
             }}
           >
-            <span className="flex items-center gap-2">
-              <User className="h-4 w-4" />
+            <span className="flex items-center gap-1.5">
+              <User className="h-3 w-3" />
               Select from Previous CVs ({profiles.length})
             </span>
             <ChevronDown
               className={cn(
-                "h-4 w-4 transition-transform",
+                "h-3 w-3 transition-transform",
                 isOpen && "rotate-180"
               )}
             />
