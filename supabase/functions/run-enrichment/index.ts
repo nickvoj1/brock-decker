@@ -27,6 +27,7 @@ interface Preference {
   industry: string
   companies: string
   exclusions: string
+  locations?: string[]
 }
 
 interface ApolloContact {
@@ -121,6 +122,48 @@ Deno.serve(async (req) => {
       'HR Business Partner'
     ]
 
+    // Get locations from preferences (all prefs share the same locations)
+    const searchLocations = preferences[0]?.locations || []
+    
+    // Map location values to human-readable names for Apollo
+    const locationLabels: Record<string, string> = {
+      'new-york': 'New York, NY',
+      'los-angeles': 'Los Angeles, CA',
+      'chicago': 'Chicago, IL',
+      'houston': 'Houston, TX',
+      'san-francisco': 'San Francisco, CA',
+      'boston': 'Boston, MA',
+      'miami': 'Miami, FL',
+      'dallas': 'Dallas, TX',
+      'seattle': 'Seattle, WA',
+      'denver': 'Denver, CO',
+      'atlanta': 'Atlanta, GA',
+      'austin': 'Austin, TX',
+      'london': 'London, United Kingdom',
+      'manchester': 'Manchester, United Kingdom',
+      'birmingham': 'Birmingham, United Kingdom',
+      'edinburgh': 'Edinburgh, United Kingdom',
+      'paris': 'Paris, France',
+      'berlin': 'Berlin, Germany',
+      'frankfurt': 'Frankfurt, Germany',
+      'amsterdam': 'Amsterdam, Netherlands',
+      'zurich': 'Zurich, Switzerland',
+      'dublin': 'Dublin, Ireland',
+      'madrid': 'Madrid, Spain',
+      'milan': 'Milan, Italy',
+      'singapore': 'Singapore',
+      'hong-kong': 'Hong Kong',
+      'tokyo': 'Tokyo, Japan',
+      'sydney': 'Sydney, Australia',
+      'melbourne': 'Melbourne, Australia',
+      'dubai': 'Dubai, UAE',
+      'toronto': 'Toronto, Canada',
+      'vancouver': 'Vancouver, Canada',
+      'montreal': 'Montreal, Canada',
+    }
+    
+    const apolloLocations = searchLocations.map(loc => locationLabels[loc] || loc)
+
     // Search across each selected industry
     for (const pref of preferences) {
       if (allContacts.length >= maxContacts) break
@@ -131,7 +174,7 @@ Deno.serve(async (req) => {
       try {
         const searchPayload: ApolloSearchPayload = {
           person_titles: hiringTitles,
-          person_locations: candidateData.location !== 'Not specified' ? [candidateData.location] : undefined,
+          person_locations: apolloLocations.length > 0 ? apolloLocations : undefined,
           per_page: perPage,
           page: 1,
         }
