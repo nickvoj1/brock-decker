@@ -32,10 +32,9 @@ interface Preference {
 
 interface ApolloContact {
   name: string
-  title: string
-  company: string
+  location: string
   email: string
-  phone: string
+  company: string
 }
 
 interface ApolloSearchPayload {
@@ -201,13 +200,14 @@ Deno.serve(async (req) => {
           const apolloData = await apolloResponse.json()
           const people = apolloData.people || []
           
-          // Collect person IDs to enrich (get emails/phones)
-          const peopleToEnrich: Array<{id: string, name: string, title: string, company: string}> = []
+          // Collect person IDs to enrich (get emails)
+          const peopleToEnrich: Array<{id: string, name: string, company: string, location: string}> = []
           
           for (const person of people) {
             if (peopleToEnrich.length >= remainingNeeded) break
             
             const companyName = person.organization?.name || person.organization_name || 'Unknown'
+            const personLocation = person.city || person.state || person.country || 'Unknown'
             
             // Check max per company limit
             if ((companyContactCount[companyName] || 0) >= maxPerCompany) {
@@ -225,8 +225,8 @@ Deno.serve(async (req) => {
               peopleToEnrich.push({
                 id: person.id,
                 name: person.name || 'Unknown',
-                title: person.title || 'Unknown',
                 company: companyName,
+                location: personLocation,
               })
               companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
             }
@@ -251,35 +251,26 @@ Deno.serve(async (req) => {
                   const enriched = await enrichResponse.json()
                   const person = enriched.person || {}
                   
-                  allContacts.push({
-                    name: personData.name,
-                    title: personData.title,
-                    company: personData.company,
-                    email: person.email || '',
-                    phone: person.phone_numbers?.[0]?.raw_number || person.sanitized_phone || '',
-                  })
+                  // Only add if we got an email
+                  const email = person.email || ''
+                  if (email) {
+                    allContacts.push({
+                      name: personData.name,
+                      location: personData.location,
+                      email: email,
+                      company: personData.company,
+                    })
+                  }
                 } else {
-                  // Add without email/phone if enrichment fails
-                  allContacts.push({
-                    name: personData.name,
-                    title: personData.title,
-                    company: personData.company,
-                    email: '',
-                    phone: '',
-                  })
+                  // Skip contacts without email
+                  console.log('Enrichment failed for', personData.name)
                 }
                 
                 // Small delay between enrichment calls
                 await new Promise(resolve => setTimeout(resolve, 100))
               } catch (enrichError) {
                 console.error('Enrichment error for', personData.name, enrichError)
-                allContacts.push({
-                  name: personData.name,
-                  title: personData.title,
-                  company: personData.company,
-                  email: '',
-                  phone: '',
-                })
+                // Skip contacts that fail enrichment
               }
             }
           }
@@ -306,9 +297,9 @@ Deno.serve(async (req) => {
     }
 
     // Generate CSV content
-    const csvHeader = 'Name,Title,Company,Email,Phone'
+    const csvHeader = 'Name,Location,Email,Company'
     const csvRows = allContacts.map(c => 
-      `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(c.email)}","${escapeCSV(c.phone)}"`
+      `"${escapeCSV(c.name)}","${escapeCSV(c.location)}","${escapeCSV(c.email)}","${escapeCSV(c.company)}"`
     )
     const csvContent = [csvHeader, ...csvRows].join('\n')
 
