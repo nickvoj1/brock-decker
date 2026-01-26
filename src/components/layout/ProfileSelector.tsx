@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 
-const PROFILE_NAMES = [
+const DEFAULT_PROFILE_NAMES = [
   "Denis Radchenko",
   "Arthur Lots",
   "Rudolf Rakiss",
@@ -24,6 +24,15 @@ const PROFILE_NAMES = [
 
 const PROFILE_NAME_KEY = "apollo-search-profile-name";
 const REMEMBER_ME_KEY = "apollo-search-remember-me";
+
+// Get ordered list with selected profile at top
+const getOrderedProfiles = (selectedProfile: string) => {
+  if (!selectedProfile) return DEFAULT_PROFILE_NAMES;
+  return [
+    selectedProfile,
+    ...DEFAULT_PROFILE_NAMES.filter(name => name !== selectedProfile)
+  ];
+};
 
 interface ProfileSelectorProps {
   onProfileChange?: (name: string) => void;
@@ -88,7 +97,7 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[220px] bg-popover z-50">
-        {PROFILE_NAMES.map((name) => (
+        {getOrderedProfiles(selectedProfile).map((name) => (
           <DropdownMenuItem
             key={name}
             onClick={() => handleSelect(name)}
