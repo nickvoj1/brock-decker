@@ -46,17 +46,12 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Extract text from the file
+    console.log('Processing file:', file.name, 'Size:', file.size, 'Type:', file.type)
+
+    // Get file as base64 for multimodal AI
     const fileBuffer = await file.arrayBuffer()
-    const fileText = await extractTextFromFile(file, fileBuffer)
-
-    if (!fileText || fileText.trim().length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'Could not extract text from file' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
+    const base64Data = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)))
+    
     // Use AI to parse the CV content
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')
     if (!LOVABLE_API_KEY) {
@@ -66,7 +61,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    const candidateData = await parseWithAI(fileText, LOVABLE_API_KEY)
+    const candidateData = await parseWithAI(base64Data, file.type, LOVABLE_API_KEY)
 
     return new Response(
       JSON.stringify({ success: true, data: candidateData }),
@@ -82,72 +77,22 @@ Deno.serve(async (req) => {
   }
 })
 
-async function extractTextFromFile(file: File, buffer: ArrayBuffer): Promise<string> {
-  const fileName = file.name.toLowerCase()
-  
-  if (fileName.endsWith('.pdf')) {
-    const uint8Array = new Uint8Array(buffer)
-    const decoder = new TextDecoder('utf-8', { fatal: false })
-    let rawText = decoder.decode(uint8Array)
-    
-    const textMatches = rawText.match(/stream[\s\S]*?endstream/g) || []
-    let extractedText = ''
-    
-    for (const match of textMatches) {
-      const cleaned = match
-        .replace(/stream|endstream/g, '')
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-      
-      if (cleaned.length > 10) {
-        extractedText += cleaned + ' '
-      }
-    }
-    
-    if (extractedText.length < 100) {
-      extractedText = rawText
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    }
-    
-    return extractedText.slice(0, 15000)
-  }
-  
-  if (fileName.endsWith('.docx')) {
-    const uint8Array = new Uint8Array(buffer)
-    const decoder = new TextDecoder('utf-8', { fatal: false })
-    const rawText = decoder.decode(uint8Array)
-    
-    const textContent = rawText
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    
-    return textContent.slice(0, 15000)
-  }
-  
-  if (fileName.endsWith('.doc')) {
-    const uint8Array = new Uint8Array(buffer)
-    const decoder = new TextDecoder('utf-8', { fatal: false })
-    const rawText = decoder.decode(uint8Array)
-    
-    const textContent = rawText
-      .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    
-    return textContent.slice(0, 15000)
-  }
-  
-  return ''
-}
-
-async function parseWithAI(cvText: string, apiKey: string, retryCount = 0): Promise<ParsedCandidate> {
+async function parseWithAI(base64Data: string, mimeType: string, apiKey: string, retryCount = 0): Promise<ParsedCandidate> {
   const maxRetries = 2
   
+  // Determine the correct mime type for the AI
+  let aiMimeType = mimeType
+  if (mimeType === 'application/msword') {
+    aiMimeType = 'application/msword'
+  } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    aiMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  } else if (mimeType === 'application/pdf' || mimeType === '') {
+    aiMimeType = 'application/pdf'
+  }
+
+  console.log('Sending to AI with mime type:', aiMimeType)
+
+  // Use multimodal approach - send the file directly to Gemini
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -155,19 +100,37 @@ async function parseWithAI(cvText: string, apiKey: string, retryCount = 0): Prom
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-flash', // Using more stable model
+      model: 'google/gemini-2.5-flash',
       messages: [
         {
-          role: 'system',
-          content: `You are a CV/resume parser. Extract comprehensive candidate information from the provided CV text.
-You must return the data using the extract_candidate_info function.
-Be accurate and extract real information - do not make up data.
-Extract ALL work history entries with company names - this is critical for finding job opportunities.
-If information is not clearly present, leave that field empty or use "Not specified".`
-        },
-        {
           role: 'user',
-          content: `Parse the following CV and extract the candidate's full profile including all work experience:\n\n${cvText}`
+          content: [
+            {
+              type: 'text',
+              text: `You are a CV/resume parser. Analyze this CV document and extract the candidate's information.
+
+IMPORTANT: You MUST use the extract_candidate_info function to return the data.
+
+Extract:
+- Full name
+- Current/most recent job title
+- Location (city, country)
+- Email address
+- Phone number
+- Professional summary (brief)
+- Skills (list up to 15)
+- Complete work history (all jobs with company name, title, and duration)
+- Education (institution, degree, year)
+
+If any information is not clearly visible in the document, use "Not specified" for that field.`
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:${aiMimeType};base64,${base64Data}`
+              }
+            }
+          ]
         }
       ],
       tools: [
@@ -253,7 +216,7 @@ If information is not clearly present, leave that field empty or use "Not specif
     if (response.status >= 500 && retryCount < maxRetries) {
       console.log(`Retrying AI request (attempt ${retryCount + 2}/${maxRetries + 1})...`)
       await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
-      return parseWithAI(cvText, apiKey, retryCount + 1)
+      return parseWithAI(base64Data, mimeType, apiKey, retryCount + 1)
     }
     
     throw new Error('Failed to parse CV with AI')
@@ -267,12 +230,12 @@ If information is not clearly present, leave that field empty or use "Not specif
     if (retryCount < maxRetries) {
       console.log(`Retrying AI request (attempt ${retryCount + 2}/${maxRetries + 1})...`)
       await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
-      return parseWithAI(cvText, apiKey, retryCount + 1)
+      return parseWithAI(base64Data, mimeType, apiKey, retryCount + 1)
     }
   }
   
-  console.log('AI response received, processing...')
-  
+  console.log('AI response received')
+
   // Try to get tool call first
   let toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
   
@@ -283,6 +246,7 @@ If information is not clearly present, leave that field empty or use "Not specif
     
     // Try to extract JSON from content if present
     if (content) {
+      console.log('Content received:', content.substring(0, 500))
       try {
         // Look for JSON in the content
         const jsonMatch = content.match(/\{[\s\S]*\}/)
@@ -307,7 +271,7 @@ If information is not clearly present, leave that field empty or use "Not specif
       }
     }
     
-    // If all else fails, return a minimal result with extracted text info
+    // If all else fails, return a minimal result with error info
     console.error('AI did not return expected format, returning minimal result')
     const candidateId = `CV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     return {
@@ -317,7 +281,7 @@ If information is not clearly present, leave that field empty or use "Not specif
       location: 'Not specified',
       email: undefined,
       phone: undefined,
-      summary: 'CV parsing encountered an issue. Please try a different file format.',
+      summary: 'CV parsing failed. Please try a different file or format (PDF works best).',
       skills: [],
       work_history: [],
       education: []
