@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
-import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2 } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { CVPreviewModal } from "./CVPreviewModal";
 
 interface WorkExperience {
   company: string;
@@ -54,6 +56,7 @@ export function CVUploadZone({
   isProcessing,
 }: CVUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const isValidFile = (file: File): boolean => {
     const hasValidType = ACCEPTED_TYPES.includes(file.type);
@@ -162,46 +165,48 @@ export function CVUploadZone({
             </div>
 
             {isValid && parsedData && (
-              <div className="mt-4 p-3 rounded-md bg-muted/50 space-y-2 text-sm">
-                {parsedData.email && (
-                  <div className="flex gap-2">
-                    <span className="text-muted-foreground">Email:</span>
-                    <span className="text-foreground">{parsedData.email}</span>
-                  </div>
-                )}
-                {parsedData.phone && (
-                  <div className="flex gap-2">
-                    <span className="text-muted-foreground">Phone:</span>
-                    <span className="text-foreground">{parsedData.phone}</span>
-                  </div>
-                )}
-                {parsedData.work_history && parsedData.work_history.length > 0 && (
-                  <div className="space-y-1">
-                    <span className="text-muted-foreground">Work History ({parsedData.work_history.length}):</span>
-                    <div className="pl-2 space-y-1">
-                      {parsedData.work_history.slice(0, 3).map((exp, i) => (
-                        <div key={i} className="text-xs">
-                          <span className="font-medium">{exp.title}</span>
-                          <span className="text-muted-foreground"> @ {exp.company}</span>
-                        </div>
-                      ))}
-                      {parsedData.work_history.length > 3 && (
-                        <span className="text-xs text-muted-foreground">
-                          +{parsedData.work_history.length - 3} more
-                        </span>
-                      )}
+              <div className="mt-4 space-y-3">
+                <div className="p-3 rounded-md bg-muted/50 space-y-2 text-sm">
+                  {parsedData.email && (
+                    <div className="flex gap-2">
+                      <span className="text-muted-foreground">Email:</span>
+                      <span className="text-foreground">{parsedData.email}</span>
                     </div>
-                  </div>
-                )}
-                {parsedData.skills && parsedData.skills.length > 0 && (
-                  <div className="flex gap-2 flex-wrap">
-                    <span className="text-muted-foreground">Skills:</span>
-                    <span className="text-foreground">{parsedData.skills.slice(0, 5).join(', ')}</span>
-                    {parsedData.skills.length > 5 && (
-                      <span className="text-muted-foreground">+{parsedData.skills.length - 5} more</span>
-                    )}
-                  </div>
-                )}
+                  )}
+                  {parsedData.phone && (
+                    <div className="flex gap-2">
+                      <span className="text-muted-foreground">Phone:</span>
+                      <span className="text-foreground">{parsedData.phone}</span>
+                    </div>
+                  )}
+                  {parsedData.work_history && parsedData.work_history.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-muted-foreground">Work History ({parsedData.work_history.length}):</span>
+                      <div className="pl-2 space-y-1">
+                        {parsedData.work_history.slice(0, 2).map((exp, i) => (
+                          <div key={i} className="text-xs">
+                            <span className="font-medium">{exp.title}</span>
+                            <span className="text-muted-foreground"> @ {exp.company}</span>
+                          </div>
+                        ))}
+                        {parsedData.work_history.length > 2 && (
+                          <span className="text-xs text-muted-foreground">
+                            +{parsedData.work_history.length - 2} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPreview(true)}
+                  className="w-full gap-2"
+                >
+                  <Eye className="h-4 w-4" />
+                  Preview Full CV
+                </Button>
               </div>
             )}
           </div>
@@ -226,6 +231,12 @@ export function CVUploadZone({
       <p className="text-xs text-muted-foreground">
         AI will extract full profile including work history
       </p>
+      
+      <CVPreviewModal
+        isOpen={showPreview}
+        onClose={() => setShowPreview(false)}
+        candidate={parsedData}
+      />
     </div>
   );
 }
