@@ -9,6 +9,7 @@ import { RoleSelector } from "@/components/upload/RoleSelector";
 import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
 import { SearchDebugPanel } from "@/components/upload/SearchDebugPanel";
 import { ContactPreviewModal, Contact } from "@/components/upload/ContactPreviewModal";
+import { SavedProfilesSelector, SavedProfile } from "@/components/upload/SavedProfilesSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,16 +48,23 @@ interface ParsedCandidate {
 export type { ParsedCandidate, WorkExperience, Education };
 
 const ROLES_STORAGE_KEY = 'apollo-search-selected-roles';
+const PROFILE_NAME_KEY = 'apollo-search-profile-name';
 
 export default function UploadRun() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  
+  // User profile name for identifying uploads
+  const [profileName, setProfileName] = useState<string>(() => {
+    return localStorage.getItem(PROFILE_NAME_KEY) || '';
+  });
   
   // CV file states
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [cvData, setCvData] = useState<ParsedCandidate | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
   const [isParsingCV, setIsParsingCV] = useState(false);
+  const [loadedFromHistory, setLoadedFromHistory] = useState(false);
   
   // Industry selection
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
@@ -85,6 +93,11 @@ export default function UploadRun() {
   // Role suggestions based on CV and industries
   const roleSuggestions = useRoleSuggestions(cvData, selectedIndustries);
 
+  // Save profile name to localStorage
+  useEffect(() => {
+    localStorage.setItem(PROFILE_NAME_KEY, profileName);
+  }, [profileName]);
+
   // Save selected roles to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem(ROLES_STORAGE_KEY, JSON.stringify(selectedRoles));
@@ -95,6 +108,7 @@ export default function UploadRun() {
     setCvError(null);
     setCvData(null);
     setIsParsingCV(true);
+    setLoadedFromHistory(false);
 
     try {
       const formData = new FormData();
@@ -118,6 +132,12 @@ export default function UploadRun() {
       }
 
       setCvData(result.data);
+      
+      // Auto-save to history if profile name is set
+      if (profileName.trim()) {
+        await saveCandidateProfile(result.data);
+      }
+      
       toast({
         title: "CV parsed successfully",
         description: `Extracted profile for ${result.data.name} with ${result.data.work_history?.length || 0} work experiences`,
@@ -139,6 +159,56 @@ export default function UploadRun() {
     setCvFile(null);
     setCvData(null);
     setCvError(null);
+    setLoadedFromHistory(false);
+  };
+
+  // Handle selecting a saved profile from history
+  const handleSelectSavedProfile = (profile: SavedProfile) => {
+    const candidate: ParsedCandidate = {
+      candidate_id: profile.candidate_id,
+      name: profile.name,
+      current_title: profile.current_title || '',
+      location: profile.location || '',
+      email: profile.email || undefined,
+      phone: profile.phone || undefined,
+      summary: profile.summary || undefined,
+      skills: profile.skills,
+      work_history: profile.work_history,
+      education: profile.education,
+    };
+    setCvData(candidate);
+    setCvFile(null);
+    setCvError(null);
+    setLoadedFromHistory(true);
+    toast({
+      title: "Profile loaded",
+      description: `Loaded ${profile.name}'s profile from history`,
+    });
+  };
+
+  // Save parsed CV to database
+  const saveCandidateProfile = async (candidate: ParsedCandidate) => {
+    if (!profileName.trim()) return;
+    
+    try {
+      const { error } = await supabase.from("candidate_profiles").insert({
+        profile_name: profileName.trim(),
+        candidate_id: candidate.candidate_id,
+        name: candidate.name,
+        current_title: candidate.current_title,
+        location: candidate.location,
+        email: candidate.email || null,
+        phone: candidate.phone || null,
+        summary: candidate.summary || null,
+        skills: candidate.skills as unknown as Json,
+        work_history: candidate.work_history as unknown as Json,
+        education: candidate.education as unknown as Json,
+      });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error saving candidate profile:", error);
+    }
   };
 
   const canRun = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning && !isParsingCV;
@@ -272,26 +342,73 @@ export default function UploadRun() {
               </div>
               <div>
                 <CardTitle className="text-lg">Step 1: Upload CV & Select Industries</CardTitle>
-                <CardDescription>Upload a candidate CV and select target industries they're interested in</CardDescription>
+                <CardDescription>Upload a candidate CV or select from history, then choose target industries</CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="grid gap-6 md:grid-cols-2">
-            <CVUploadZone
-              onFileSelect={handleCvFileSelect}
-              onClear={handleCvClear}
-              onParsed={setCvData}
-              file={cvFile}
-              parsedData={cvData}
-              error={cvError}
-              isProcessing={isParsingCV}
+          <CardContent className="space-y-6">
+            {/* Profile Name & Saved Profiles */}
+            <SavedProfilesSelector
+              onSelectProfile={handleSelectSavedProfile}
+              currentProfileName={profileName}
+              onProfileNameChange={setProfileName}
             />
-            <IndustrySelector
-              selectedIndustries={selectedIndustries}
-              onSelectionChange={setSelectedIndustries}
-              selectedSectors={selectedSectors}
-              onSectorsChange={setSelectedSectors}
-            />
+            
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* CV Upload or Loaded Profile Display */}
+              {loadedFromHistory && cvData ? (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Selected Candidate</label>
+                  <div className="rounded-lg border-2 border-success bg-success/5 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
+                          <Users className="h-5 w-5 text-success" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">{cvData.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {cvData.current_title} • {cvData.location}
+                          </p>
+                          <p className="text-xs text-success mt-1">Loaded from history</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleCvClear}
+                        className="rounded-full p-1 hover:bg-muted transition-colors"
+                      >
+                        <span className="sr-only">Clear</span>
+                        ×
+                      </button>
+                    </div>
+                    {cvData.work_history && cvData.work_history.length > 0 && (
+                      <div className="mt-3 p-2 rounded-md bg-muted/50 text-sm">
+                        <span className="text-muted-foreground">Recent:</span>{" "}
+                        <span className="text-foreground">
+                          {cvData.work_history[0]?.title} @ {cvData.work_history[0]?.company}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <CVUploadZone
+                  onFileSelect={handleCvFileSelect}
+                  onClear={handleCvClear}
+                  onParsed={setCvData}
+                  file={cvFile}
+                  parsedData={cvData}
+                  error={cvError}
+                  isProcessing={isParsingCV}
+                />
+              )}
+              <IndustrySelector
+                selectedIndustries={selectedIndustries}
+                onSelectionChange={setSelectedIndustries}
+                selectedSectors={selectedSectors}
+                onSectorsChange={setSelectedSectors}
+              />
+            </div>
           </CardContent>
         </Card>
 

@@ -41,6 +41,57 @@ export type Database = {
         }
         Relationships: []
       }
+      candidate_profiles: {
+        Row: {
+          candidate_id: string
+          created_at: string
+          current_title: string | null
+          education: Json | null
+          email: string | null
+          id: string
+          location: string | null
+          name: string
+          phone: string | null
+          profile_name: string
+          skills: Json | null
+          summary: string | null
+          updated_at: string
+          work_history: Json | null
+        }
+        Insert: {
+          candidate_id: string
+          created_at?: string
+          current_title?: string | null
+          education?: Json | null
+          email?: string | null
+          id?: string
+          location?: string | null
+          name: string
+          phone?: string | null
+          profile_name?: string
+          skills?: Json | null
+          summary?: string | null
+          updated_at?: string
+          work_history?: Json | null
+        }
+        Update: {
+          candidate_id?: string
+          created_at?: string
+          current_title?: string | null
+          education?: Json | null
+          email?: string | null
+          id?: string
+          location?: string | null
+          name?: string
+          phone?: string | null
+          profile_name?: string
+          skills?: Json | null
+          summary?: string | null
+          updated_at?: string
+          work_history?: Json | null
+        }
+        Relationships: []
+      }
       enrichment_runs: {
         Row: {
           bullhorn_enabled: boolean
