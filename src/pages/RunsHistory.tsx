@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,14 @@ import type { Json } from "@/integrations/supabase/types";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
 
+interface ApolloContact {
+  name: string;
+  title: string;
+  company: string;
+  email: string;
+  phone: string;
+}
+
 interface EnrichmentRun {
   id: string;
   created_at: string;
@@ -44,6 +52,9 @@ interface EnrichmentRun {
   bullhorn_enabled: boolean;
   bullhorn_errors: Json;
   enriched_data: Json;
+  enriched_csv_url: string | null;
+  candidates_data: Json;
+  preferences_data: Json;
 }
 
 export default function RunsHistory() {
@@ -69,30 +80,44 @@ export default function RunsHistory() {
   });
 
   const downloadCSV = (run: EnrichmentRun) => {
-    const enrichedData = run.enriched_data as Record<string, string>[];
-    if (!enrichedData || enrichedData.length === 0) return;
+    const contacts = (run.enriched_data as unknown) as ApolloContact[];
+    if (!contacts || !Array.isArray(contacts) || contacts.length === 0) return;
 
-    const headers = Object.keys(enrichedData[0]);
-    const csvContent = [
-      headers.join(','),
-      ...enrichedData.map(row => 
-        headers.map(h => `"${(row[h] || '').replace(/"/g, '""')}"`).join(',')
-      )
-    ].join('\n');
+    const csvHeader = 'Name,Title,Company,Email,Phone';
+    const csvRows = contacts.map(c => 
+      `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(c.email)}","${escapeCSV(c.phone)}"`
+    );
+    const csvContent = [csvHeader, ...csvRows].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `enriched-run-${run.id.slice(0, 8)}.csv`;
+    a.download = `contacts-${run.id.slice(0, 8)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const escapeCSV = (value: string | undefined): string => {
+    if (!value) return '';
+    return value.replace(/"/g, '""');
+  };
+
+  const getContactCount = (run: EnrichmentRun): number => {
+    const contacts = (run.enriched_data as unknown) as ApolloContact[];
+    if (!Array.isArray(contacts)) return 0;
+    return contacts.length;
+  };
+
+  const getCandidateName = (run: EnrichmentRun): string => {
+    const candidates = run.candidates_data as any[];
+    return candidates?.[0]?.name || 'Unknown';
   };
 
   return (
     <AppLayout 
       title="Runs History" 
-      description="View past enrichment runs and download results"
+      description="View past searches and download contact lists"
     >
       <div className="space-y-6">
         {/* Filters */}
@@ -130,9 +155,9 @@ export default function RunsHistory() {
                 <History className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Enrichment Runs</CardTitle>
+                <CardTitle className="text-lg">Contact Searches</CardTitle>
                 <CardDescription>
-                  {runs?.length || 0} runs found
+                  {runs?.length || 0} searches found
                 </CardDescription>
               </div>
             </div>
@@ -146,10 +171,10 @@ export default function RunsHistory() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Run ID</TableHead>
+                    <TableHead>Candidate</TableHead>
                     <TableHead>Date</TableHead>
-                    <TableHead>Counter</TableHead>
-                    <TableHead>Candidates</TableHead>
+                    <TableHead>Contacts Found</TableHead>
+                    <TableHead>Max Requested</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -157,16 +182,19 @@ export default function RunsHistory() {
                 <TableBody>
                   {runs.map((run) => (
                     <TableRow key={run.id} className="animate-fade-in">
-                      <TableCell className="font-mono text-sm">
-                        {run.id.slice(0, 8)}...
+                      <TableCell className="font-medium">
+                        {getCandidateName(run)}
                       </TableCell>
                       <TableCell>
                         {format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}
                       </TableCell>
-                      <TableCell>{run.search_counter}</TableCell>
                       <TableCell>
-                        {run.processed_count}/{run.candidates_count}
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-muted-foreground" />
+                          {getContactCount(run)}
+                        </div>
                       </TableCell>
+                      <TableCell>{run.search_counter}</TableCell>
                       <TableCell>
                         <StatusBadge status={run.status} />
                       </TableCell>
@@ -183,7 +211,7 @@ export default function RunsHistory() {
                             variant="ghost"
                             size="sm"
                             onClick={() => downloadCSV(run)}
-                            disabled={run.status !== 'success' && run.status !== 'partial'}
+                            disabled={getContactCount(run) === 0}
                           >
                             <Download className="h-4 w-4" />
                           </Button>
@@ -198,9 +226,9 @@ export default function RunsHistory() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
                   <Inbox className="h-6 w-6 text-muted-foreground" />
                 </div>
-                <h3 className="font-medium text-foreground mb-1">No runs yet</h3>
+                <h3 className="font-medium text-foreground mb-1">No searches yet</h3>
                 <p className="text-sm text-muted-foreground">
-                  Upload files and run an enrichment to see results here
+                  Upload a CV and search for contacts to see results here
                 </p>
               </div>
             )}
@@ -211,38 +239,32 @@ export default function RunsHistory() {
         <Dialog open={!!selectedRun} onOpenChange={() => setSelectedRun(null)}>
           <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Run Details</DialogTitle>
+              <DialogTitle>Search Details</DialogTitle>
               <DialogDescription>
-                Run ID: {selectedRun?.id}
+                Contacts found for {selectedRun ? getCandidateName(selectedRun) : ''}
               </DialogDescription>
             </DialogHeader>
             
             {selectedRun && (
               <div className="space-y-6">
                 {/* Stats */}
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <Card>
                     <CardContent className="pt-4">
-                      <div className="text-2xl font-bold">{selectedRun.candidates_count}</div>
-                      <div className="text-sm text-muted-foreground">Total Candidates</div>
+                      <div className="text-2xl font-bold">{getContactCount(selectedRun)}</div>
+                      <div className="text-sm text-muted-foreground">Contacts Found</div>
                     </CardContent>
                   </Card>
                   <Card>
                     <CardContent className="pt-4">
-                      <div className="text-2xl font-bold">{selectedRun.processed_count}</div>
-                      <div className="text-sm text-muted-foreground">Processed</div>
+                      <div className="text-2xl font-bold">{selectedRun.search_counter}</div>
+                      <div className="text-sm text-muted-foreground">Max Requested</div>
                     </CardContent>
                   </Card>
                   <Card>
                     <CardContent className="pt-4">
                       <StatusBadge status={selectedRun.status} />
                       <div className="text-sm text-muted-foreground mt-2">Status</div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="pt-4">
-                      <div className="text-2xl font-bold">{selectedRun.search_counter}</div>
-                      <div className="text-sm text-muted-foreground">Search Counter</div>
                     </CardContent>
                   </Card>
                 </div>
@@ -259,29 +281,31 @@ export default function RunsHistory() {
                   </Card>
                 )}
 
-                {/* Preview */}
-                {selectedRun.enriched_data && (selectedRun.enriched_data as any[]).length > 0 && (
+                {/* Contacts Preview */}
+                {getContactCount(selectedRun) > 0 && (
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-sm">Preview (First 10 rows)</CardTitle>
+                      <CardTitle className="text-sm">Contacts Preview (First 10)</CardTitle>
                     </CardHeader>
                     <CardContent className="overflow-x-auto">
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            {Object.keys((selectedRun.enriched_data as Record<string, string>[])[0]).map((key) => (
-                              <TableHead key={key} className="whitespace-nowrap">{key}</TableHead>
-                            ))}
+                            <TableHead>Name</TableHead>
+                            <TableHead>Title</TableHead>
+                            <TableHead>Company</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Phone</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {(selectedRun.enriched_data as Record<string, string>[]).slice(0, 10).map((row, i) => (
+                          {((selectedRun.enriched_data as unknown) as ApolloContact[]).slice(0, 10).map((contact, i) => (
                             <TableRow key={i}>
-                              {Object.values(row).map((val, j) => (
-                                <TableCell key={j} className="whitespace-nowrap max-w-[200px] truncate">
-                                  {val || '-'}
-                                </TableCell>
-                              ))}
+                              <TableCell className="font-medium">{contact.name || '-'}</TableCell>
+                              <TableCell>{contact.title || '-'}</TableCell>
+                              <TableCell>{contact.company || '-'}</TableCell>
+                              <TableCell className="text-primary">{contact.email || '-'}</TableCell>
+                              <TableCell>{contact.phone || '-'}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -290,30 +314,14 @@ export default function RunsHistory() {
                   </Card>
                 )}
 
-                {/* Bullhorn Errors */}
-                {selectedRun.bullhorn_enabled && (selectedRun.bullhorn_errors as any[])?.length > 0 && (
-                  <Card className="border-warning/50">
-                    <CardHeader>
-                      <CardTitle className="text-warning text-sm">Bullhorn Errors</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="text-sm space-y-1">
-                        {(selectedRun.bullhorn_errors as string[]).map((err, i) => (
-                          <li key={i}>• {err}</li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                )}
-
                 {/* Download Button */}
                 <Button
                   onClick={() => downloadCSV(selectedRun)}
-                  disabled={selectedRun.status !== 'success' && selectedRun.status !== 'partial'}
+                  disabled={getContactCount(selectedRun) === 0}
                   className="w-full"
                 >
                   <Download className="mr-2 h-4 w-4" />
-                  Download Enriched CSV
+                  Download Contacts CSV ({getContactCount(selectedRun)} contacts)
                 </Button>
               </div>
             )}

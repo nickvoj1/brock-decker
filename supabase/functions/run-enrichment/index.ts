@@ -5,37 +5,45 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-interface Candidate {
+interface WorkExperience {
+  company: string
+  title: string
+  duration?: string
+}
+
+interface CandidateData {
   candidate_id: string
   name: string
-  position: string
+  current_title: string
   location: string
-  company?: string
-  [key: string]: string | undefined
+  email?: string
+  phone?: string
+  summary?: string
+  skills: string[]
+  work_history: WorkExperience[]
 }
 
 interface Preference {
   industry: string
   companies: string
   exclusions: string
-  [key: string]: string
+}
+
+interface ApolloContact {
+  name: string
+  title: string
+  company: string
+  email: string
+  phone: string
 }
 
 interface ApolloSearchPayload {
   person_titles?: string[]
   person_locations?: string[]
-  organization_names?: string[]
   q_organization_name?: string
+  organization_industry_tag_ids?: string[]
   page?: number
   per_page?: number
-}
-
-interface ApolloResult {
-  name: string
-  title: string
-  organization_name: string
-  email: string
-  phone: string
 }
 
 Deno.serve(async (req) => {
@@ -85,147 +93,141 @@ Deno.serve(async (req) => {
       )
     }
 
-    const candidates = run.candidates_data as Candidate[]
+    const candidateData = (run.candidates_data as CandidateData[])?.[0]
     const preferences = run.preferences_data as Preference[]
-    const enrichedCandidates: (Candidate & { keywords: string; email: string; phone: string })[] = []
+    const maxContacts = run.search_counter || 50 // Use search_counter as max contacts
+    const maxPerCompany = 3
+
+    if (!candidateData) {
+      throw new Error('No candidate data found')
+    }
+
+    // Search for hiring contacts based on industries
+    const allContacts: ApolloContact[] = []
+    const companyContactCount: Record<string, number> = {}
     let processedCount = 0
 
-    // Process candidates in batches of 10
-    const batchSize = 10
-    for (let i = 0; i < candidates.length; i += batchSize) {
-      const batch = candidates.slice(i, i + batchSize)
-      
-      for (let j = 0; j < batch.length; j++) {
-        const candidate = batch[j]
-        const prefIndex = (i + j) % preferences.length
-        const pref = preferences[prefIndex]
+    // Build search titles based on hiring roles
+    const hiringTitles = [
+      'Recruiter',
+      'Talent Acquisition',
+      'HR Manager',
+      'Human Resources',
+      'Hiring Manager',
+      'Head of Talent',
+      'People Operations',
+      'HR Director',
+      'Talent Partner',
+      'HR Business Partner'
+    ]
 
-        try {
-          // Build Apollo search payload
-          const searchPayload: ApolloSearchPayload = {
-            person_titles: [candidate.position, pref.industry].filter(Boolean),
-            person_locations: candidate.location ? [candidate.location] : undefined,
-            q_organization_name: pref.companies || candidate.company || undefined,
-            page: 1,
-            per_page: 1,
-          }
+    // Search across each selected industry
+    for (const pref of preferences) {
+      if (allContacts.length >= maxContacts) break
 
-          // Call Apollo API
-          const apolloResponse = await fetch('https://api.apollo.io/v1/mixed_people/search', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Api-Key': apolloApiKey,
-            },
-            body: JSON.stringify(searchPayload),
-          })
+      const remainingNeeded = maxContacts - allContacts.length
+      const perPage = Math.min(remainingNeeded * 2, 100) // Get extra to account for filtering
 
-          let apolloResult: ApolloResult | null = null
-
-          if (apolloResponse.ok) {
-            const apolloData = await apolloResponse.json()
-            const people = apolloData.people || []
-            
-            // Find best match by name similarity
-            apolloResult = people.find((p: any) => 
-              p.name?.toLowerCase().includes(candidate.name.split(' ')[0]?.toLowerCase())
-            ) || people[0] || null
-          }
-
-          if (apolloResult) {
-            enrichedCandidates.push({
-              ...candidate,
-              keywords: `${apolloResult.title} (${apolloResult.organization_name})`,
-              email: apolloResult.email || '',
-              phone: apolloResult.phone || '',
-            })
-          } else {
-            enrichedCandidates.push({
-              ...candidate,
-              keywords: 'No match found',
-              email: '',
-              phone: '',
-            })
-          }
-
-          processedCount++
-        } catch (error) {
-          console.error(`Error processing candidate ${candidate.candidate_id}:`, error)
-          enrichedCandidates.push({
-            ...candidate,
-            keywords: 'Error during enrichment',
-            email: '',
-            phone: '',
-          })
-          processedCount++
+      try {
+        const searchPayload: ApolloSearchPayload = {
+          person_titles: hiringTitles,
+          person_locations: candidateData.location !== 'Not specified' ? [candidateData.location] : undefined,
+          per_page: perPage,
+          page: 1,
         }
+
+        // Add industry-based search parameters
+        // Apollo uses different industry mappings, so we search by title relevance
+        
+        const apolloResponse = await fetch('https://api.apollo.io/v1/mixed_people/search', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': apolloApiKey,
+          },
+          body: JSON.stringify(searchPayload),
+        })
+
+        if (apolloResponse.ok) {
+          const apolloData = await apolloResponse.json()
+          const people = apolloData.people || []
+          
+          for (const person of people) {
+            if (allContacts.length >= maxContacts) break
+            
+            const companyName = person.organization?.name || person.organization_name || 'Unknown'
+            
+            // Check max per company limit
+            if ((companyContactCount[companyName] || 0) >= maxPerCompany) {
+              continue
+            }
+            
+            // Check if we already have this contact (by email or name+company)
+            const isDuplicate = allContacts.some(c => 
+              (c.email && c.email === person.email) ||
+              (c.name === person.name && c.company === companyName)
+            )
+            
+            if (isDuplicate) continue
+            
+            allContacts.push({
+              name: person.name || 'Unknown',
+              title: person.title || 'Unknown',
+              company: companyName,
+              email: person.email || '',
+              phone: person.phone_numbers?.[0]?.raw_number || person.phone || '',
+            })
+            
+            companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+          }
+        } else {
+          console.error('Apollo API error:', apolloResponse.status, await apolloResponse.text())
+        }
+
+        processedCount++
+        
+        // Update progress
+        await supabase
+          .from('enrichment_runs')
+          .update({ processed_count: processedCount })
+          .eq('id', runId)
 
         // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100))
-      }
+        await new Promise(resolve => setTimeout(resolve, 200))
 
-      // Update progress periodically
-      await supabase
-        .from('enrichment_runs')
-        .update({ processed_count: processedCount })
-        .eq('id', runId)
-    }
-
-    // Handle Bullhorn integration if enabled
-    const bullhornErrors: string[] = []
-    
-    if (run.bullhorn_enabled) {
-      const { data: bhSettings } = await supabase
-        .from('api_settings')
-        .select('setting_key, setting_value')
-        .in('setting_key', ['bullhorn_client_id', 'bullhorn_client_secret', 'bullhorn_username', 'bullhorn_password'])
-
-      const bhConfig = Object.fromEntries(
-        (bhSettings || []).map(s => [s.setting_key, s.setting_value])
-      )
-
-      if (bhConfig.bullhorn_client_id && bhConfig.bullhorn_client_secret) {
-        try {
-          // Bullhorn OAuth flow
-          const authUrl = `https://auth.bullhornstaffing.com/oauth/authorize?client_id=${bhConfig.bullhorn_client_id}&response_type=code&username=${bhConfig.bullhorn_username}&password=${bhConfig.bullhorn_password}&action=Login`
-          
-          // Note: In a real implementation, you'd complete the full OAuth flow
-          // For now, we'll mark this as a placeholder for Bullhorn integration
-          bullhornErrors.push('Bullhorn integration requires manual OAuth setup - please contact support')
-          
-        } catch (error: any) {
-          bullhornErrors.push(`Bullhorn auth error: ${error.message}`)
-        }
-      } else {
-        bullhornErrors.push('Bullhorn credentials not configured')
+      } catch (error) {
+        console.error(`Error searching for industry ${pref.industry}:`, error)
+        processedCount++
       }
     }
 
-    // Determine final status
-    const hasErrors = enrichedCandidates.some(c => c.keywords === 'Error during enrichment')
-    const noMatches = enrichedCandidates.filter(c => c.keywords === 'No match found').length
-    const status = hasErrors || bullhornErrors.length > 0 
-      ? 'partial' 
-      : noMatches === enrichedCandidates.length 
-        ? 'failed' 
-        : 'success'
+    // Generate CSV content
+    const csvHeader = 'Name,Title,Company,Email,Phone'
+    const csvRows = allContacts.map(c => 
+      `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(c.email)}","${escapeCSV(c.phone)}"`
+    )
+    const csvContent = [csvHeader, ...csvRows].join('\n')
+
+    // Determine status
+    const status = allContacts.length === 0 ? 'failed' : 
+                   allContacts.length < maxContacts ? 'partial' : 'success'
 
     // Update run with results
     await supabase
       .from('enrichment_runs')
       .update({
         status,
-        processed_count: processedCount,
-        enriched_data: enrichedCandidates,
-        bullhorn_errors: bullhornErrors,
-        error_message: hasErrors ? 'Some candidates failed to enrich' : null,
+        processed_count: preferences.length,
+        enriched_data: allContacts,
+        enriched_csv_url: csvContent, // Store CSV content directly for now
+        error_message: allContacts.length === 0 ? 'No contacts found matching criteria' : null,
       })
       .eq('id', runId)
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        processedCount,
+        contactsFound: allContacts.length,
         status 
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -239,3 +241,8 @@ Deno.serve(async (req) => {
     )
   }
 })
+
+function escapeCSV(value: string): string {
+  if (!value) return ''
+  return value.replace(/"/g, '""')
+}
