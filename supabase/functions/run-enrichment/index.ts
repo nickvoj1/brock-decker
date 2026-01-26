@@ -116,6 +116,18 @@ Deno.serve(async (req) => {
     }
     console.log('Excluding contacts from candidate\'s previous employers:', Array.from(excludedCompanies))
 
+    // Fetch recently used contacts (within last 2 weeks) to exclude them
+    const twoWeeksAgo = new Date()
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+    
+    const { data: recentlyUsedContacts } = await supabase
+      .from('used_contacts')
+      .select('email')
+      .gte('added_at', twoWeeksAgo.toISOString())
+    
+    const usedEmails = new Set((recentlyUsedContacts || []).map(c => c.email.toLowerCase()))
+    console.log(`Found ${usedEmails.size} recently used contacts to exclude`)
+
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
     const companyContactCount: Record<string, number> = {}
@@ -293,13 +305,18 @@ Deno.serve(async (req) => {
                   
                   // Only add if we got an email and a valid name
                   if (email && fullName && fullName !== 'Unknown') {
-                    allContacts.push({
-                      name: fullName,
-                      title: jobTitle,
-                      location: fullLocation,
-                      email: email,
-                      company: companyName,
-                    })
+                    // Check if this contact was recently used
+                    if (usedEmails.has(email.toLowerCase())) {
+                      console.log(`Skipping recently used contact: ${fullName} (${email})`)
+                    } else {
+                      allContacts.push({
+                        name: fullName,
+                        title: jobTitle,
+                        location: fullLocation,
+                        email: email,
+                        company: companyName,
+                      })
+                    }
                   } else {
                     console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
                   }
@@ -335,6 +352,29 @@ Deno.serve(async (req) => {
       } catch (error) {
         console.error(`Error searching for industry ${pref.industry}:`, error)
         processedCount++
+      }
+    }
+
+    // Save newly found contacts to used_contacts table
+    if (allContacts.length > 0) {
+      const contactsToSave = allContacts.map(c => ({
+        email: c.email.toLowerCase(),
+        name: c.name,
+        company: c.company,
+      }))
+      
+      // Use upsert to handle duplicates (update added_at if already exists)
+      const { error: saveError } = await supabase
+        .from('used_contacts')
+        .upsert(contactsToSave, { 
+          onConflict: 'email',
+          ignoreDuplicates: false // Update the timestamp when re-adding
+        })
+      
+      if (saveError) {
+        console.error('Error saving used contacts:', saveError)
+      } else {
+        console.log(`Saved ${allContacts.length} contacts to used_contacts table`)
       }
     }
 
