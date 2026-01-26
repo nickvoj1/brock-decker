@@ -191,9 +191,6 @@ Deno.serve(async (req) => {
     for (const pref of preferences) {
       if (allContacts.length >= maxContacts) break
 
-      const remainingNeeded = maxContacts - allContacts.length
-      const perPage = Math.min(remainingNeeded * 2, 100) // Get extra to account for filtering
-
       try {
         // Build query params for new API search endpoint
         const queryParams = new URLSearchParams()
@@ -224,99 +221,117 @@ Deno.serve(async (req) => {
         if (pref.industry) console.log('Selected industry:', pref.industry)
         if (sectors.length > 0) console.log('Selected sectors:', sectors)
         
-        queryParams.append('per_page', String(perPage))
-        queryParams.append('page', '1')
-
-        // Use the new api_search endpoint (note: /api/v1/ not /v1/)
-        const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
-        console.log('Apollo search URL params:', queryParams.toString())
+        // Use pagination to get more results - fetch up to 5 pages
+        const maxPages = 5
+        let currentPage = 1
+        let hasMoreResults = true
         
-        const apolloResponse = await fetch(searchUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apolloApiKey,
-          },
-        })
+        while (hasMoreResults && currentPage <= maxPages && allContacts.length < maxContacts) {
+          const remainingNeeded = maxContacts - allContacts.length
+          const perPage = 100 // Always request max per page for efficiency
+          
+          const pageParams = new URLSearchParams(queryParams)
+          pageParams.set('per_page', String(perPage))
+          pageParams.set('page', String(currentPage))
 
-        if (apolloResponse.ok) {
-          const apolloData = await apolloResponse.json()
-          let people = apolloData.people || []
+          // Use the new api_search endpoint (note: /api/v1/ not /v1/)
+          const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${pageParams.toString()}`
+          if (currentPage === 1) {
+            console.log('Apollo search URL params:', pageParams.toString())
+          }
+          
+          const apolloResponse = await fetch(searchUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apolloApiKey,
+            },
+          })
 
-          console.log('Apollo people returned:', people.length)
+          if (apolloResponse.ok) {
+            const apolloData = await apolloResponse.json()
+            let people = apolloData.people || []
+            const totalAvailable = apolloData.pagination?.total_entries || 0
 
-          // If the sector keyword made the query too strict, retry without it.
-          if (people.length === 0 && sectorPrimaryKeyword && industryKeyword) {
-            try {
-              console.log('No people found; retrying without sector keyword...')
-              const retryParams = new URLSearchParams(queryParams)
-              retryParams.delete('q_keywords')
-              retryParams.append('q_keywords', industryKeyword)
+            console.log(`Apollo page ${currentPage}: ${people.length} people returned (total available: ${totalAvailable})`)
 
-              const retryUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${retryParams.toString()}`
-              const retryResponse = await fetch(retryUrl, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-api-key': apolloApiKey,
-                },
-              })
+            // If the sector keyword made the query too strict on first page, retry without it.
+            if (people.length === 0 && currentPage === 1 && sectorPrimaryKeyword && industryKeyword) {
+              try {
+                console.log('No people found; retrying without sector keyword...')
+                const retryParams = new URLSearchParams(pageParams)
+                retryParams.delete('q_keywords')
+                retryParams.append('q_keywords', industryKeyword)
 
-              if (retryResponse.ok) {
-                const retryData = await retryResponse.json()
-                people = retryData.people || []
-                console.log('Apollo people returned (retry):', people.length)
-              } else {
-                const errorText = await retryResponse.text()
-                console.error('Apollo retry error:', retryResponse.status, errorText)
+                const retryUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${retryParams.toString()}`
+                const retryResponse = await fetch(retryUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apolloApiKey,
+                  },
+                })
+
+                if (retryResponse.ok) {
+                  const retryData = await retryResponse.json()
+                  people = retryData.people || []
+                  console.log('Apollo people returned (retry):', people.length)
+                } else {
+                  const errorText = await retryResponse.text()
+                  console.error('Apollo retry error:', retryResponse.status, errorText)
+                }
+              } catch (retryError) {
+                console.error('Apollo retry exception:', retryError)
               }
-            } catch (retryError) {
-              console.error('Apollo retry exception:', retryError)
-            }
-          }
-          
-          // Collect person IDs to enrich (get emails)
-          const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
-          
-          for (const person of people) {
-            if (peopleToEnrich.length >= remainingNeeded) break
-            
-            const companyName = person.organization?.name || person.organization_name || 'Unknown'
-            const personLocation = person.city || person.state || person.country || 'Unknown'
-            
-            // Skip contacts from candidate's previous employers
-            const normalizedCompany = companyName.toLowerCase().trim()
-            const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
-              normalizedCompany.includes(excluded) || excluded.includes(normalizedCompany)
-            )
-            if (isExcludedCompany) {
-              console.log(`Skipping contact from excluded company: ${companyName}`)
-              continue
             }
             
-            // Check max per company limit
-            if ((companyContactCount[companyName] || 0) >= maxPerCompany) {
-              continue
+            // Stop pagination if no more results
+            if (people.length === 0) {
+              hasMoreResults = false
+              break
             }
             
-            // Check if we already have this contact
-            const isDuplicate = allContacts.some(c => 
-              c.name === person.name && c.company === companyName
-            )
+            // Collect person IDs to enrich (get emails)
+            const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
             
-            if (isDuplicate) continue
-            
-            if (person.id) {
-              peopleToEnrich.push({
-                id: person.id,
-                name: person.name || 'Unknown',
-                title: person.title || 'Unknown',
-                company: companyName,
-                location: personLocation,
-              })
-              companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+            for (const person of people) {
+              if (allContacts.length + peopleToEnrich.length >= maxContacts) break
+              
+              const companyName = person.organization?.name || person.organization_name || 'Unknown'
+              const personLocation = person.city || person.state || person.country || 'Unknown'
+              
+              // Skip contacts from candidate's previous employers
+              const normalizedCompany = companyName.toLowerCase().trim()
+              const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
+                normalizedCompany.includes(excluded) || excluded.includes(normalizedCompany)
+              )
+              if (isExcludedCompany) {
+                continue
+              }
+              
+              // Check max per company limit
+              if ((companyContactCount[companyName] || 0) >= maxPerCompany) {
+                continue
+              }
+              
+              // Check if we already have this contact
+              const isDuplicate = allContacts.some(c => 
+                c.name === person.name && c.company === companyName
+              )
+              
+              if (isDuplicate) continue
+              
+              if (person.id) {
+                peopleToEnrich.push({
+                  id: person.id,
+                  name: person.name || 'Unknown',
+                  title: person.title || 'Unknown',
+                  company: companyName,
+                  location: personLocation,
+                })
+                companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+              }
             }
-          }
           
           // Enrich people to get email/phone (batch of up to 10)
           for (let i = 0; i < peopleToEnrich.length; i += 10) {
@@ -413,10 +428,17 @@ Deno.serve(async (req) => {
               }
             }
           }
-        } else {
-          const errorText = await apolloResponse.text()
-          console.error('Apollo API error:', apolloResponse.status, errorText)
-        }
+          } else {
+            const errorText = await apolloResponse.text()
+            console.error('Apollo API error:', apolloResponse.status, errorText)
+            hasMoreResults = false
+          }
+          
+          currentPage++
+          
+          // Small delay to avoid rate limiting between pages
+          await new Promise(resolve => setTimeout(resolve, 200))
+        } // end while loop
 
         processedCount++
         
@@ -425,9 +447,6 @@ Deno.serve(async (req) => {
           .from('enrichment_runs')
           .update({ processed_count: processedCount })
           .eq('id', runId)
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 200))
 
       } catch (error) {
         console.error(`Error searching for industry ${pref.industry}:`, error)
