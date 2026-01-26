@@ -4,6 +4,7 @@ import { Play, Loader2, FileText, Settings2, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
+import { IndustrySuggestions } from "@/components/upload/IndustrySuggestions";
 import { LocationSelector } from "@/components/upload/LocationSelector";
 import { RoleSelector } from "@/components/upload/RoleSelector";
 import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
@@ -17,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useRoleSuggestions } from "@/hooks/useRoleSuggestions";
+import { useIndustrySuggestions } from "@/hooks/useIndustrySuggestions";
 import type { Json } from "@/integrations/supabase/types";
 
 interface WorkExperience {
@@ -92,6 +94,9 @@ export default function UploadRun() {
 
   // Role suggestions based on CV and industries
   const roleSuggestions = useRoleSuggestions(cvData, selectedIndustries);
+  
+  // Industry suggestions based on CV
+  const industrySuggestions = useIndustrySuggestions(cvData);
 
   // Check for profile selected from PreviousCVs page
   useEffect(() => {
@@ -415,12 +420,50 @@ export default function UploadRun() {
                   onSelectProfile={handleSelectSavedProfile}
                 />
               </div>
-              <IndustrySelector
-                selectedIndustries={selectedIndustries}
-                onSelectionChange={setSelectedIndustries}
-                selectedSectors={selectedSectors}
-                onSectorsChange={setSelectedSectors}
-              />
+              <div className="space-y-4">
+                <IndustrySelector
+                  selectedIndustries={selectedIndustries}
+                  onSelectionChange={setSelectedIndustries}
+                  selectedSectors={selectedSectors}
+                  onSectorsChange={setSelectedSectors}
+                />
+                {cvData && (industrySuggestions.industries.length > 0 || industrySuggestions.sectors.length > 0) && (
+                  <IndustrySuggestions
+                    industrySuggestions={industrySuggestions.industries}
+                    sectorSuggestions={industrySuggestions.sectors}
+                    selectedIndustries={selectedIndustries}
+                    selectedSectors={selectedSectors}
+                    onAddIndustry={(industry) => {
+                      if (!selectedIndustries.includes(industry)) {
+                        setSelectedIndustries([...selectedIndustries, industry]);
+                      }
+                    }}
+                    onAddSector={(sector) => {
+                      if (!selectedSectors.includes(sector)) {
+                        setSelectedSectors([...selectedSectors, sector]);
+                      }
+                    }}
+                    onAddAllIndustries={() => {
+                      const newIndustries = [...selectedIndustries];
+                      industrySuggestions.industries.forEach((i) => {
+                        if (!newIndustries.includes(i)) {
+                          newIndustries.push(i);
+                        }
+                      });
+                      setSelectedIndustries(newIndustries);
+                    }}
+                    onAddAllSectors={() => {
+                      const newSectors = [...selectedSectors];
+                      industrySuggestions.sectors.forEach((s) => {
+                        if (!newSectors.includes(s)) {
+                          newSectors.push(s);
+                        }
+                      });
+                      setSelectedSectors(newSectors);
+                    }}
+                  />
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
