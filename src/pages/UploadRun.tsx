@@ -6,12 +6,15 @@ import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
 import { LocationSelector } from "@/components/upload/LocationSelector";
 import { RoleSelector } from "@/components/upload/RoleSelector";
+import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
+import { SearchDebugPanel } from "@/components/upload/SearchDebugPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useRoleSuggestions } from "@/hooks/useRoleSuggestions";
 import type { Json } from "@/integrations/supabase/types";
 
 interface WorkExperience {
@@ -72,6 +75,9 @@ export default function UploadRun() {
   // Run configuration
   const [maxContacts, setMaxContacts] = useState(50);
   const [isRunning, setIsRunning] = useState(false);
+
+  // Role suggestions based on CV and industries
+  const roleSuggestions = useRoleSuggestions(cvData, selectedIndustries);
 
   // Save selected roles to localStorage whenever they change
   useEffect(() => {
@@ -278,11 +284,31 @@ export default function UploadRun() {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <RoleSelector
               selectedRoles={selectedRoles}
               onRolesChange={setSelectedRoles}
             />
+            {cvData && roleSuggestions.length > 0 && (
+              <RoleSuggestions
+                suggestions={roleSuggestions}
+                selectedRoles={selectedRoles}
+                onAddRole={(role) => {
+                  if (!selectedRoles.includes(role)) {
+                    setSelectedRoles([...selectedRoles, role]);
+                  }
+                }}
+                onAddAll={() => {
+                  const newRoles = [...selectedRoles];
+                  roleSuggestions.forEach((role) => {
+                    if (!newRoles.includes(role)) {
+                      newRoles.push(role);
+                    }
+                  });
+                  setSelectedRoles(newRoles);
+                }}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -329,6 +355,16 @@ export default function UploadRun() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Search Debug Panel */}
+        <SearchDebugPanel
+          selectedIndustries={selectedIndustries}
+          selectedSectors={selectedSectors}
+          selectedLocations={selectedLocations}
+          selectedRoles={selectedRoles}
+          maxContacts={maxContacts}
+          candidateName={cvData?.name}
+        />
 
         {/* Step 5: Run */}
         <Card className="animate-slide-up" style={{ animationDelay: '0.4s' }}>
