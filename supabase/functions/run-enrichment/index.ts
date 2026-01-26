@@ -133,6 +133,7 @@ Deno.serve(async (req) => {
 
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
+    const seenEmails = new Set<string>() // Track unique contacts by email
     const companyContactCount: Record<string, number> = {}
     let processedCount = 0
 
@@ -187,8 +188,70 @@ Deno.serve(async (req) => {
     
     const apolloLocations = searchLocations.map(loc => locationLabels[loc] || loc)
 
-    // Search across each selected industry
-    for (const pref of preferences) {
+    // Build all search combinations: industries × sectors (OR logic for maximum coverage)
+    // If no sectors, just use industries. If no industries, just use sectors.
+    const allIndustries = preferences.map(p => p.industry).filter(Boolean)
+    const allSectors = preferences[0]?.sectors || []
+    
+    interface SearchCombo {
+      industry: string | null
+      sector: string | null
+      label: string
+    }
+    
+    const searchCombinations: SearchCombo[] = []
+    
+    if (allIndustries.length > 0 && allSectors.length > 0) {
+      // Create all industry × sector combinations for maximum coverage
+      for (const industry of allIndustries) {
+        for (const sector of allSectors) {
+          searchCombinations.push({
+            industry,
+            sector,
+            label: `${industry} + ${sector}`
+          })
+        }
+      }
+      // Also search each industry alone (without sector constraint)
+      for (const industry of allIndustries) {
+        searchCombinations.push({
+          industry,
+          sector: null,
+          label: `${industry} (no sector filter)`
+        })
+      }
+    } else if (allIndustries.length > 0) {
+      // Only industries selected
+      for (const industry of allIndustries) {
+        searchCombinations.push({
+          industry,
+          sector: null,
+          label: industry
+        })
+      }
+    } else if (allSectors.length > 0) {
+      // Only sectors selected
+      for (const sector of allSectors) {
+        searchCombinations.push({
+          industry: null,
+          sector,
+          label: sector
+        })
+      }
+    } else {
+      // No filters - run a single broad search
+      searchCombinations.push({
+        industry: null,
+        sector: null,
+        label: 'Broad search (no filters)'
+      })
+    }
+
+    console.log(`Running ${searchCombinations.length} search combinations for maximum coverage:`, 
+      searchCombinations.map(c => c.label))
+
+    // Search across each combination
+    for (const combo of searchCombinations) {
       if (allContacts.length >= maxContacts) break
 
       try {
@@ -203,31 +266,25 @@ Deno.serve(async (req) => {
           apolloLocations.forEach(loc => queryParams.append('person_locations[]', loc))
         }
         
-        // Add industry sectors if specified (broad categories like Tech, Healthcare, etc.)
-        const sectors = pref.sectors || []
-        const industryKeyword = normalizeApolloKeyword(pref.industry || '')
-        const sectorPrimaryKeyword = getSectorPrimaryKeyword(sectors)
+        // Build keyword query from industry and/or sector
+        const industryKeyword = combo.industry ? normalizeApolloKeyword(combo.industry) : ''
+        const sectorKeyword = combo.sector ? getSectorPrimaryKeyword([combo.sector]) : ''
 
-        // Keyword-style filtering: keep this SMALL.
-        // Apollo keyword search tends to behave like an AND across terms.
-        // So we use at most 1 sector keyword (e.g. "energy") and do additional filtering after enrichment.
-        const keywordParts = [industryKeyword, sectorPrimaryKeyword].filter(Boolean)
+        const keywordParts = [industryKeyword, sectorKeyword].filter(Boolean)
         if (keywordParts.length > 0) {
           const qKeywords = keywordParts.join(' ')
           queryParams.append('q_keywords', qKeywords)
-          console.log('Apollo keyword query:', qKeywords)
+          console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
+        } else {
+          console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
         }
-
-        if (pref.industry) console.log('Selected industry:', pref.industry)
-        if (sectors.length > 0) console.log('Selected sectors:', sectors)
         
-        // Use pagination to get more results - fetch up to 5 pages
-        const maxPages = 5
+        // Use pagination to get more results - fetch up to 3 pages per combination
+        const maxPages = 3
         let currentPage = 1
         let hasMoreResults = true
         
         while (hasMoreResults && currentPage <= maxPages && allContacts.length < maxContacts) {
-          const remainingNeeded = maxContacts - allContacts.length
           const perPage = 100 // Always request max per page for efficiency
           
           const pageParams = new URLSearchParams(queryParams)
@@ -255,8 +312,8 @@ Deno.serve(async (req) => {
 
             console.log(`Apollo page ${currentPage}: ${people.length} people returned (total available: ${totalAvailable})`)
 
-            // If the sector keyword made the query too strict on first page, retry without it.
-            if (people.length === 0 && currentPage === 1 && sectorPrimaryKeyword && industryKeyword) {
+            // If no results on first page with sector keyword, retry without it
+            if (people.length === 0 && currentPage === 1 && sectorKeyword && industryKeyword) {
               try {
                 console.log('No people found; retrying without sector keyword...')
                 const retryParams = new URLSearchParams(pageParams)
@@ -372,14 +429,13 @@ Deno.serve(async (req) => {
                   // Get job title from enrichment
                   const jobTitle = person.title || personData.title || 'Unknown'
                   
-                  // Flexible sector matching using keywords (post-filter)
-                  const sectors = pref.sectors || []
-                  if (sectors.length > 0) {
+                  // Flexible sector matching using keywords (post-filter) - only if combo has sector
+                  if (combo.sector) {
                     const orgIndustry = (person.organization?.industry || '').toLowerCase()
                     const orgKeywords: string[] = (person.organization?.keywords || []).map((k: string) => k.toLowerCase())
                     const orgName = companyName.toLowerCase()
 
-                    const sectorWords = getSectorKeywords(sectors)
+                    const sectorWords = getSectorKeywords([combo.sector])
 
                     const sectorMatched = sectorWords.some(word =>
                       orgIndustry.includes(word) ||
@@ -399,11 +455,16 @@ Deno.serve(async (req) => {
                   
                   // Only add if we got an email and a valid name
                   if (email && fullName && fullName !== 'Unknown') {
+                    const emailLower = email.toLowerCase()
                     // Check if this contact was recently used
-                    if (usedEmails.has(email.toLowerCase())) {
+                    if (usedEmails.has(emailLower)) {
                       console.log(`Skipping recently used contact: ${fullName} (${email})`)
+                    } else if (seenEmails.has(emailLower)) {
+                      // Skip duplicates from other search combinations
+                      console.log(`Skipping duplicate from other search: ${fullName} (${email})`)
                     } else {
                       console.log(`Adding contact: ${fullName} at ${companyName} (industry: ${person.organization?.industry || 'unknown'})`)
+                      seenEmails.add(emailLower)
                       allContacts.push({
                         name: fullName,
                         title: jobTitle,
@@ -449,7 +510,7 @@ Deno.serve(async (req) => {
           .eq('id', runId)
 
       } catch (error) {
-        console.error(`Error searching for industry ${pref.industry}:`, error)
+        console.error(`Error searching for combination ${combo.label}:`, error)
         processedCount++
       }
     }
