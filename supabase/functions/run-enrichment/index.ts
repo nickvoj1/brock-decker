@@ -320,23 +320,27 @@ Deno.serve(async (req) => {
                   // Get job title from enrichment
                   const jobTitle = person.title || personData.title || 'Unknown'
                   
-                  // Strict sector matching: verify company industry matches selected sectors
+                  // Keyword-style sector matching: flexible partial matching like Apollo keywords
                   const sectors = pref.sectors || []
                   if (sectors.length > 0) {
                     const orgIndustry = (person.organization?.industry || '').toLowerCase()
                     const orgKeywords: string[] = (person.organization?.keywords || []).map((k: string) => k.toLowerCase())
                     const orgName = companyName.toLowerCase()
                     
-                    // Check if any selected sector matches the company's industry, keywords, or name
-                    const sectorMatched = sectors.some(sector => {
-                      const sectorLower = sector.toLowerCase()
-                      return orgIndustry.includes(sectorLower) ||
-                             orgKeywords.some(k => k.includes(sectorLower) || sectorLower.includes(k)) ||
-                             orgName.includes(sectorLower)
-                    })
+                    // Extract individual words from sectors for flexible matching
+                    const sectorWords = sectors.flatMap(sector => 
+                      sector.toLowerCase().split(/[\s&,\-\/]+/).filter(w => w.length > 2)
+                    )
+                    
+                    // Check if any sector word appears in company data (keyword-style matching)
+                    const sectorMatched = sectorWords.some(word => 
+                      orgIndustry.includes(word) ||
+                      orgKeywords.some(k => k.includes(word)) ||
+                      orgName.includes(word)
+                    )
                     
                     if (!sectorMatched) {
-                      console.log(`Skipping contact - sector mismatch: ${companyName} (industry: ${orgIndustry}) doesn't match sectors: ${sectors.join(', ')}`)
+                      console.log(`Skipping contact - no sector keyword match: ${companyName} (industry: ${orgIndustry}) for keywords: ${sectorWords.join(', ')}`)
                       continue
                     }
                   }
