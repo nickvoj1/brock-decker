@@ -178,18 +178,33 @@ export function IndustrySelector({
     }
   }, [selectedSectors]);
 
+  const isSectorSelected = (sector: { value: string; label: string }) => {
+    // Backward compatible: older runs stored sector.value, newer ones store sector.label
+    return selectedSectors.includes(sector.value) || selectedSectors.includes(sector.label);
+  };
+
   const toggleSector = (value: string) => {
     if (!onSectorsChange) return;
-    if (selectedSectors.includes(value)) {
-      onSectorsChange(selectedSectors.filter((s) => s !== value));
+    const sector = INDUSTRY_SECTORS.find((s) => s.value === value);
+    if (!sector) return;
+
+    if (isSectorSelected(sector)) {
+      // Remove both legacy value and label variants
+      onSectorsChange(selectedSectors.filter((s) => s !== sector.value && s !== sector.label));
     } else {
-      onSectorsChange([...selectedSectors, value]);
+      // Store label to send Apollo human-readable keywords
+      onSectorsChange([...selectedSectors, sector.label]);
     }
   };
 
   const removeSector = (value: string) => {
     if (!onSectorsChange) return;
-    onSectorsChange(selectedSectors.filter((s) => s !== value));
+    const sector = INDUSTRY_SECTORS.find((s) => s.value === value || s.label === value);
+    if (!sector) {
+      onSectorsChange(selectedSectors.filter((s) => s !== value));
+      return;
+    }
+    onSectorsChange(selectedSectors.filter((s) => s !== sector.value && s !== sector.label));
   };
 
   const getSectorLabel = (value: string) => {
@@ -202,36 +217,51 @@ export function IndustrySelector({
     }
   };
 
+  const isIndustrySelected = (industry: Industry) => {
+    // Backward compatible: older runs stored industry.value, newer ones store industry.label
+    return selectedIndustries.includes(industry.value) || selectedIndustries.includes(industry.label);
+  };
+
   const toggleIndustry = (value: string) => {
-    if (selectedIndustries.includes(value)) {
-      onSelectionChange(selectedIndustries.filter((i) => i !== value));
+    const industry = ALL_INDUSTRIES.find((i) => i.value === value);
+    if (!industry) return;
+
+    if (isIndustrySelected(industry)) {
+      onSelectionChange(selectedIndustries.filter((i) => i !== industry.value && i !== industry.label));
     } else {
-      onSelectionChange([...selectedIndustries, value]);
+      // Store label to send Apollo human-readable keywords
+      onSelectionChange([...selectedIndustries, industry.label]);
     }
   };
 
   const removeIndustry = (value: string) => {
-    onSelectionChange(selectedIndustries.filter((i) => i !== value));
+    const industry = ALL_INDUSTRIES.find((i) => i.value === value || i.label === value);
+    if (!industry) {
+      onSelectionChange(selectedIndustries.filter((i) => i !== value));
+      return;
+    }
+    onSelectionChange(selectedIndustries.filter((i) => i !== industry.value && i !== industry.label));
   };
 
   const selectAllInCategory = (category: IndustryCategory) => {
-    const categoryValues = category.industries.map((i) => i.value);
+    // Store labels to send Apollo human-readable keywords
+    const categoryValues = category.industries.map((i) => i.label);
     const newSelection = [...new Set([...selectedIndustries, ...categoryValues])];
     onSelectionChange(newSelection);
   };
 
   const clearAllInCategory = (category: IndustryCategory) => {
-    const categoryValues = new Set(category.industries.map((i) => i.value));
+    // Remove both legacy value and label variants for safety
+    const categoryValues = new Set(category.industries.flatMap((i) => [i.value, i.label]));
     onSelectionChange(selectedIndustries.filter((v) => !categoryValues.has(v)));
   };
 
   const isCategoryFullySelected = (category: IndustryCategory) => {
-    return category.industries.every((i) => selectedIndustries.includes(i.value));
+    return category.industries.every((i) => isIndustrySelected(i));
   };
 
   const isCategoryPartiallySelected = (category: IndustryCategory) => {
-    return category.industries.some((i) => selectedIndustries.includes(i.value)) && 
-           !isCategoryFullySelected(category);
+    return category.industries.some((i) => isIndustrySelected(i)) && !isCategoryFullySelected(category);
   };
 
   const getLabel = (value: string) => {
@@ -320,11 +350,11 @@ export function IndustrySelector({
                         >
                           <div className={cn(
                             "mr-2 h-4 w-4 border rounded flex items-center justify-center",
-                            selectedIndustries.includes(industry.value)
+                            isIndustrySelected(industry)
                               ? "bg-primary border-primary text-primary-foreground"
                               : "border-muted-foreground/30"
                           )}>
-                            {selectedIndustries.includes(industry.value) && (
+                            {isIndustrySelected(industry) && (
                               <Check className="h-3 w-3" />
                             )}
                           </div>
@@ -417,11 +447,11 @@ export function IndustrySelector({
                         >
                           <div className={cn(
                             "mr-2 h-4 w-4 border rounded flex items-center justify-center",
-                            selectedSectors.includes(sector.value)
+                            isSectorSelected(sector)
                               ? "bg-primary border-primary text-primary-foreground"
                               : "border-muted-foreground/30"
                           )}>
-                            {selectedSectors.includes(sector.value) && (
+                            {isSectorSelected(sector) && (
                               <Check className="h-3 w-3" />
                             )}
                           </div>
