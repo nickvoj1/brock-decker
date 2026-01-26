@@ -45,6 +45,9 @@ export type Database = {
         Row: {
           bullhorn_enabled: boolean
           bullhorn_errors: Json | null
+          bullhorn_exported_at: string | null
+          bullhorn_list_id: number | null
+          bullhorn_list_name: string | null
           candidates_count: number
           candidates_data: Json | null
           created_at: string
@@ -62,6 +65,9 @@ export type Database = {
         Insert: {
           bullhorn_enabled?: boolean
           bullhorn_errors?: Json | null
+          bullhorn_exported_at?: string | null
+          bullhorn_list_id?: number | null
+          bullhorn_list_name?: string | null
           candidates_count?: number
           candidates_data?: Json | null
           created_at?: string
@@ -79,6 +85,9 @@ export type Database = {
         Update: {
           bullhorn_enabled?: boolean
           bullhorn_errors?: Json | null
+          bullhorn_exported_at?: string | null
+          bullhorn_list_id?: number | null
+          bullhorn_list_name?: string | null
           candidates_count?: number
           candidates_data?: Json | null
           created_at?: string
