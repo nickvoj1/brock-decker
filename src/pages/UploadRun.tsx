@@ -93,6 +93,20 @@ export default function UploadRun() {
   // Role suggestions based on CV and industries
   const roleSuggestions = useRoleSuggestions(cvData, selectedIndustries);
 
+  // Check for profile selected from PreviousCVs page
+  useEffect(() => {
+    const storedProfile = sessionStorage.getItem("selected-cv-profile");
+    if (storedProfile) {
+      try {
+        const profile = JSON.parse(storedProfile);
+        handleSelectSavedProfile(profile);
+        sessionStorage.removeItem("selected-cv-profile");
+      } catch (e) {
+        console.error("Failed to parse stored profile:", e);
+      }
+    }
+  }, []);
+
   // Save profile name to localStorage
   useEffect(() => {
     localStorage.setItem(PROFILE_NAME_KEY, profileName);
@@ -347,11 +361,9 @@ export default function UploadRun() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Profile Name & Saved Profiles */}
+            {/* Saved Profiles Selector */}
             <SavedProfilesSelector
               onSelectProfile={handleSelectSavedProfile}
-              currentProfileName={profileName}
-              onProfileNameChange={setProfileName}
             />
             
             <div className="grid gap-6 md:grid-cols-2">

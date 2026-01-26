@@ -28,14 +28,10 @@ export interface SavedProfile {
 
 interface SavedProfilesSelectorProps {
   onSelectProfile: (profile: SavedProfile) => void;
-  currentProfileName: string;
-  onProfileNameChange: (name: string) => void;
 }
 
 export function SavedProfilesSelector({
   onSelectProfile,
-  currentProfileName,
-  onProfileNameChange,
 }: SavedProfilesSelectorProps) {
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -115,18 +111,6 @@ export function SavedProfilesSelector({
 
   return (
     <div className="space-y-3">
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">Your Profile Name</label>
-        <Input
-          placeholder="Enter your name to identify searches"
-          value={currentProfileName}
-          onChange={(e) => onProfileNameChange(e.target.value)}
-          className="max-w-xs"
-        />
-        <p className="text-xs text-muted-foreground">
-          Used to identify who uploaded this CV
-        </p>
-      </div>
 
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleTrigger asChild>
