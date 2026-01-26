@@ -28,6 +28,7 @@ interface Preference {
   companies: string
   exclusions: string
   locations?: string[]
+  targetRoles?: string[]
 }
 
 interface ApolloContact {
@@ -107,19 +108,14 @@ Deno.serve(async (req) => {
     const companyContactCount: Record<string, number> = {}
     let processedCount = 0
 
-    // Build search titles based on hiring roles
-    const hiringTitles = [
-      'Recruiter',
-      'Talent Acquisition',
-      'HR Manager',
-      'Human Resources',
-      'Hiring Manager',
-      'Head of Talent',
-      'People Operations',
-      'HR Director',
-      'Talent Partner',
-      'HR Business Partner'
+    // Get target roles from preferences (all prefs share the same roles)
+    // Fall back to default HR/Recruiting roles if not specified
+    const defaultRoles = [
+      'Recruiter', 'Talent Acquisition', 'HR Manager', 'Human Resources',
+      'Hiring Manager', 'Head of Talent', 'People Operations', 'HR Director',
+      'Talent Partner', 'HR Business Partner'
     ]
+    const targetRoles = preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
 
     // Get locations from preferences (all prefs share the same locations)
     const searchLocations = preferences[0]?.locations || []
@@ -174,8 +170,8 @@ Deno.serve(async (req) => {
         // Build query params for new API search endpoint
         const queryParams = new URLSearchParams()
         
-        // Add titles
-        hiringTitles.forEach(title => queryParams.append('person_titles[]', title))
+        // Add target roles
+        targetRoles.forEach(title => queryParams.append('person_titles[]', title))
         
         // Add locations
         if (apolloLocations.length > 0) {
