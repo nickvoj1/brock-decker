@@ -119,14 +119,14 @@ Deno.serve(async (req) => {
     }
     console.log('Excluding contacts from candidate\'s previous employers:', Array.from(excludedCompanies))
 
-    // Fetch recently used contacts (within last 2 weeks) to exclude them
-    const twoWeeksAgo = new Date()
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
+    // Fetch recently used contacts (within last 3 days) to exclude them
+    const threeDaysAgo = new Date()
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
     
     const { data: recentlyUsedContacts } = await supabase
       .from('used_contacts')
       .select('email')
-      .gte('added_at', twoWeeksAgo.toISOString())
+      .gte('added_at', threeDaysAgo.toISOString())
     
     const usedEmails = new Set((recentlyUsedContacts || []).map(c => c.email.toLowerCase()))
     console.log(`Found ${usedEmails.size} recently used contacts to exclude`)
