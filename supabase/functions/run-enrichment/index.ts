@@ -57,6 +57,8 @@ Deno.serve(async (req) => {
   try {
     const { runId } = await req.json()
 
+    console.log('Starting enrichment run:', runId)
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
@@ -206,18 +208,21 @@ Deno.serve(async (req) => {
         
         // Add industry sectors if specified (broad categories like Tech, Healthcare, etc.)
         const sectors = pref.sectors || []
-        if (sectors.length > 0) {
-          // Apollo uses organization_industry_tag_ids or q_organization_keyword_tags
-          // Using keyword tags for broader matching
-          sectors.forEach(sector => queryParams.append('q_organization_keyword_tags[]', sector))
-          console.log('Filtering by sectors:', sectors)
+        const industryKeyword = normalizeApolloKeyword(pref.industry || '')
+        const sectorPrimaryKeyword = getSectorPrimaryKeyword(sectors)
+
+        // Keyword-style filtering: keep this SMALL.
+        // Apollo keyword search tends to behave like an AND across terms.
+        // So we use at most 1 sector keyword (e.g. "energy") and do additional filtering after enrichment.
+        const keywordParts = [industryKeyword, sectorPrimaryKeyword].filter(Boolean)
+        if (keywordParts.length > 0) {
+          const qKeywords = keywordParts.join(' ')
+          queryParams.append('q_keywords', qKeywords)
+          console.log('Apollo keyword query:', qKeywords)
         }
-        
-        // Add industry keyword for filtering
-        if (pref.industry) {
-          queryParams.append('q_keywords', pref.industry)
-          console.log('Filtering by industry keyword:', pref.industry)
-        }
+
+        if (pref.industry) console.log('Selected industry:', pref.industry)
+        if (sectors.length > 0) console.log('Selected sectors:', sectors)
         
         queryParams.append('per_page', String(perPage))
         queryParams.append('page', '1')
@@ -236,7 +241,39 @@ Deno.serve(async (req) => {
 
         if (apolloResponse.ok) {
           const apolloData = await apolloResponse.json()
-          const people = apolloData.people || []
+          let people = apolloData.people || []
+
+          console.log('Apollo people returned:', people.length)
+
+          // If the sector keyword made the query too strict, retry without it.
+          if (people.length === 0 && sectorPrimaryKeyword && industryKeyword) {
+            try {
+              console.log('No people found; retrying without sector keyword...')
+              const retryParams = new URLSearchParams(queryParams)
+              retryParams.delete('q_keywords')
+              retryParams.append('q_keywords', industryKeyword)
+
+              const retryUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${retryParams.toString()}`
+              const retryResponse = await fetch(retryUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': apolloApiKey,
+                },
+              })
+
+              if (retryResponse.ok) {
+                const retryData = await retryResponse.json()
+                people = retryData.people || []
+                console.log('Apollo people returned (retry):', people.length)
+              } else {
+                const errorText = await retryResponse.text()
+                console.error('Apollo retry error:', retryResponse.status, errorText)
+              }
+            } catch (retryError) {
+              console.error('Apollo retry exception:', retryError)
+            }
+          }
           
           // Collect person IDs to enrich (get emails)
           const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
@@ -320,61 +357,27 @@ Deno.serve(async (req) => {
                   // Get job title from enrichment
                   const jobTitle = person.title || personData.title || 'Unknown'
                   
-                  // Flexible sector matching using keywords
+                  // Flexible sector matching using keywords (post-filter)
                   const sectors = pref.sectors || []
                   if (sectors.length > 0) {
                     const orgIndustry = (person.organization?.industry || '').toLowerCase()
                     const orgKeywords: string[] = (person.organization?.keywords || []).map((k: string) => k.toLowerCase())
                     const orgName = companyName.toLowerCase()
-                    
-                    // Map common sector slugs/labels to search keywords
-                    const sectorKeywordMap: Record<string, string[]> = {
-                      'energy-utilities': ['energy', 'utility', 'utilities', 'power', 'oil', 'gas', 'renewable', 'solar', 'wind', 'electric'],
-                      'energy & utilities': ['energy', 'utility', 'utilities', 'power', 'oil', 'gas', 'renewable', 'solar', 'wind', 'electric'],
-                      'technology': ['technology', 'tech', 'software', 'saas', 'it', 'computer', 'digital'],
-                      'healthcare': ['healthcare', 'health', 'medical', 'pharma', 'biotech', 'hospital', 'clinical'],
-                      'financial-services': ['financial', 'finance', 'banking', 'insurance', 'investment', 'capital'],
-                      'financial services': ['financial', 'finance', 'banking', 'insurance', 'investment', 'capital'],
-                      'industrial': ['industrial', 'manufacturing', 'machinery', 'equipment', 'engineering'],
-                      'consumer': ['consumer', 'retail', 'cpg', 'fmcg', 'brand'],
-                      'media-entertainment': ['media', 'entertainment', 'content', 'streaming', 'gaming'],
-                      'media & entertainment': ['media', 'entertainment', 'content', 'streaming', 'gaming'],
-                      'real-estate-construction': ['real estate', 'property', 'construction', 'building', 'housing'],
-                      'real estate & construction': ['real estate', 'property', 'construction', 'building', 'housing'],
-                      'transportation-logistics': ['transportation', 'logistics', 'shipping', 'freight', 'supply chain'],
-                      'transportation & logistics': ['transportation', 'logistics', 'shipping', 'freight', 'supply chain'],
-                      'retail-ecommerce': ['retail', 'ecommerce', 'e-commerce', 'shopping', 'store'],
-                      'retail & e-commerce': ['retail', 'ecommerce', 'e-commerce', 'shopping', 'store'],
-                      'telecommunications': ['telecom', 'telecommunications', 'wireless', 'mobile', 'network'],
-                      'manufacturing': ['manufacturing', 'factory', 'production', 'industrial'],
-                      'education': ['education', 'edtech', 'school', 'university', 'learning'],
-                      'agriculture': ['agriculture', 'agri', 'farming', 'agtech', 'food'],
-                      'government-public': ['government', 'public sector', 'federal', 'municipal'],
-                      'government & public sector': ['government', 'public sector', 'federal', 'municipal'],
-                    }
-                    
-                    // Get keywords for each selected sector
-                    const sectorWords: string[] = []
-                    for (const sector of sectors) {
-                      const sectorLower = sector.toLowerCase()
-                      const mappedKeywords = sectorKeywordMap[sectorLower]
-                      if (mappedKeywords) {
-                        sectorWords.push(...mappedKeywords)
-                      } else {
-                        // Fallback: split the sector into words
-                        sectorWords.push(...sectorLower.split(/[\s&,\-\/]+/).filter(w => w.length > 2))
-                      }
-                    }
-                    
-                    // Check if any sector keyword appears in company data
-                    const sectorMatched = sectorWords.some(word => 
+
+                    const sectorWords = getSectorKeywords(sectors)
+
+                    const sectorMatched = sectorWords.some(word =>
                       orgIndustry.includes(word) ||
                       orgKeywords.some(k => k.includes(word)) ||
                       orgName.includes(word)
                     )
-                    
+
                     if (!sectorMatched) {
-                      console.log(`Skipping - no sector match: ${companyName} (industry: ${orgIndustry}) for: ${sectorWords.slice(0, 5).join(', ')}...`)
+                      console.log(
+                        `Skipping - no sector match: ${companyName} (industry: ${orgIndustry}) for: ${sectorWords
+                          .slice(0, 6)
+                          .join(', ')}...`,
+                      )
                       continue
                     }
                   }
@@ -527,4 +530,64 @@ Deno.serve(async (req) => {
 function escapeCSV(value: string): string {
   if (!value) return ''
   return value.replace(/"/g, '""')
+}
+
+function normalizeApolloKeyword(value: string): string {
+  if (!value) return ''
+  return value
+    .replace(/\([^)]*\)/g, ' ') // remove parenthetical abbreviations like (VC)
+    .replace(/&/g, ' ')
+    .replace(/[-_/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function getSectorKeywords(sectors: string[]): string[] {
+  const sectorKeywordMap: Record<string, string[]> = {
+    'energy-utilities': ['energy', 'utility', 'utilities', 'power', 'oil', 'gas', 'renewable', 'solar', 'wind', 'electric'],
+    'energy & utilities': ['energy', 'utility', 'utilities', 'power', 'oil', 'gas', 'renewable', 'solar', 'wind', 'electric'],
+    'technology': ['technology', 'tech', 'software', 'saas', 'it', 'computer', 'digital'],
+    'healthcare': ['healthcare', 'health', 'medical', 'pharma', 'biotech', 'hospital', 'clinical'],
+    'financial-services': ['financial', 'finance', 'banking', 'insurance', 'investment', 'capital'],
+    'financial services': ['financial', 'finance', 'banking', 'insurance', 'investment', 'capital'],
+    'industrial': ['industrial', 'manufacturing', 'machinery', 'equipment', 'engineering'],
+    'consumer': ['consumer', 'retail', 'cpg', 'fmcg', 'brand'],
+    'media-entertainment': ['media', 'entertainment', 'content', 'streaming', 'gaming'],
+    'media & entertainment': ['media', 'entertainment', 'content', 'streaming', 'gaming'],
+    'real-estate-construction': ['real estate', 'property', 'construction', 'building', 'housing'],
+    'real estate & construction': ['real estate', 'property', 'construction', 'building', 'housing'],
+    'transportation-logistics': ['transportation', 'logistics', 'shipping', 'freight', 'supply chain'],
+    'transportation & logistics': ['transportation', 'logistics', 'shipping', 'freight', 'supply chain'],
+    'retail-ecommerce': ['retail', 'ecommerce', 'e-commerce', 'shopping', 'store'],
+    'retail & e-commerce': ['retail', 'ecommerce', 'e-commerce', 'shopping', 'store'],
+    'telecommunications': ['telecom', 'telecommunications', 'wireless', 'mobile', 'network'],
+    'manufacturing': ['manufacturing', 'factory', 'production', 'industrial'],
+    'education': ['education', 'edtech', 'school', 'university', 'learning'],
+    'agriculture': ['agriculture', 'agri', 'farming', 'agtech', 'food'],
+    'government-public': ['government', 'public sector', 'federal', 'municipal'],
+    'government & public sector': ['government', 'public sector', 'federal', 'municipal'],
+  }
+
+  const out: string[] = []
+  for (const sector of sectors || []) {
+    const sectorLower = (sector || '').toLowerCase().trim()
+    const mapped = sectorKeywordMap[sectorLower]
+    if (mapped?.length) {
+      out.push(...mapped)
+    } else {
+      out.push(...sectorLower.split(/[\s&,\-\/]+/).filter(w => w.length > 2))
+    }
+  }
+
+  return Array.from(new Set(out))
+}
+
+function getSectorPrimaryKeyword(sectors: string[]): string {
+  const keywords = getSectorKeywords(sectors)
+  // Prefer a broad, high-recall keyword to avoid over-constraining Apollo searches.
+  if (keywords.includes('energy')) return 'energy'
+  if (keywords.includes('technology')) return 'technology'
+  if (keywords.includes('healthcare')) return 'healthcare'
+  if (keywords.includes('financial')) return 'financial'
+  return keywords[0] || ''
 }
