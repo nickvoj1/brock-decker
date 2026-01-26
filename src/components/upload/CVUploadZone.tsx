@@ -2,21 +2,35 @@ import { useCallback, useState } from "react";
 import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+interface WorkExperience {
+  company: string;
+  title: string;
+  duration?: string;
+}
+
+interface Education {
+  institution: string;
+  degree: string;
+  year?: string;
+}
+
 interface ParsedCandidate {
   candidate_id: string;
   name: string;
-  position: string;
+  current_title: string;
   location: string;
-  company?: string;
   email?: string;
   phone?: string;
-  skills?: string[];
+  summary?: string;
+  skills: string[];
+  work_history: WorkExperience[];
+  education: Education[];
 }
 
 interface CVUploadZoneProps {
   onFileSelect: (file: File) => void;
   onClear: () => void;
-  onParsed: (data: ParsedCandidate) => void;
+  onParsed?: (data: ParsedCandidate | null) => void;
   file: File | null;
   parsedData: ParsedCandidate | null;
   error: string | null;
@@ -128,7 +142,7 @@ export function CVUploadZone({
                     <div className="text-sm text-success space-y-0.5">
                       <p className="font-medium">{parsedData.name}</p>
                       <p className="text-muted-foreground">
-                        {parsedData.position} • {parsedData.location}
+                        {parsedData.current_title} • {parsedData.location}
                       </p>
                     </div>
                   )}
@@ -161,16 +175,31 @@ export function CVUploadZone({
                     <span className="text-foreground">{parsedData.phone}</span>
                   </div>
                 )}
-                {parsedData.company && (
-                  <div className="flex gap-2">
-                    <span className="text-muted-foreground">Company:</span>
-                    <span className="text-foreground">{parsedData.company}</span>
+                {parsedData.work_history && parsedData.work_history.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground">Work History ({parsedData.work_history.length}):</span>
+                    <div className="pl-2 space-y-1">
+                      {parsedData.work_history.slice(0, 3).map((exp, i) => (
+                        <div key={i} className="text-xs">
+                          <span className="font-medium">{exp.title}</span>
+                          <span className="text-muted-foreground"> @ {exp.company}</span>
+                        </div>
+                      ))}
+                      {parsedData.work_history.length > 3 && (
+                        <span className="text-xs text-muted-foreground">
+                          +{parsedData.work_history.length - 3} more
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
                 {parsedData.skills && parsedData.skills.length > 0 && (
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <span className="text-muted-foreground">Skills:</span>
                     <span className="text-foreground">{parsedData.skills.slice(0, 5).join(', ')}</span>
+                    {parsedData.skills.length > 5 && (
+                      <span className="text-muted-foreground">+{parsedData.skills.length - 5} more</span>
+                    )}
                   </div>
                 )}
               </div>
@@ -195,7 +224,7 @@ export function CVUploadZone({
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        AI will extract name, position, location, and contact info
+        AI will extract full profile including work history
       </p>
     </div>
   );

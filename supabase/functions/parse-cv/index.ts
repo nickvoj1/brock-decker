@@ -5,15 +5,29 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+interface WorkExperience {
+  company: string
+  title: string
+  duration?: string
+}
+
+interface Education {
+  institution: string
+  degree: string
+  year?: string
+}
+
 interface ParsedCandidate {
   candidate_id: string
   name: string
-  position: string
+  current_title: string
   location: string
-  company?: string
   email?: string
   phone?: string
-  skills?: string[]
+  summary?: string
+  skills: string[]
+  work_history: WorkExperience[]
+  education: Education[]
 }
 
 Deno.serve(async (req) => {
@@ -72,18 +86,14 @@ async function extractTextFromFile(file: File, buffer: ArrayBuffer): Promise<str
   const fileName = file.name.toLowerCase()
   
   if (fileName.endsWith('.pdf')) {
-    // For PDF, we'll extract text using a simple approach
-    // Convert buffer to text and try to extract readable content
     const uint8Array = new Uint8Array(buffer)
     const decoder = new TextDecoder('utf-8', { fatal: false })
     let rawText = decoder.decode(uint8Array)
     
-    // Try to extract text between stream markers (common in PDFs)
     const textMatches = rawText.match(/stream[\s\S]*?endstream/g) || []
     let extractedText = ''
     
     for (const match of textMatches) {
-      // Extract readable ASCII content
       const cleaned = match
         .replace(/stream|endstream/g, '')
         .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
@@ -95,7 +105,6 @@ async function extractTextFromFile(file: File, buffer: ArrayBuffer): Promise<str
       }
     }
     
-    // If stream extraction didn't work well, try direct text extraction
     if (extractedText.length < 100) {
       extractedText = rawText
         .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
@@ -103,17 +112,14 @@ async function extractTextFromFile(file: File, buffer: ArrayBuffer): Promise<str
         .trim()
     }
     
-    // Limit to first 15000 chars to stay within AI context limits
     return extractedText.slice(0, 15000)
   }
   
   if (fileName.endsWith('.docx')) {
-    // For DOCX, extract text from the XML content
     const uint8Array = new Uint8Array(buffer)
     const decoder = new TextDecoder('utf-8', { fatal: false })
     const rawText = decoder.decode(uint8Array)
     
-    // Extract text from XML tags
     const textContent = rawText
       .replace(/<[^>]*>/g, ' ')
       .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
@@ -124,7 +130,6 @@ async function extractTextFromFile(file: File, buffer: ArrayBuffer): Promise<str
   }
   
   if (fileName.endsWith('.doc')) {
-    // For older DOC format, try to extract readable text
     const uint8Array = new Uint8Array(buffer)
     const decoder = new TextDecoder('utf-8', { fatal: false })
     const rawText = decoder.decode(uint8Array)
@@ -152,14 +157,15 @@ async function parseWithAI(cvText: string, apiKey: string): Promise<ParsedCandid
       messages: [
         {
           role: 'system',
-          content: `You are a CV/resume parser. Extract candidate information from the provided CV text. 
+          content: `You are a CV/resume parser. Extract comprehensive candidate information from the provided CV text.
 You must return the data using the extract_candidate_info function.
 Be accurate and extract real information - do not make up data.
+Extract ALL work history entries with company names - this is critical for finding job opportunities.
 If information is not clearly present, leave that field empty or use "Not specified".`
         },
         {
           role: 'user',
-          content: `Parse the following CV and extract the candidate's information:\n\n${cvText}`
+          content: `Parse the following CV and extract the candidate's full profile including all work experience:\n\n${cvText}`
         }
       ],
       tools: [
@@ -167,7 +173,7 @@ If information is not clearly present, leave that field empty or use "Not specif
           type: 'function',
           function: {
             name: 'extract_candidate_info',
-            description: 'Extract structured candidate information from a CV',
+            description: 'Extract structured candidate information from a CV including full work history',
             parameters: {
               type: 'object',
               properties: {
@@ -175,17 +181,13 @@ If information is not clearly present, leave that field empty or use "Not specif
                   type: 'string',
                   description: 'Full name of the candidate'
                 },
-                position: {
+                current_title: {
                   type: 'string',
                   description: 'Current or most recent job title/position'
                 },
                 location: {
                   type: 'string',
                   description: 'City, state/country or location of the candidate'
-                },
-                company: {
-                  type: 'string',
-                  description: 'Current or most recent company/employer'
                 },
                 email: {
                   type: 'string',
@@ -195,13 +197,43 @@ If information is not clearly present, leave that field empty or use "Not specif
                   type: 'string',
                   description: 'Phone number'
                 },
+                summary: {
+                  type: 'string',
+                  description: 'Professional summary or objective from the CV (max 200 words)'
+                },
                 skills: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Key skills mentioned in the CV (max 10)'
+                  description: 'Key skills mentioned in the CV (max 15)'
+                },
+                work_history: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      company: { type: 'string', description: 'Company name' },
+                      title: { type: 'string', description: 'Job title at this company' },
+                      duration: { type: 'string', description: 'Time period (e.g., "2020-2023" or "2 years")' }
+                    },
+                    required: ['company', 'title']
+                  },
+                  description: 'All previous work experience entries'
+                },
+                education: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      institution: { type: 'string', description: 'School/university name' },
+                      degree: { type: 'string', description: 'Degree or certification' },
+                      year: { type: 'string', description: 'Year of completion' }
+                    },
+                    required: ['institution', 'degree']
+                  },
+                  description: 'Educational background'
                 }
               },
-              required: ['name', 'position', 'location'],
+              required: ['name', 'current_title', 'location', 'work_history'],
               additionalProperties: false
             }
           }
@@ -219,7 +251,6 @@ If information is not clearly present, leave that field empty or use "Not specif
 
   const data = await response.json()
   
-  // Extract the tool call arguments
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0]
   if (!toolCall || toolCall.function.name !== 'extract_candidate_info') {
     throw new Error('AI did not return expected format')
@@ -227,17 +258,18 @@ If information is not clearly present, leave that field empty or use "Not specif
 
   const parsed = JSON.parse(toolCall.function.arguments)
   
-  // Generate a unique candidate ID
   const candidateId = `CV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
   return {
     candidate_id: candidateId,
     name: parsed.name || 'Unknown',
-    position: parsed.position || 'Not specified',
+    current_title: parsed.current_title || 'Not specified',
     location: parsed.location || 'Not specified',
-    company: parsed.company || undefined,
     email: parsed.email || undefined,
     phone: parsed.phone || undefined,
-    skills: parsed.skills || undefined
+    summary: parsed.summary || undefined,
+    skills: parsed.skills || [],
+    work_history: parsed.work_history || [],
+    education: parsed.education || []
   }
 }

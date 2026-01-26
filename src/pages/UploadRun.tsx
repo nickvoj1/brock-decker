@@ -1,28 +1,44 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, Loader2, FileText, Settings2 } from "lucide-react";
+import { Play, Loader2, FileText, Settings2, Download } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { Json } from "@/integrations/supabase/types";
 
+interface WorkExperience {
+  company: string;
+  title: string;
+  duration?: string;
+}
+
+interface Education {
+  institution: string;
+  degree: string;
+  year?: string;
+}
+
 interface ParsedCandidate {
   candidate_id: string;
   name: string;
-  position: string;
+  current_title: string;
   location: string;
-  company?: string;
   email?: string;
   phone?: string;
-  skills?: string[];
+  summary?: string;
+  skills: string[];
+  work_history: WorkExperience[];
+  education: Education[];
 }
+
+// Re-export for CVUploadZone compatibility
+export type { ParsedCandidate, WorkExperience, Education };
 
 export default function UploadRun() {
   const navigate = useNavigate();
@@ -38,8 +54,7 @@ export default function UploadRun() {
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   
   // Run configuration
-  const [searchCounter, setSearchCounter] = useState(1);
-  const [bullhornEnabled, setBullhornEnabled] = useState(false);
+  const [maxContacts, setMaxContacts] = useState(50);
   const [isRunning, setIsRunning] = useState(false);
 
   const handleCvFileSelect = async (file: File) => {
@@ -72,7 +87,7 @@ export default function UploadRun() {
       setCvData(result.data);
       toast({
         title: "CV parsed successfully",
-        description: `Extracted info for ${result.data.name}`,
+        description: `Extracted profile for ${result.data.name} with ${result.data.work_history?.length || 0} work experiences`,
       });
     } catch (error: any) {
       console.error('CV parsing error:', error);
@@ -113,14 +128,15 @@ export default function UploadRun() {
     
     try {
       // Create a new run record with single candidate
+      // Note: search_counter is now used as maxContacts
       const { data: run, error: runError } = await supabase
         .from('enrichment_runs')
         .insert([{
-          search_counter: searchCounter,
+          search_counter: maxContacts, // Using this field for max contacts
           candidates_count: 1,
           preferences_count: selectedIndustries.length,
           status: 'running' as const,
-          bullhorn_enabled: bullhornEnabled,
+          bullhorn_enabled: false,
           candidates_data: JSON.parse(JSON.stringify([cvData])) as Json,
           preferences_data: JSON.parse(JSON.stringify(preferencesData)) as Json,
         }])
@@ -130,8 +146,8 @@ export default function UploadRun() {
       if (runError) throw runError;
 
       toast({
-        title: "Enrichment started",
-        description: `Processing candidate: ${cvData.name}`,
+        title: "Searching for contacts",
+        description: `Finding up to ${maxContacts} hiring contacts for ${cvData.name}`,
       });
 
       // Call the enrichment edge function
@@ -150,15 +166,15 @@ export default function UploadRun() {
       }
 
       toast({
-        title: "Enrichment complete",
-        description: "View results in Runs History",
+        title: "Search complete",
+        description: `Found ${enrichResult.contactsFound || 0} contacts. View in Runs History to download.`,
       });
 
       navigate('/history');
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to start enrichment",
+        description: error.message || "Failed to search for contacts",
         variant: "destructive",
       });
     } finally {
@@ -168,8 +184,8 @@ export default function UploadRun() {
 
   return (
     <AppLayout 
-      title="Upload & Run" 
-      description="Upload a CV and run Apollo.io enrichment"
+      title="Find Hiring Contacts" 
+      description="Upload a CV and find relevant hiring contacts on Apollo.io"
     >
       <div className="max-w-4xl space-y-6">
         {/* Step 1: Upload CV & Select Industries */}
@@ -181,7 +197,7 @@ export default function UploadRun() {
               </div>
               <div>
                 <CardTitle className="text-lg">Step 1: Upload CV & Select Industries</CardTitle>
-                <CardDescription>Upload a candidate CV and select target industries</CardDescription>
+                <CardDescription>Upload a candidate CV and select target industries they're interested in</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -202,7 +218,7 @@ export default function UploadRun() {
           </CardContent>
         </Card>
 
-        {/* Step 2: Configure Run */}
+        {/* Step 2: Configure Search */}
         <Card className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -210,41 +226,36 @@ export default function UploadRun() {
                 <Settings2 className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 2: Configure Run</CardTitle>
-                <CardDescription>Set enrichment parameters and integrations</CardDescription>
+                <CardTitle className="text-lg">Step 2: Configure Search</CardTitle>
+                <CardDescription>Set how many contacts you want to find</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid gap-6 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="searchCounter">Search Counter</Label>
+                <Label htmlFor="maxContacts">Maximum Contacts</Label>
                 <Input
-                  id="searchCounter"
+                  id="maxContacts"
                   type="number"
-                  min={1}
-                  value={searchCounter}
-                  onChange={(e) => setSearchCounter(parseInt(e.target.value) || 1)}
+                  min={10}
+                  max={500}
+                  step={10}
+                  value={maxContacts}
+                  onChange={(e) => setMaxContacts(Math.max(10, Math.min(500, parseInt(e.target.value) || 50)))}
                   className="max-w-[200px]"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Starting number for Bullhorn candidate naming
+                  Number of contacts to retrieve (10-500). Max 3 per company.
                 </p>
               </div>
               
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label htmlFor="bullhorn">Push to Bullhorn</Label>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Create/update candidates in Bullhorn after enrichment
-                    </p>
-                  </div>
-                  <Switch
-                    id="bullhorn"
-                    checked={bullhornEnabled}
-                    onCheckedChange={setBullhornEnabled}
-                  />
+                <Label>What you'll get</Label>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <p>• CSV with: Name, Title, Company, Email, Phone</p>
+                  <p>• Hiring contacts (Recruiters, HR, Talent Acquisition)</p>
+                  <p>• Based on candidate's location & selected industries</p>
                 </div>
               </div>
             </div>
@@ -259,11 +270,11 @@ export default function UploadRun() {
                 <Play className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 3: Run Enrichment</CardTitle>
+                <CardTitle className="text-lg">Step 3: Find Contacts</CardTitle>
                 <CardDescription>
                   {canRun 
-                    ? `Ready to enrich ${cvData?.name} with ${selectedIndustries.length} industries`
-                    : "Upload a CV and select industries to enable enrichment"
+                    ? `Ready to find up to ${maxContacts} contacts for ${cvData?.name}`
+                    : "Upload a CV and select industries to start"
                   }
                 </CardDescription>
               </div>
@@ -279,12 +290,12 @@ export default function UploadRun() {
               {isRunning ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
+                  Searching Apollo.io...
                 </>
               ) : (
                 <>
                   <Play className="mr-2 h-4 w-4" />
-                  Run Enrichment
+                  Find Hiring Contacts
                 </>
               )}
             </Button>
