@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Play, Loader2, FileSpreadsheet, Settings2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { FileUploadZone } from "@/components/upload/FileUploadZone";
+import { IndustrySelector } from "@/components/upload/IndustrySelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,13 +20,6 @@ interface ParsedCandidate {
   [key: string]: string;
 }
 
-interface ParsedPreference {
-  industry: string;
-  companies: string;
-  exclusions: string;
-  [key: string]: string;
-}
-
 export default function UploadRun() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -35,9 +29,8 @@ export default function UploadRun() {
   const [cvData, setCvData] = useState<ParsedCandidate[] | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
   
-  const [prefFile, setPrefFile] = useState<File | null>(null);
-  const [prefData, setPrefData] = useState<ParsedPreference[] | null>(null);
-  const [prefError, setPrefError] = useState<string | null>(null);
+  // Industry selection (replaces preferences CSV)
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   
   // Run configuration
   const [searchCounter, setSearchCounter] = useState(1);
@@ -55,21 +48,21 @@ export default function UploadRun() {
     }
   };
 
-  const handlePrefFileSelect = (file: File, parsed: Record<string, string>[]) => {
-    setPrefFile(file);
-    if (parsed.length > 0) {
-      setPrefData(parsed as ParsedPreference[]);
-      setPrefError(null);
-    } else {
-      setPrefData(null);
-      setPrefError("Invalid file or missing required columns");
-    }
+  const canRun = cvData && cvData.length > 0 && selectedIndustries.length > 0 && !isRunning;
+
+  // Convert selected industries to preferences data format for backend
+  const getPreferencesData = () => {
+    return selectedIndustries.map(industry => ({
+      industry,
+      companies: '',
+      exclusions: '',
+    }));
   };
 
-  const canRun = cvData && cvData.length > 0 && prefData && prefData.length > 0 && !isRunning;
-
   const handleRunEnrichment = async () => {
-    if (!cvData || !prefData) return;
+    if (!cvData || selectedIndustries.length === 0) return;
+    
+    const preferencesData = getPreferencesData();
     
     setIsRunning(true);
     
@@ -80,11 +73,11 @@ export default function UploadRun() {
         .insert({
           search_counter: searchCounter,
           candidates_count: cvData.length,
-          preferences_count: prefData.length,
+          preferences_count: selectedIndustries.length,
           status: 'running',
           bullhorn_enabled: bullhornEnabled,
           candidates_data: cvData,
-          preferences_data: prefData,
+          preferences_data: preferencesData,
         })
         .select()
         .single();
@@ -162,19 +155,9 @@ export default function UploadRun() {
               parsedData={cvData}
               error={cvError}
             />
-            <FileUploadZone
-              label="Preferences CSV"
-              description="Upload Prefs.csv with search preferences"
-              expectedColumns={['industry', 'companies', 'exclusions']}
-              onFileSelect={handlePrefFileSelect}
-              onClear={() => {
-                setPrefFile(null);
-                setPrefData(null);
-                setPrefError(null);
-              }}
-              file={prefFile}
-              parsedData={prefData}
-              error={prefError}
+            <IndustrySelector
+              selectedIndustries={selectedIndustries}
+              onSelectionChange={setSelectedIndustries}
             />
           </CardContent>
         </Card>
@@ -239,8 +222,8 @@ export default function UploadRun() {
                 <CardTitle className="text-lg">Step 3: Run Enrichment</CardTitle>
                 <CardDescription>
                   {canRun 
-                    ? `Ready to process ${cvData?.length} candidates with ${prefData?.length} preference rows`
-                    : "Upload both files to enable enrichment"
+                    ? `Ready to process ${cvData?.length} candidates with ${selectedIndustries.length} industries`
+                    : "Upload CSV and select industries to enable enrichment"
                   }
                 </CardDescription>
               </div>
