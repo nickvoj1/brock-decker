@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, Loader2, FileText, Settings2, Download } from "lucide-react";
+import { Play, Loader2, FileText, Settings2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
+import { LocationSelector } from "@/components/upload/LocationSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,6 +53,9 @@ export default function UploadRun() {
   
   // Industry selection
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
+  
+  // Location selection
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   
   // Run configuration
   const [maxContacts, setMaxContacts] = useState(50);
@@ -108,7 +112,7 @@ export default function UploadRun() {
     setCvError(null);
   };
 
-  const canRun = cvData && selectedIndustries.length > 0 && !isRunning && !isParsingCV;
+  const canRun = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && !isRunning && !isParsingCV;
 
   // Convert selected industries to preferences data format for backend
   const getPreferencesData = () => {
@@ -116,6 +120,7 @@ export default function UploadRun() {
       industry,
       companies: '',
       exclusions: '',
+      locations: selectedLocations, // Include selected locations
     }));
   };
 
@@ -218,7 +223,7 @@ export default function UploadRun() {
           </CardContent>
         </Card>
 
-        {/* Step 2: Configure Search */}
+        {/* Step 2: Select Locations */}
         <Card className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -226,7 +231,28 @@ export default function UploadRun() {
                 <Settings2 className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 2: Configure Search</CardTitle>
+                <CardTitle className="text-lg">Step 2: Select Locations</CardTitle>
+                <CardDescription>Choose where to find hiring contacts</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <LocationSelector
+              selectedLocations={selectedLocations}
+              onSelectionChange={setSelectedLocations}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Step 3: Configure Search */}
+        <Card className="animate-slide-up" style={{ animationDelay: '0.2s' }}>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Settings2 className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className="text-lg">Step 3: Configure Search</CardTitle>
                 <CardDescription>Set how many contacts you want to find</CardDescription>
               </div>
             </div>
@@ -255,26 +281,26 @@ export default function UploadRun() {
                 <div className="text-sm text-muted-foreground space-y-1">
                   <p>• CSV with: Name, Title, Company, Email, Phone</p>
                   <p>• Hiring contacts (Recruiters, HR, Talent Acquisition)</p>
-                  <p>• Based on candidate's location & selected industries</p>
+                  <p>• Based on selected locations & industries</p>
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Step 3: Run */}
-        <Card className="animate-slide-up" style={{ animationDelay: '0.2s' }}>
+        {/* Step 4: Run */}
+        <Card className="animate-slide-up" style={{ animationDelay: '0.3s' }}>
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Play className="h-4 w-4" />
               </div>
               <div>
-                <CardTitle className="text-lg">Step 3: Find Contacts</CardTitle>
+                <CardTitle className="text-lg">Step 4: Find Contacts</CardTitle>
                 <CardDescription>
                   {canRun 
-                    ? `Ready to find up to ${maxContacts} contacts for ${cvData?.name}`
-                    : "Upload a CV and select industries to start"
+                    ? `Ready to find up to ${maxContacts} contacts for ${cvData?.name} in ${selectedLocations.length} location(s)`
+                    : "Complete all steps above to start searching"
                   }
                 </CardDescription>
               </div>
