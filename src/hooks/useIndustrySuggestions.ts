@@ -79,20 +79,21 @@ const TITLE_INDUSTRY_PATTERNS: Record<string, string[]> = {
   "Corporate Finance": ["analyst", "manager", "director", "controller", "treasurer", "fp&a"],
 };
 
-// Sector keywords mapping - enhanced
+// Sector keywords mapping - improved with more specific matching
+// Using word boundaries and avoiding overly generic terms
 const SECTOR_KEYWORDS: Record<string, string[]> = {
-  "Technology": ["software", "tech", "saas", "ai", "machine learning", "data", "cloud", "fintech", "it ", "microsoft", "google", "amazon", "meta", "apple", "salesforce", "oracle", "sap", "ibm", "cisco", "intel", "nvidia"],
-  "Healthcare": ["healthcare", "health", "medical", "pharma", "biotech", "hospital", "life sciences", "pfizer", "johnson & johnson", "merck", "novartis", "roche", "abbvie", "amgen", "gilead"],
-  "Financial Services": ["bank", "finance", "investment", "asset management", "insurance", "trading", "capital", "securities"],
-  "Industrial": ["industrial", "manufacturing", "engineering", "construction", "automotive", "aerospace", "defense", "ge ", "siemens", "honeywell", "caterpillar", "3m", "boeing", "lockheed"],
-  "Consumer": ["consumer", "retail", "ecommerce", "e-commerce", "fmcg", "cpg", "brand", "nike", "coca-cola", "pepsi", "procter", "unilever", "lvmh", "amazon", "walmart", "target"],
-  "Energy & Utilities": ["energy", "oil", "gas", "power", "utilities", "renewable", "solar", "wind", "exxon", "chevron", "shell", "bp "],
-  "Real Estate & Construction": ["real estate", "property", "construction", "reit", "development", "cbre", "jll", "brookfield"],
-  "Media & Entertainment": ["media", "entertainment", "gaming", "sports", "publishing", "advertising", "disney", "netflix", "warner", "spotify", "ea ", "activision"],
-  "Telecommunications": ["telecom", "telco", "mobile", "network", "5g", "at&t", "verizon", "t-mobile", "vodafone"],
-  "Transportation & Logistics": ["logistics", "transportation", "shipping", "supply chain", "aviation", "fedex", "ups", "maersk", "delta", "united airlines"],
-  "Education": ["education", "edtech", "university", "school", "learning", "coursera", "pearson"],
-  "Agriculture": ["agriculture", "farming", "agtech", "food", "cargill", "adm", "bunge"],
+  "Technology": ["software engineer", "software developer", "saas", "artificial intelligence", "machine learning", "data scientist", "data engineer", "cloud computing", "fintech", "microsoft", "google", "amazon web services", "aws", "meta", "apple", "salesforce", "oracle", "sap", "ibm", "cisco", "intel", "nvidia", "tech company", "technology sector", "it services"],
+  "Healthcare": ["healthcare", "health system", "medical device", "pharmaceutical", "pharma", "biotech", "biotechnology", "hospital", "life sciences", "pfizer", "johnson & johnson", "merck", "novartis", "roche", "abbvie", "amgen", "gilead", "clinical", "therapeutics"],
+  "Financial Services": ["banking", "financial services", "investment management", "asset management", "insurance company", "trading firm", "capital markets", "securities", "wealth management", "private banking"],
+  "Industrial": ["industrial", "manufacturing", "mechanical engineer", "construction", "automotive", "aerospace", "defense contractor", "general electric", "siemens", "honeywell", "caterpillar", "3m company", "boeing", "lockheed martin"],
+  "Consumer": ["consumer goods", "retail", "ecommerce", "e-commerce", "fmcg", "cpg", "consumer brand", "nike", "coca-cola", "pepsi", "procter & gamble", "unilever", "lvmh", "walmart", "target"],
+  "Energy & Natural Resources": ["oil & gas", "oil and gas", "petroleum", "utilities company", "renewable energy", "solar energy", "wind energy", "exxonmobil", "chevron", "shell oil", "conocophillips", "energy sector", "natural resources"],
+  "Real Estate": ["real estate", "property management", "commercial property", "reit", "real estate development", "cbre", "jll", "jones lang", "brookfield properties", "starwood capital"],
+  "Media & Entertainment": ["media company", "entertainment", "gaming industry", "sports industry", "publishing", "advertising agency", "disney", "netflix", "warner", "spotify", "electronic arts", "activision"],
+  "Telecommunications": ["telecom", "telecommunications", "mobile network", "5g network", "at&t", "verizon", "t-mobile", "vodafone", "wireless"],
+  "Transportation & Logistics": ["logistics", "transportation", "shipping company", "supply chain", "aviation", "fedex", "ups", "maersk", "delta airlines", "united airlines", "freight"],
+  "Education": ["education", "edtech", "university", "higher education", "learning platform", "coursera", "pearson"],
+  "Agriculture & Food": ["agriculture", "farming", "agtech", "food processing", "cargill", "adm", "bunge", "agribusiness"],
 };
 
 export interface IndustrySuggestion {
