@@ -501,7 +501,7 @@ async function getSkillsFieldName(
   bhRestToken: string
 ): Promise<string> {
   if (skillsFieldChecked) {
-    return cachedSkillsFieldName || 'customText1'
+    return cachedSkillsFieldName || 'desiredSkills'
   }
   skillsFieldChecked = true
 
@@ -510,13 +510,21 @@ async function getSkillsFieldName(
     const res = await bullhornFetch(metaUrl)
     if (!res.ok) {
       await res.text()
-      return 'customText1'
+      return 'desiredSkills'
     }
 
     const meta = await res.json()
     const fields: any[] = meta?.fields || []
 
-    // Look for a field labeled "Skills" or similar
+    // First check if desiredSkills field exists (standard Bullhorn field)
+    const desiredSkillsField = fields.find((f) => f?.name === 'desiredSkills')
+    if (desiredSkillsField) {
+      cachedSkillsFieldName = 'desiredSkills'
+      console.log('Using standard Bullhorn field: desiredSkills')
+      return 'desiredSkills'
+    }
+
+    // Look for a custom field labeled "Skills" or similar
     const skillsField = fields.find((f) => {
       const label = String(f?.label || '').toLowerCase()
       return label === 'skills' || label.includes('skills')
@@ -524,16 +532,16 @@ async function getSkillsFieldName(
 
     if (skillsField?.name) {
       cachedSkillsFieldName = skillsField.name
-      console.log(`Detected skills field: ${skillsField.name} (label: ${skillsField.label})`)
+      console.log(`Detected custom skills field: ${skillsField.name} (label: ${skillsField.label})`)
       return skillsField.name
     }
   } catch (e) {
     console.error('Error detecting skills field:', e)
   }
 
-  // Default to customText1
-  console.log('Using default skills field: customText1')
-  return 'customText1'
+  // Default to desiredSkills (standard Bullhorn field for ClientContact)
+  console.log('Using default skills field: desiredSkills')
+  return 'desiredSkills'
 }
 
 async function findOrCreateClientContact(
@@ -666,7 +674,8 @@ async function createDistributionList(
   
   for (const contactId of contactIds) {
     try {
-      // Create TearsheetRecipient entry - this is what makes contacts appear in Distribution Lists
+      // Create TearsheetRecipient entry with required 'comments' field
+      // This is what makes contacts appear in Distribution Lists tab (not Hotlists)
       const recipientUrl = `${restUrl}entity/TearsheetRecipient?BhRestToken=${bhRestToken}`
       const recipientResponse = await bullhornFetch(recipientUrl, {
         method: 'PUT',
@@ -674,22 +683,16 @@ async function createDistributionList(
         body: JSON.stringify({
           tearsheet: { id: tearsheetId },
           clientContact: { id: contactId },
+          comments: 'Added via automated contact search export',
         }),
       })
       
       if (recipientResponse.ok) {
         successCount++
+        console.log(`Added TearsheetRecipient for contact ${contactId}`)
       } else {
         const errorText = await recipientResponse.text()
         console.error(`Failed to add TearsheetRecipient for contact ${contactId}: ${errorText}`)
-        
-        // Fallback: try adding to tearsheet directly (for older Bullhorn versions)
-        const fallbackUrl = `${restUrl}entity/Tearsheet/${tearsheetId}/clientContacts/${contactId}?BhRestToken=${bhRestToken}`
-        const fallbackResponse = await bullhornFetch(fallbackUrl, { method: 'PUT' })
-        if (fallbackResponse.ok) {
-          successCount++
-          console.log(`Fallback: Added contact ${contactId} directly to tearsheet`)
-        }
       }
     } catch (err: any) {
       console.error(`Error adding contact ${contactId}: ${err.message}`)
