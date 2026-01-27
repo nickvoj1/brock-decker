@@ -674,7 +674,7 @@ async function createDistributionList(
   
   for (const contactId of contactIds) {
     try {
-      // Create TearsheetRecipient entry with required 'comments' field
+      // Create TearsheetRecipient entry with required 'person' field (not clientContact!)
       // This is what makes contacts appear in Distribution Lists tab (not Hotlists)
       const recipientUrl = `${restUrl}entity/TearsheetRecipient?BhRestToken=${bhRestToken}`
       const recipientResponse = await bullhornFetch(recipientUrl, {
@@ -682,7 +682,7 @@ async function createDistributionList(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tearsheet: { id: tearsheetId },
-          clientContact: { id: contactId },
+          person: { id: contactId },
           comments: 'Added via automated contact search export',
         }),
       })
