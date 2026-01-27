@@ -30,7 +30,10 @@ export function BullhornSettingsCard() {
   
   const [bullhornClientId, setBullhornClientId] = useState("");
   const [bullhornClientSecret, setBullhornClientSecret] = useState("");
+  const [bullhornUsername, setBullhornUsername] = useState("");
+  const [bullhornPassword, setBullhornPassword] = useState("");
   const [showBullhornSecret, setShowBullhornSecret] = useState(false);
+  const [showBullhornPassword, setShowBullhornPassword] = useState(false);
   const [testingBullhorn, setTestingBullhorn] = useState(false);
   const [bullhornStatus, setBullhornStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [connecting, setConnecting] = useState(false);
@@ -91,6 +94,12 @@ export function BullhornSettingsCard() {
           case 'bullhorn_client_secret':
             setBullhornClientSecret(s.setting_value);
             break;
+          case 'bullhorn_username':
+            setBullhornUsername(s.setting_value);
+            break;
+          case 'bullhorn_password':
+            setBullhornPassword(s.setting_value);
+            break;
         }
       });
     }
@@ -126,6 +135,8 @@ export function BullhornSettingsCard() {
   const handleSaveBullhorn = () => {
     saveMutation.mutate({ key: 'bullhorn_client_id', value: bullhornClientId });
     saveMutation.mutate({ key: 'bullhorn_client_secret', value: bullhornClientSecret });
+    saveMutation.mutate({ key: 'bullhorn_username', value: bullhornUsername });
+    saveMutation.mutate({ key: 'bullhorn_password', value: bullhornPassword });
   };
 
   const handleConnectBullhorn = async () => {
@@ -255,6 +266,34 @@ export function BullhornSettingsCard() {
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 {showBullhornSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="bhUsername">API Username</Label>
+            <Input
+              id="bhUsername"
+              value={bullhornUsername}
+              onChange={(e) => setBullhornUsername(e.target.value)}
+              placeholder="Bullhorn API Username"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="bhPassword">API Password</Label>
+            <div className="relative">
+              <Input
+                id="bhPassword"
+                type={showBullhornPassword ? "text" : "password"}
+                value={bullhornPassword}
+                onChange={(e) => setBullhornPassword(e.target.value)}
+                placeholder="Bullhorn API Password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowBullhornPassword(!showBullhornPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showBullhornPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
