@@ -323,6 +323,9 @@ async function findOrCreateClientContact(
   // Parse location for city
   const city = contact.location?.split(',')[0]?.trim() || ''
 
+  // Truncate occupation to 100 chars (Bullhorn limit)
+  const occupation = (contact.title || '').substring(0, 100)
+
   console.log(`Processing contact: ${firstName} ${lastName} (${contact.email})`)
 
   // Search for existing ClientContact by email
@@ -340,7 +343,7 @@ async function findOrCreateClientContact(
       const updatePayload = {
         firstName,
         lastName,
-        occupation: contact.title || '',
+        occupation,
         address: { city },
         clientCorporation: { id: clientCorporationId },
         customText1: skillsString, // Skills field
@@ -371,7 +374,7 @@ async function findOrCreateClientContact(
     firstName,
     lastName,
     email: contact.email,
-    occupation: contact.title || '',
+    occupation,
     address: { city },
     status: 'Active',
     clientCorporation: { id: clientCorporationId },
