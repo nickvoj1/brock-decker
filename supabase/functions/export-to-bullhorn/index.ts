@@ -147,6 +147,92 @@ function generateSkillsString(
   return Array.from(skills).join(', ')
 }
 
+async function refreshBullhornTokens(supabase: any, refreshToken: string): Promise<BullhornTokens | null> {
+  console.log('Attempting to refresh Bullhorn token...')
+  
+  // Fetch client credentials from api_settings
+  const { data: settings } = await supabase
+    .from('api_settings')
+    .select('setting_key, setting_value')
+    .in('setting_key', ['bullhorn_client_id', 'bullhorn_client_secret'])
+
+  const creds: Record<string, string> = {}
+  settings?.forEach((s: any) => {
+    creds[s.setting_key] = s.setting_value
+  })
+
+  if (!creds.bullhorn_client_id || !creds.bullhorn_client_secret) {
+    console.error('Bullhorn credentials not configured for refresh')
+    return null
+  }
+
+  // Exchange refresh token for new access token
+  const tokenUrl = 'https://auth.bullhornstaffing.com/oauth/token'
+  const tokenParams = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+    client_id: creds.bullhorn_client_id,
+    client_secret: creds.bullhorn_client_secret,
+  })
+
+  const tokenResponse = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenParams.toString(),
+  })
+
+  if (!tokenResponse.ok) {
+    const errorText = await tokenResponse.text()
+    console.error('Token refresh failed:', errorText)
+    return null
+  }
+
+  const tokenData = await tokenResponse.json()
+  const accessToken = tokenData.access_token
+  const newRefreshToken = tokenData.refresh_token
+  const expiresIn = tokenData.expires_in
+
+  console.log('Token refreshed, getting new REST session...')
+
+  // Get new REST session
+  const loginUrl = `https://rest.bullhornstaffing.com/rest-services/login?version=*&access_token=${accessToken}`
+  const loginResponse = await fetch(loginUrl, { method: 'GET' })
+
+  if (!loginResponse.ok) {
+    const errorText = await loginResponse.text()
+    console.error('REST login failed after refresh:', errorText)
+    return null
+  }
+
+  const loginData = await loginResponse.json()
+  const restUrl = loginData.restUrl
+  const bhRestToken = loginData.BhRestToken
+
+  // Calculate expiration time
+  const expiresAt = expiresIn 
+    ? new Date(Date.now() + expiresIn * 1000).toISOString()
+    : null
+
+  // Update tokens in database
+  await supabase.from('bullhorn_tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+  
+  const { error: insertError } = await supabase.from('bullhorn_tokens').insert({
+    access_token: accessToken,
+    refresh_token: newRefreshToken,
+    rest_url: restUrl,
+    bh_rest_token: bhRestToken,
+    expires_at: expiresAt,
+  })
+
+  if (insertError) {
+    console.error('Failed to save refreshed tokens:', insertError)
+    return null
+  }
+
+  console.log('Bullhorn tokens refreshed successfully')
+  return { accessToken, restUrl, bhRestToken }
+}
+
 async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | null> {
   const { data: tokens } = await supabase
     .from('bullhorn_tokens')
@@ -162,7 +248,17 @@ async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | 
   
   // Check if token is expired
   if (token.expires_at && new Date(token.expires_at) < new Date()) {
-    console.log('Token expired, need to refresh or reconnect')
+    console.log('Token expired, attempting refresh...')
+    
+    // Try to refresh using the refresh token
+    if (token.refresh_token) {
+      const refreshed = await refreshBullhornTokens(supabase, token.refresh_token)
+      if (refreshed) {
+        return refreshed
+      }
+    }
+    
+    console.log('Token refresh failed, user needs to reconnect')
     return null
   }
 
