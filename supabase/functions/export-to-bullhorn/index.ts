@@ -308,6 +308,77 @@ async function findOrCreateClientCorporation(
   return createData.changedEntityId
 }
 
+async function parseLocation(location: string): Promise<{ city: string; state: string; countryName: string; countryCode: string }> {
+  // Parse location string like "Milan, Italy" or "New York, NY, United States"
+  const parts = (location || '').split(',').map(p => p.trim()).filter(Boolean)
+  
+  // Country code mapping for Bullhorn
+  const countryMap: Record<string, string> = {
+    'italy': 'IT', 'italia': 'IT',
+    'united kingdom': 'GB', 'uk': 'GB', 'england': 'GB', 'scotland': 'GB', 'wales': 'GB',
+    'germany': 'DE', 'deutschland': 'DE',
+    'france': 'FR',
+    'spain': 'ES', 'españa': 'ES',
+    'netherlands': 'NL', 'holland': 'NL',
+    'belgium': 'BE',
+    'switzerland': 'CH',
+    'austria': 'AT',
+    'sweden': 'SE',
+    'norway': 'NO',
+    'denmark': 'DK',
+    'finland': 'FI',
+    'ireland': 'IE',
+    'portugal': 'PT',
+    'poland': 'PL',
+    'czech republic': 'CZ', 'czechia': 'CZ',
+    'greece': 'GR',
+    'united states': 'US', 'usa': 'US', 'u.s.': 'US', 'u.s.a.': 'US',
+    'canada': 'CA',
+    'australia': 'AU',
+    'singapore': 'SG',
+    'hong kong': 'HK',
+    'japan': 'JP',
+    'china': 'CN',
+    'india': 'IN',
+    'uae': 'AE', 'united arab emirates': 'AE', 'dubai': 'AE',
+    'saudi arabia': 'SA',
+    'brazil': 'BR',
+    'mexico': 'MX',
+    'luxembourg': 'LU',
+  }
+
+  let city = ''
+  let state = ''
+  let countryName = ''
+  let countryCode = ''
+
+  if (parts.length === 1) {
+    // Could be just a country or just a city
+    const lower = parts[0].toLowerCase()
+    if (countryMap[lower]) {
+      countryName = parts[0]
+      countryCode = countryMap[lower]
+    } else {
+      city = parts[0]
+    }
+  } else if (parts.length === 2) {
+    // City, Country format
+    city = parts[0]
+    const lower = parts[1].toLowerCase()
+    countryName = parts[1]
+    countryCode = countryMap[lower] || ''
+  } else if (parts.length >= 3) {
+    // City, State, Country format
+    city = parts[0]
+    state = parts[1]
+    const lower = parts[parts.length - 1].toLowerCase()
+    countryName = parts[parts.length - 1]
+    countryCode = countryMap[lower] || ''
+  }
+
+  return { city, state, countryName, countryCode }
+}
+
 async function findOrCreateClientContact(
   restUrl: string,
   bhRestToken: string,
@@ -320,13 +391,20 @@ async function findOrCreateClientContact(
   const firstName = nameParts[0] || 'Unknown'
   const lastName = nameParts.slice(1).join(' ') || '-' // Bullhorn requires lastName
 
-  // Parse location for city
-  const city = contact.location?.split(',')[0]?.trim() || ''
+  // Parse location for city, state, and country
+  const { city, state, countryName, countryCode } = await parseLocation(contact.location || '')
 
   // Truncate occupation to 100 chars (Bullhorn limit)
   const occupation = (contact.title || '').substring(0, 100)
 
-  console.log(`Processing contact: ${firstName} ${lastName} (${contact.email})`)
+  console.log(`Processing contact: ${firstName} ${lastName} (${contact.email}) - Location: ${city}, ${countryName} (${countryCode})`)
+
+  // Build address object
+  const address: Record<string, string> = {}
+  if (city) address.city = city
+  if (state) address.state = state
+  if (countryName) address.countryName = countryName
+  if (countryCode) address.countryCode = countryCode
 
   // Search for existing ClientContact by email
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
@@ -344,7 +422,7 @@ async function findOrCreateClientContact(
         firstName,
         lastName,
         occupation,
-        address: { city },
+        address,
         clientCorporation: { id: clientCorporationId },
         customText1: skillsString, // Skills field
       }
@@ -375,7 +453,7 @@ async function findOrCreateClientContact(
     lastName,
     email: contact.email,
     occupation,
-    address: { city },
+    address,
     status: 'Active',
     clientCorporation: { id: clientCorporationId },
     customText1: skillsString, // Skills field
