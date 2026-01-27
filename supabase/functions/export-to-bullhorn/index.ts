@@ -45,10 +45,50 @@ async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | 
   }
 }
 
+async function findOrCreateClientCorporation(
+  restUrl: string,
+  bhRestToken: string,
+  companyName: string
+): Promise<number> {
+  // Search for existing ClientCorporation by name
+  const searchUrl = `${restUrl}search/ClientCorporation?BhRestToken=${bhRestToken}&query=name:"${companyName}"&fields=id,name`
+  const searchResponse = await fetch(searchUrl)
+  
+  if (searchResponse.ok) {
+    const searchData = await searchResponse.json()
+    if (searchData.data && searchData.data.length > 0) {
+      console.log(`Found existing ClientCorporation: ${companyName} (ID: ${searchData.data[0].id})`)
+      return searchData.data[0].id
+    }
+  }
+
+  // Create new ClientCorporation
+  console.log(`Creating new ClientCorporation: ${companyName}`)
+  const createUrl = `${restUrl}entity/ClientCorporation?BhRestToken=${bhRestToken}`
+  const createResponse = await fetch(createUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: companyName,
+      status: 'Active Client',
+    }),
+  })
+
+  if (!createResponse.ok) {
+    const errorText = await createResponse.text()
+    throw new Error(`Failed to create ClientCorporation: ${errorText}`)
+  }
+
+  const createData = await createResponse.json()
+  console.log(`Created ClientCorporation: ${companyName} (ID: ${createData.changedEntityId})`)
+  return createData.changedEntityId
+}
+
 async function findOrCreateClientContact(
   restUrl: string,
   bhRestToken: string,
-  contact: ApolloContact
+  contact: ApolloContact,
+  clientCorporationId: number
 ): Promise<number> {
   // Search for existing ClientContact by email
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id`
@@ -68,13 +108,14 @@ async function findOrCreateClientContact(
           lastName: contact.name.split(' ').slice(1).join(' ') || '',
           occupation: contact.title,
           address: { city: contact.location.split(',')[0]?.trim() || '' },
+          clientCorporation: { id: clientCorporationId },
         }),
       })
       return existingId
     }
   }
 
-  // Create new ClientContact
+  // Create new ClientContact with required clientCorporation reference
   const createUrl = `${restUrl}entity/ClientContact?BhRestToken=${bhRestToken}`
   const createResponse = await fetch(createUrl, {
     method: 'PUT',
@@ -84,9 +125,9 @@ async function findOrCreateClientContact(
       lastName: contact.name.split(' ').slice(1).join(' ') || '',
       email: contact.email,
       occupation: contact.title,
-      companyName: contact.company,
       address: { city: contact.location.split(',')[0]?.trim() || '' },
       status: 'Active',
+      clientCorporation: { id: clientCorporationId },
     }),
   })
 
@@ -182,13 +223,33 @@ Deno.serve(async (req) => {
     console.log(`Creating/updating ${contacts.length} ClientContacts...`)
     const contactIds: number[] = []
     const errors: string[] = []
+    
+    // Cache for company IDs to avoid duplicate lookups
+    const companyCache: Record<string, number> = {}
 
     for (const contact of contacts) {
       try {
+        // First, find or create the ClientCorporation
+        let clientCorporationId: number
+        const companyName = contact.company || 'Unknown Company'
+        
+        if (companyCache[companyName]) {
+          clientCorporationId = companyCache[companyName]
+        } else {
+          clientCorporationId = await findOrCreateClientCorporation(
+            tokens.restUrl,
+            tokens.bhRestToken,
+            companyName
+          )
+          companyCache[companyName] = clientCorporationId
+        }
+        
+        // Then create the contact with the corporation reference
         const contactId = await findOrCreateClientContact(
           tokens.restUrl,
           tokens.bhRestToken,
-          contact
+          contact,
+          clientCorporationId
         )
         contactIds.push(contactId)
       } catch (error: any) {
