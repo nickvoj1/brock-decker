@@ -41,6 +41,117 @@ interface ApolloContact {
   company: string;
   email: string;
   phone: string;
+  location?: string;
+}
+
+interface SearchPreference {
+  industries?: string[];
+  roles?: string[];
+  locations?: string[];
+}
+
+// Skills mapping (matching export-to-bullhorn logic)
+const INDUSTRY_SKILLS: Record<string, string[]> = {
+  'private equity': ['PE'],
+  'pe ': ['PE'],
+  'venture capital': ['VC'],
+  'vc ': ['VC'],
+  'hedge fund': ['HEDGE FUND'],
+  'investment bank': ['INVESTMENT BANK'],
+  'm&a': ['M&A'],
+  'mergers': ['M&A'],
+  'tier 1': ['TIER1'],
+  'tier1': ['TIER1'],
+  'asset management': ['ASSET MAN'],
+  'asset manager': ['ASSET MAN'],
+  'lbo': ['LBO'],
+  'leveraged buyout': ['LBO'],
+  'debt capital': ['DCM'],
+  'dcm': ['DCM'],
+  'secondary': ['SECN'],
+  'secondaries': ['SECN'],
+};
+
+const LOCATION_SKILLS: Record<string, string[]> = {
+  'uk': ['UK'],
+  'united kingdom': ['UK'],
+  'london': ['UK', 'LONDON'],
+  'germany': ['DACH'],
+  'frankfurt': ['DACH', 'FRANKFURT'],
+  'munich': ['DACH', 'GERMANY'],
+  'austria': ['DACH'],
+  'switzerland': ['SWISS'],
+  'zurich': ['SWISS'],
+  'nordic': ['NORDICS'],
+  'sweden': ['NORDICS'],
+  'norway': ['NORDICS'],
+  'denmark': ['NORDICS'],
+  'finland': ['NORDICS'],
+  'netherlands': ['BENELUX'],
+  'belgium': ['BENELUX'],
+  'luxembourg': ['BENELUX'],
+  'uae': ['UAE', 'MENA'],
+  'dubai': ['UAE', 'DUBAI', 'MENA'],
+  'italy': ['ITALY'],
+  'milan': ['ITALY'],
+  'rome': ['ITALY'],
+};
+
+const ROLE_SKILLS: Record<string, string[]> = {
+  'head': ['HEAD'],
+  'director': ['HEAD'],
+  'partner': ['HEAD'],
+  'managing director': ['HEAD'],
+  'md': ['HEAD'],
+  'principal': ['HEAD'],
+  'buy side': ['BUY SIDE'],
+  'buyside': ['BUY SIDE'],
+  'growth': ['GROWTH'],
+  'fundraising': ['FUNDRAISING'],
+  'investor relations': ['INVESTOR RELATIONS'],
+  'ir': ['INVESTOR RELATIONS'],
+};
+
+function generateSkillsString(contact: ApolloContact, preferences?: SearchPreference): string {
+  const skills = new Set<string>();
+
+  // Match from search preferences (industries)
+  if (preferences?.industries) {
+    for (const industry of preferences.industries) {
+      const lowerIndustry = industry.toLowerCase();
+      for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
+        if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
+          skillCodes.forEach(s => skills.add(s));
+        }
+      }
+    }
+  }
+
+  // Match from company name
+  const companyLower = contact.company?.toLowerCase() || '';
+  for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
+    if (companyLower.includes(keyword)) {
+      skillCodes.forEach(s => skills.add(s));
+    }
+  }
+
+  // Match from location
+  const locationLower = contact.location?.toLowerCase() || '';
+  for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
+    if (locationLower.includes(keyword)) {
+      skillCodes.forEach(s => skills.add(s));
+    }
+  }
+
+  // Match from title (role-based skills)
+  const titleLower = contact.title?.toLowerCase() || '';
+  for (const [keyword, skillCodes] of Object.entries(ROLE_SKILLS)) {
+    if (titleLower.includes(keyword)) {
+      skillCodes.forEach(s => skills.add(s));
+    }
+  }
+
+  return Array.from(skills).join(', ');
 }
 
 interface EnrichmentRun {
@@ -131,10 +242,14 @@ export default function RunsHistory() {
     const filteredContacts = contacts.filter(c => !excludedEmails.has(c.email));
     if (filteredContacts.length === 0) return;
 
-    const csvHeader = 'Name,Title,Company,Email,Phone';
-    const csvRows = filteredContacts.map(c => 
-      `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(c.email)}","${escapeCSV(c.phone)}"`
-    );
+    // Get preferences for skills generation
+    const preferences = run.preferences_data as SearchPreference | null;
+
+    const csvHeader = 'Name,Title,Company,Email,Phone,Skills';
+    const csvRows = filteredContacts.map(c => {
+      const skills = generateSkillsString(c, preferences || undefined);
+      return `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(c.email)}","${escapeCSV(c.phone)}","${escapeCSV(skills)}"`;
+    });
     const csvContent = [csvHeader, ...csvRows].join('\n');
 
     // Generate filename with date, time, and CV name
