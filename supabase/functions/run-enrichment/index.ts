@@ -266,13 +266,10 @@ Deno.serve(async (req) => {
           apolloLocations.forEach(loc => queryParams.append('person_locations[]', loc))
         }
         
-        // Build keyword query from industry and/or sector
-        const industryKeyword = combo.industry ? normalizeApolloKeyword(combo.industry) : ''
-        const sectorKeyword = combo.sector ? getSectorPrimaryKeyword([combo.sector]) : ''
+        // Build optimized keyword query from industry and/or sector
+        const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
 
-        const keywordParts = [industryKeyword, sectorKeyword].filter(Boolean)
-        if (keywordParts.length > 0) {
-          const qKeywords = keywordParts.join(' ')
+        if (qKeywords) {
           queryParams.append('q_keywords', qKeywords)
           console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
         } else {
@@ -312,13 +309,17 @@ Deno.serve(async (req) => {
 
             console.log(`Apollo page ${currentPage}: ${people.length} people returned (total available: ${totalAvailable})`)
 
-            // If no results on first page with sector keyword, retry without it
-            if (people.length === 0 && currentPage === 1 && sectorKeyword && industryKeyword) {
+            // If no results on first page with sector, retry without sector constraint
+            if (people.length === 0 && currentPage === 1 && combo.sector && combo.industry) {
               try {
                 console.log('No people found; retrying without sector keyword...')
                 const retryParams = new URLSearchParams(pageParams)
                 retryParams.delete('q_keywords')
-                retryParams.append('q_keywords', industryKeyword)
+                // Use industry-only keyword for retry
+                const industryOnlyKeyword = buildApolloKeywordQuery(combo.industry, null)
+                if (industryOnlyKeyword) {
+                  retryParams.append('q_keywords', industryOnlyKeyword)
+                }
 
                 const retryUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${retryParams.toString()}`
                 const retryResponse = await fetch(retryUrl, {
@@ -615,12 +616,54 @@ function escapeCSV(value: string): string {
 
 function normalizeApolloKeyword(value: string): string {
   if (!value) return ''
+  // Remove parenthetical abbreviations, normalize to clean keywords
   return value
-    .replace(/\([^)]*\)/g, ' ') // remove parenthetical abbreviations like (VC)
-    .replace(/&/g, ' ')
+    .replace(/\([^)]*\)/g, ' ') // remove (VC), (PE), etc.
+    .replace(/&/g, 'and')       // Apollo prefers "and" over "&"
     .replace(/[-_/]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+    .toLowerCase()
+}
+
+// Map industries to Apollo-optimized search terms
+const INDUSTRY_TO_APOLLO_KEYWORDS: Record<string, string[]> = {
+  'private equity (pe)': ['private equity', 'buyout', 'portfolio company'],
+  'private equity': ['private equity', 'buyout', 'portfolio company'],
+  'venture capital (vc)': ['venture capital', 'startup investing', 'early stage'],
+  'venture capital': ['venture capital', 'startup investing', 'early stage'],
+  'hedge fund': ['hedge fund', 'investment management', 'trading'],
+  'asset management': ['asset management', 'investment management', 'portfolio management'],
+  'wealth management': ['wealth management', 'private banking', 'family office'],
+  'investment banking': ['investment banking', 'mergers acquisitions', 'capital markets'],
+  'mergers & acquisitions (m&a)': ['mergers acquisitions', 'ma advisory', 'deal advisory'],
+  'capital markets': ['capital markets', 'equity capital markets', 'debt capital markets'],
+  'equity capital markets (ecm)': ['equity capital markets', 'ipo', 'equity offerings'],
+  'debt capital markets (dcm)': ['debt capital markets', 'bond issuance', 'credit markets'],
+  'leveraged finance': ['leveraged finance', 'leveraged lending', 'high yield'],
+  'restructuring': ['restructuring', 'turnaround', 'distressed'],
+  'private credit': ['private credit', 'direct lending', 'private debt'],
+  'direct lending': ['direct lending', 'middle market lending'],
+  'strategy consulting': ['strategy consulting', 'management consulting', 'strategic advisory'],
+  'management consulting': ['management consulting', 'business consulting'],
+  'corporate finance': ['corporate finance', 'financial planning analysis'],
+  'corporate development': ['corporate development', 'strategic initiatives', 'business development'],
+  'real estate': ['real estate', 'property', 'commercial real estate'],
+  'real estate private equity': ['real estate private equity', 'repe', 'property investment'],
+  'infrastructure': ['infrastructure', 'infrastructure investing'],
+  'fintech': ['fintech', 'financial technology', 'payments technology'],
+  'payments': ['payments', 'payment processing', 'fintech'],
+  'blockchain & crypto': ['blockchain', 'cryptocurrency', 'digital assets', 'web3'],
+  'insurance': ['insurance', 'underwriting'],
+  'reinsurance': ['reinsurance'],
+  'quantitative trading': ['quantitative trading', 'algorithmic trading', 'systematic trading'],
+  'sales & trading': ['sales trading', 'trading', 'securities'],
+  'equity research': ['equity research', 'investment research', 'securities analysis'],
+}
+
+function getIndustryApolloKeywords(industry: string): string[] {
+  const key = industry.toLowerCase().trim()
+  return INDUSTRY_TO_APOLLO_KEYWORDS[key] || [normalizeApolloKeyword(industry)]
 }
 
 function getSectorKeywords(sectors: string[]): string[] {
@@ -669,6 +712,33 @@ function getSectorPrimaryKeyword(sectors: string[]): string {
   if (keywords.includes('energy')) return 'energy'
   if (keywords.includes('technology')) return 'technology'
   if (keywords.includes('healthcare')) return 'healthcare'
-  if (keywords.includes('financial')) return 'financial'
+  if (keywords.includes('financial')) return 'financial services'
+  if (keywords.includes('industrial')) return 'industrial'
+  if (keywords.includes('consumer')) return 'consumer'
+  if (keywords.includes('media')) return 'media'
+  if (keywords.includes('real estate')) return 'real estate'
   return keywords[0] || ''
 }
+
+// Build optimized Apollo keyword query from industry
+function buildApolloKeywordQuery(industry: string | null, sector: string | null): string {
+  const parts: string[] = []
+  
+  if (industry) {
+    const industryKeywords = getIndustryApolloKeywords(industry)
+    // Use the first (most specific) keyword for Apollo
+    if (industryKeywords.length > 0) {
+      parts.push(industryKeywords[0])
+    }
+  }
+  
+  if (sector) {
+    const sectorKeyword = getSectorPrimaryKeyword([sector])
+    if (sectorKeyword && !parts.some(p => p.includes(sectorKeyword))) {
+      parts.push(sectorKeyword)
+    }
+  }
+  
+  return parts.join(' ')
+}
+
