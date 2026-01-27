@@ -291,30 +291,22 @@ export default function RunsHistory() {
                           >
                             <Download className="h-4 w-4" />
                           </Button>
-                          {run.bullhorn_exported_at ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled
-                              className="text-green-600"
-                            >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => exportTooBullhornMutation.mutate(run.id)}
+                            disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
+                            title={run.bullhorn_exported_at ? "Re-export to Bullhorn" : "Export to Bullhorn"}
+                            className={run.bullhorn_exported_at ? "text-green-600 hover:text-green-700" : ""}
+                          >
+                            {exportingRunId === run.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : run.bullhorn_exported_at ? (
                               <CheckCircle2 className="h-4 w-4" />
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => exportTooBullhornMutation.mutate(run.id)}
-                              disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
-                              title="Export to Bullhorn"
-                            >
-                              {exportingRunId === run.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Upload className="h-4 w-4" />
-                              )}
-                            </Button>
-                          )}
+                            ) : (
+                              <Upload className="h-4 w-4" />
+                            )}
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
