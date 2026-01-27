@@ -26,9 +26,13 @@ async function getBullhornTokens(
   password: string
 ): Promise<BullhornTokens> {
   // Step 1: Get authorization code via password grant
+  // Bullhorn requires a redirect_uri even for password grant flow
+  const redirectUri = 'https://flbeeduimzyjecdlonde.supabase.co/functions/v1/bullhorn-oauth-callback'
+  
   const authUrl = new URL('https://auth.bullhornstaffing.com/oauth/authorize')
   authUrl.searchParams.set('client_id', clientId)
   authUrl.searchParams.set('response_type', 'code')
+  authUrl.searchParams.set('redirect_uri', redirectUri)
   authUrl.searchParams.set('username', username)
   authUrl.searchParams.set('password', password)
   authUrl.searchParams.set('action', 'Login')
