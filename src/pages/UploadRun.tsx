@@ -297,6 +297,7 @@ export default function UploadRun() {
           bullhorn_enabled: false,
           candidates_data: JSON.parse(JSON.stringify([cvData])) as Json,
           preferences_data: JSON.parse(JSON.stringify(preferencesData)) as Json,
+          uploaded_by: profileName.trim() || null, // Track who created this run
         }])
         .select()
         .single();

@@ -9,6 +9,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useProfileName } from "@/hooks/useProfileName";
 
 export interface SavedProfile {
   id: string;
@@ -33,6 +34,7 @@ interface SavedProfilesSelectorProps {
 export function SavedProfilesSelector({
   onSelectProfile,
 }: SavedProfilesSelectorProps) {
+  const profileName = useProfileName();
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -41,10 +43,17 @@ export function SavedProfilesSelector({
   const fetchProfiles = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("candidate_profiles")
         .select("*")
         .order("created_at", { ascending: false });
+      
+      // Filter by current user profile
+      if (profileName) {
+        query = query.eq("profile_name", profileName);
+      }
+      
+      const { data, error } = await query;
 
       if (error) throw error;
       
@@ -75,7 +84,7 @@ export function SavedProfilesSelector({
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
+  }, [profileName]);
 
   const handleDelete = async (e: React.MouseEvent, profileId: string) => {
     e.stopPropagation();
