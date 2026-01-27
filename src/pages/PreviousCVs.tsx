@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useProfileName } from "@/hooks/useProfileName";
 
 interface SavedProfile {
   id: string;
@@ -24,6 +25,7 @@ interface SavedProfile {
 export default function PreviousCVs() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const profileName = useProfileName();
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -31,10 +33,17 @@ export default function PreviousCVs() {
   const fetchProfiles = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("candidate_profiles")
         .select("*")
         .order("created_at", { ascending: false });
+      
+      // Filter by current user profile
+      if (profileName) {
+        query = query.eq("profile_name", profileName);
+      }
+      
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -75,7 +84,7 @@ export default function PreviousCVs() {
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
+  }, [profileName]);
 
   const handleDelete = async (profileId: string) => {
     try {

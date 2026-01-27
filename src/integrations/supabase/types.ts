@@ -145,6 +145,7 @@ export type Database = {
           search_counter: number
           status: Database["public"]["Enums"]["run_status"]
           updated_at: string
+          uploaded_by: string | null
         }
         Insert: {
           bullhorn_enabled?: boolean
@@ -165,6 +166,7 @@ export type Database = {
           search_counter?: number
           status?: Database["public"]["Enums"]["run_status"]
           updated_at?: string
+          uploaded_by?: string | null
         }
         Update: {
           bullhorn_enabled?: boolean
@@ -185,6 +187,7 @@ export type Database = {
           search_counter?: number
           status?: Database["public"]["Enums"]["run_status"]
           updated_at?: string
+          uploaded_by?: string | null
         }
         Relationships: []
       }

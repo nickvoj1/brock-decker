@@ -79,6 +79,8 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
   const handleSelect = (name: string) => {
     setSelectedProfile(name);
     setIsOpen(false);
+    // Dispatch custom event for same-tab updates
+    window.dispatchEvent(new Event("profile-name-changed"));
   };
 
   return (

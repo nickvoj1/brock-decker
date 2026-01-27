@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useProfileName } from "@/hooks/useProfileName";
 import type { Json } from "@/integrations/supabase/types";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
@@ -64,18 +65,24 @@ interface EnrichmentRun {
 export default function RunsHistory() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const profileName = useProfileName();
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRun, setSelectedRun] = useState<EnrichmentRun | null>(null);
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
   
   const { data: runs, isLoading } = useQuery({
-    queryKey: ['enrichment-runs', statusFilter],
+    queryKey: ['enrichment-runs', statusFilter, profileName],
     queryFn: async () => {
       let query = supabase
         .from('enrichment_runs')
         .select('*')
         .order('created_at', { ascending: false });
+      
+      // Filter by current user profile
+      if (profileName) {
+        query = query.eq('uploaded_by', profileName);
+      }
       
       if (statusFilter !== 'all') {
         query = query.eq('status', statusFilter as RunStatus);
