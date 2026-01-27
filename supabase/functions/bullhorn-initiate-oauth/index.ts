@@ -38,6 +38,13 @@ Deno.serve(async (req) => {
     authUrl.searchParams.set('response_type', 'code')
     authUrl.searchParams.set('redirect_uri', redirectUri)
 
+    // Preserve where to send the user back to after the OAuth callback.
+    // This avoids hard-coding FRONTEND_URL and supports both preview + published URLs.
+    const origin = req.headers.get('origin')
+    if (origin) {
+      authUrl.searchParams.set('state', origin)
+    }
+
     console.log('Generated OAuth URL:', authUrl.toString())
 
     return new Response(

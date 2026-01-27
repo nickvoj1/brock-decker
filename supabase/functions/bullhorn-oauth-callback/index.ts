@@ -16,9 +16,27 @@ Deno.serve(async (req) => {
     const code = url.searchParams.get('code')
     const error = url.searchParams.get('error')
     const errorDescription = url.searchParams.get('error_description')
+    const state = url.searchParams.get('state')
+
+    const isAllowedReturnTo = (value: string) => {
+      try {
+        const u = new URL(value)
+        if (u.protocol !== 'https:' && u.hostname !== 'localhost') return false
+        return (
+          u.hostname.endsWith('.lovable.app') ||
+          u.hostname.endsWith('.lovableproject.com') ||
+          u.hostname === 'localhost'
+        )
+      } catch {
+        return false
+      }
+    }
 
     // Get the frontend URL for redirect
-    const frontendUrl = Deno.env.get('FRONTEND_URL') || 'https://id-preview--80452e28-c96a-4eb6-9497-821c41c7d009.lovable.app'
+    const fallbackFrontendUrl =
+      Deno.env.get('FRONTEND_URL') ||
+      'https://id-preview--80452e28-c96a-4eb6-9497-821c41c7d009.lovable.app'
+    const frontendUrl = (state && isAllowedReturnTo(state) ? state : fallbackFrontendUrl).replace(/\/$/, '')
 
     if (error) {
       console.error('OAuth error:', error, errorDescription)
@@ -36,6 +54,8 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
+
+    const redirectUri = `${supabaseUrl}/functions/v1/bullhorn-oauth-callback`
 
     // Fetch Bullhorn credentials from api_settings
     const { data: settings } = await supabase
@@ -59,6 +79,7 @@ Deno.serve(async (req) => {
       code: code,
       client_id: creds.bullhorn_client_id,
       client_secret: creds.bullhorn_client_secret,
+      redirect_uri: redirectUri,
     })
 
     console.log('Exchanging code for token...')
