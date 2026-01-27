@@ -33,21 +33,36 @@ async function getBullhornTokens(
   authUrl.searchParams.set('password', password)
   authUrl.searchParams.set('action', 'Login')
 
+  console.log('Attempting Bullhorn auth with URL:', authUrl.toString().replace(password, '***'))
+
   const authResponse = await fetch(authUrl.toString(), {
     method: 'GET',
     redirect: 'manual',
   })
 
+  console.log('Auth response status:', authResponse.status)
+  console.log('Auth response headers:', JSON.stringify(Object.fromEntries(authResponse.headers.entries())))
+
   // Extract auth code from redirect URL
   const location = authResponse.headers.get('location')
   if (!location) {
-    throw new Error('Failed to get authorization redirect')
+    // Try to read the response body for error details
+    const body = await authResponse.text()
+    console.error('No redirect received. Response body preview:', body.substring(0, 500))
+    throw new Error(`Failed to get authorization redirect. Status: ${authResponse.status}. Check Bullhorn credentials in Settings.`)
   }
 
   const redirectUrl = new URL(location)
   const authCode = redirectUrl.searchParams.get('code')
+  const error = redirectUrl.searchParams.get('error')
+  
+  if (error) {
+    const errorDesc = redirectUrl.searchParams.get('error_description') || error
+    throw new Error(`Bullhorn auth error: ${errorDesc}`)
+  }
+  
   if (!authCode) {
-    throw new Error('Failed to get authorization code')
+    throw new Error('Failed to get authorization code from redirect')
   }
 
   // Step 2: Exchange auth code for access token
