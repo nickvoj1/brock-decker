@@ -637,43 +637,59 @@ async function createDistributionList(
   listName: string,
   contactIds: number[]
 ): Promise<number> {
-  console.log(`Creating Tearsheet: ${listName} with ${contactIds.length} contacts`)
+  console.log(`Creating Distribution List: ${listName} with ${contactIds.length} contacts`)
   
-  const createUrl = `${restUrl}entity/Tearsheet?BhRestToken=${bhRestToken}`
-  const createResponse = await bullhornFetch(createUrl, {
+  // Step 1: Create a Tearsheet first (required for Distribution List recipients)
+  const createTearsheetUrl = `${restUrl}entity/Tearsheet?BhRestToken=${bhRestToken}`
+  const tearsheetResponse = await bullhornFetch(createTearsheetUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: listName,
-      description: `Auto-generated list from contact search`,
+      description: `Auto-generated distribution list from contact search`,
       isPrivate: false,
     }),
   })
 
-  if (!createResponse.ok) {
-    const errorText = await createResponse.text()
-    throw new Error(`Failed to create distribution list: ${errorText}`)
+  if (!tearsheetResponse.ok) {
+    const errorText = await tearsheetResponse.text()
+    throw new Error(`Failed to create tearsheet: ${errorText}`)
   }
 
-  const createData = await createResponse.json()
-  const tearsheetId = createData.changedEntityId
+  const tearsheetData = await tearsheetResponse.json()
+  const tearsheetId = tearsheetData.changedEntityId
   console.log(`Tearsheet created with ID: ${tearsheetId}`)
 
-  // Add ClientContacts to the tearsheet
-  console.log(`Adding ${contactIds.length} contacts to tearsheet...`)
+  // Step 2: Add contacts as TearsheetRecipients (this makes them appear in Distribution Lists tab)
+  console.log(`Adding ${contactIds.length} contacts as TearsheetRecipients...`)
   let successCount = 0
   
   for (const contactId of contactIds) {
-    const addUrl = `${restUrl}entity/Tearsheet/${tearsheetId}/clientContacts/${contactId}?BhRestToken=${bhRestToken}`
-    
     try {
-      const addResponse = await bullhornFetch(addUrl, { method: 'PUT' })
+      // Create TearsheetRecipient entry - this is what makes contacts appear in Distribution Lists
+      const recipientUrl = `${restUrl}entity/TearsheetRecipient?BhRestToken=${bhRestToken}`
+      const recipientResponse = await bullhornFetch(recipientUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tearsheet: { id: tearsheetId },
+          clientContact: { id: contactId },
+        }),
+      })
       
-      if (addResponse.ok) {
+      if (recipientResponse.ok) {
         successCount++
       } else {
-        const errorText = await addResponse.text()
-        console.error(`Failed to add contact ${contactId} to tearsheet: ${errorText}`)
+        const errorText = await recipientResponse.text()
+        console.error(`Failed to add TearsheetRecipient for contact ${contactId}: ${errorText}`)
+        
+        // Fallback: try adding to tearsheet directly (for older Bullhorn versions)
+        const fallbackUrl = `${restUrl}entity/Tearsheet/${tearsheetId}/clientContacts/${contactId}?BhRestToken=${bhRestToken}`
+        const fallbackResponse = await bullhornFetch(fallbackUrl, { method: 'PUT' })
+        if (fallbackResponse.ok) {
+          successCount++
+          console.log(`Fallback: Added contact ${contactId} directly to tearsheet`)
+        }
       }
     } catch (err: any) {
       console.error(`Error adding contact ${contactId}: ${err.message}`)
@@ -683,7 +699,7 @@ async function createDistributionList(
     await sleep(100)
   }
   
-  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to tearsheet ${tearsheetId}`)
+  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to distribution list ${tearsheetId}`)
   return tearsheetId
 }
 
