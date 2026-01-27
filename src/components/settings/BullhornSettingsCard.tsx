@@ -136,8 +136,35 @@ export function BullhornSettingsCard() {
       if (error) throw error;
       if (data.error) throw new Error(data.error);
       
-      // Redirect to Bullhorn OAuth
-      window.location.href = data.authUrl;
+      // In preview, navigating inside an iframe can fail due to Bullhorn's anti-framing headers.
+      // Prefer opening a new tab; fall back to same-tab navigation if popups are blocked.
+      const authUrl = data.authUrl as string | undefined;
+      if (!authUrl) throw new Error('No authUrl returned from server');
+
+      // If we're inside an iframe (Lovable preview), open a new tab to avoid anti-framing blocks.
+      let inIframe = false;
+      try {
+        inIframe = window.self !== window.top;
+      } catch {
+        inIframe = true;
+      }
+
+      if (inIframe) {
+        const opened = window.open(authUrl, '_blank', 'noopener,noreferrer');
+        if (opened) {
+          toast({
+            title: 'Continue in new tab',
+            description: 'Complete Bullhorn authorization, then return here and refresh if needed.',
+          });
+          setConnecting(false);
+        } else {
+          // Popup blocked — try same-tab redirect
+          window.location.href = authUrl;
+        }
+      } else {
+        // Normal app usage: same-tab redirect so the callback can return to /settings with params.
+        window.location.href = authUrl;
+      }
     } catch (error: any) {
       toast({
         title: "Connection Error",
