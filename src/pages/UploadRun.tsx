@@ -462,6 +462,8 @@ export default function UploadRun() {
                     sectorSuggestions={industrySuggestions.sectors}
                     selectedIndustries={selectedIndustries}
                     selectedSectors={selectedSectors}
+                    confidence={industrySuggestions.confidence}
+                    matchedCompanies={industrySuggestions.matchedCompanies}
                     onAddIndustry={(industry) => {
                       if (!selectedIndustries.includes(industry)) {
                         setSelectedIndustries([...selectedIndustries, industry]);
