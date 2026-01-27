@@ -315,8 +315,18 @@ async function findOrCreateClientContact(
   clientCorporationId: number,
   skillsString: string
 ): Promise<number> {
+  // Parse name - handle various formats
+  const nameParts = (contact.name || 'Unknown').trim().split(/\s+/)
+  const firstName = nameParts[0] || 'Unknown'
+  const lastName = nameParts.slice(1).join(' ') || '-' // Bullhorn requires lastName
+
+  // Parse location for city
+  const city = contact.location?.split(',')[0]?.trim() || ''
+
+  console.log(`Processing contact: ${firstName} ${lastName} (${contact.email})`)
+
   // Search for existing ClientContact by email
-  const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id`
+  const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
   const searchResponse = await fetch(searchUrl)
   
   if (searchResponse.ok) {
@@ -324,38 +334,56 @@ async function findOrCreateClientContact(
     if (searchData.data && searchData.data.length > 0) {
       // Update existing contact
       const existingId = searchData.data[0].id
+      console.log(`Updating existing contact ID ${existingId}: ${firstName} ${lastName}`)
+      
       const updateUrl = `${restUrl}entity/ClientContact/${existingId}?BhRestToken=${bhRestToken}`
-      await fetch(updateUrl, {
+      const updatePayload = {
+        firstName,
+        lastName,
+        occupation: contact.title || '',
+        address: { city },
+        clientCorporation: { id: clientCorporationId },
+        customText1: skillsString, // Skills field
+      }
+      
+      const updateResponse = await fetch(updateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          firstName: contact.name.split(' ')[0] || contact.name,
-          lastName: contact.name.split(' ').slice(1).join(' ') || '',
-          occupation: contact.title,
-          address: { city: contact.location.split(',')[0]?.trim() || '' },
-          clientCorporation: { id: clientCorporationId },
-          customText1: skillsString, // Skills field
-        }),
+        body: JSON.stringify(updatePayload),
       })
+      
+      if (!updateResponse.ok) {
+        const errorText = await updateResponse.text()
+        console.error(`Failed to update contact ${existingId}: ${errorText}`)
+      } else {
+        console.log(`Updated contact ${existingId} with skills: ${skillsString}`)
+      }
+      
       return existingId
     }
   }
 
   // Create new ClientContact with required clientCorporation reference
+  console.log(`Creating new contact: ${firstName} ${lastName}`)
+  
   const createUrl = `${restUrl}entity/ClientContact?BhRestToken=${bhRestToken}`
+  const createPayload = {
+    firstName,
+    lastName,
+    email: contact.email,
+    occupation: contact.title || '',
+    address: { city },
+    status: 'Active',
+    clientCorporation: { id: clientCorporationId },
+    customText1: skillsString, // Skills field
+  }
+  
+  console.log(`Create payload: ${JSON.stringify(createPayload)}`)
+  
   const createResponse = await fetch(createUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      firstName: contact.name.split(' ')[0] || contact.name,
-      lastName: contact.name.split(' ').slice(1).join(' ') || '',
-      email: contact.email,
-      occupation: contact.title,
-      address: { city: contact.location.split(',')[0]?.trim() || '' },
-      status: 'Active',
-      clientCorporation: { id: clientCorporationId },
-      customText1: skillsString, // Skills field
-    }),
+    body: JSON.stringify(createPayload),
   })
 
   if (!createResponse.ok) {
@@ -364,6 +392,7 @@ async function findOrCreateClientContact(
   }
 
   const createData = await createResponse.json()
+  console.log(`Created contact ID ${createData.changedEntityId}: ${firstName} ${lastName}`)
   return createData.changedEntityId
 }
 
@@ -374,6 +403,8 @@ async function createDistributionList(
   contactIds: number[]
 ): Promise<number> {
   // Bullhorn calls distribution lists "Tearsheet"
+  console.log(`Creating Tearsheet: ${listName} with ${contactIds.length} contacts`)
+  
   const createUrl = `${restUrl}entity/Tearsheet?BhRestToken=${bhRestToken}`
   const createResponse = await fetch(createUrl, {
     method: 'PUT',
@@ -392,15 +423,34 @@ async function createDistributionList(
 
   const createData = await createResponse.json()
   const tearsheetId = createData.changedEntityId
+  console.log(`Tearsheet created with ID: ${tearsheetId}`)
 
-  // Add ClientContacts to the tearsheet
+  // Add ClientContacts to the tearsheet using association endpoint
+  console.log(`Adding ${contactIds.length} contacts to tearsheet...`)
+  let successCount = 0
+  
   for (const contactId of contactIds) {
+    // Use the association endpoint format
     const addUrl = `${restUrl}entity/Tearsheet/${tearsheetId}/clientContacts/${contactId}?BhRestToken=${bhRestToken}`
-    await fetch(addUrl, { method: 'PUT' })
+    
+    try {
+      const addResponse = await fetch(addUrl, { method: 'PUT' })
+      
+      if (addResponse.ok) {
+        successCount++
+      } else {
+        const errorText = await addResponse.text()
+        console.error(`Failed to add contact ${contactId} to tearsheet: ${errorText}`)
+      }
+    } catch (err: any) {
+      console.error(`Error adding contact ${contactId}: ${err.message}`)
+    }
+    
     // Small delay to avoid rate limiting
     await new Promise(resolve => setTimeout(resolve, 50))
   }
-
+  
+  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to tearsheet ${tearsheetId}`)
   return tearsheetId
 }
 
