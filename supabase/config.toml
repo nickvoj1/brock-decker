@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.test-bullhorn]
 verify_jwt = false
+
+[functions.bullhorn-oauth-callback]
+verify_jwt = false
+
+[functions.bullhorn-initiate-oauth]
+verify_jwt = false

@@ -19,94 +19,29 @@ interface BullhornTokens {
   bhRestToken: string
 }
 
-async function getBullhornTokens(
-  clientId: string,
-  clientSecret: string,
-  username: string,
-  password: string
-): Promise<BullhornTokens> {
-  // Step 1: Get authorization code via password grant
-  // Bullhorn requires a redirect_uri even for password grant flow
-  const redirectUri = 'https://flbeeduimzyjecdlonde.supabase.co/functions/v1/bullhorn-oauth-callback'
+async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | null> {
+  const { data: tokens } = await supabase
+    .from('bullhorn_tokens')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(1)
+
+  if (!tokens || tokens.length === 0) {
+    return null
+  }
+
+  const token = tokens[0]
   
-  const authUrl = new URL('https://auth.bullhornstaffing.com/oauth/authorize')
-  authUrl.searchParams.set('client_id', clientId)
-  authUrl.searchParams.set('response_type', 'code')
-  authUrl.searchParams.set('redirect_uri', redirectUri)
-  authUrl.searchParams.set('username', username)
-  authUrl.searchParams.set('password', password)
-  authUrl.searchParams.set('action', 'Login')
-
-  console.log('Attempting Bullhorn auth with URL:', authUrl.toString().replace(password, '***'))
-
-  const authResponse = await fetch(authUrl.toString(), {
-    method: 'GET',
-    redirect: 'manual',
-  })
-
-  console.log('Auth response status:', authResponse.status)
-  console.log('Auth response headers:', JSON.stringify(Object.fromEntries(authResponse.headers.entries())))
-
-  // Extract auth code from redirect URL
-  const location = authResponse.headers.get('location')
-  if (!location) {
-    // Try to read the response body for error details
-    const body = await authResponse.text()
-    console.error('No redirect received. Response body preview:', body.substring(0, 500))
-    throw new Error(`Failed to get authorization redirect. Status: ${authResponse.status}. Check Bullhorn credentials in Settings.`)
+  // Check if token is expired
+  if (token.expires_at && new Date(token.expires_at) < new Date()) {
+    console.log('Token expired, need to refresh or reconnect')
+    return null
   }
-
-  const redirectUrl = new URL(location)
-  const authCode = redirectUrl.searchParams.get('code')
-  const error = redirectUrl.searchParams.get('error')
-  
-  if (error) {
-    const errorDesc = redirectUrl.searchParams.get('error_description') || error
-    throw new Error(`Bullhorn auth error: ${errorDesc}`)
-  }
-  
-  if (!authCode) {
-    throw new Error('Failed to get authorization code from redirect')
-  }
-
-  // Step 2: Exchange auth code for access token
-  const tokenUrl = 'https://auth.bullhornstaffing.com/oauth/token'
-  const tokenParams = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code: authCode,
-    client_id: clientId,
-    client_secret: clientSecret,
-  })
-
-  const tokenResponse = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: tokenParams.toString(),
-  })
-
-  if (!tokenResponse.ok) {
-    const errorText = await tokenResponse.text()
-    throw new Error(`Token exchange failed: ${errorText}`)
-  }
-
-  const tokenData = await tokenResponse.json()
-  const accessToken = tokenData.access_token
-
-  // Step 3: Get REST session
-  const loginUrl = `https://rest.bullhornstaffing.com/rest-services/login?version=*&access_token=${accessToken}`
-  const loginResponse = await fetch(loginUrl, { method: 'GET' })
-
-  if (!loginResponse.ok) {
-    const errorText = await loginResponse.text()
-    throw new Error(`REST login failed: ${errorText}`)
-  }
-
-  const loginData = await loginResponse.json()
 
   return {
-    accessToken,
-    restUrl: loginData.restUrl,
-    bhRestToken: loginData.BhRestToken,
+    accessToken: token.access_token,
+    restUrl: token.rest_url,
+    bhRestToken: token.bh_rest_token,
   }
 }
 
@@ -229,31 +164,14 @@ Deno.serve(async (req) => {
       throw new Error('No contacts to export')
     }
 
-    // Fetch Bullhorn credentials
-    const { data: bhSettings } = await supabase
-      .from('api_settings')
-      .select('setting_key, setting_value')
-      .in('setting_key', ['bullhorn_client_id', 'bullhorn_client_secret', 'bullhorn_username', 'bullhorn_password'])
-
-    const settings: Record<string, string> = {}
-    bhSettings?.forEach(s => {
-      settings[s.setting_key] = s.setting_value
-    })
-
-    if (!settings.bullhorn_client_id || !settings.bullhorn_client_secret || 
-        !settings.bullhorn_username || !settings.bullhorn_password) {
-      throw new Error('Bullhorn credentials not fully configured. Please check Settings.')
+    // Get stored Bullhorn tokens (from OAuth flow)
+    console.log('Fetching stored Bullhorn tokens...')
+    const tokens = await getStoredBullhornTokens(supabase)
+    
+    if (!tokens) {
+      throw new Error('Bullhorn not connected. Please connect via Settings → Bullhorn → Connect to Bullhorn.')
     }
-
-    // Get Bullhorn access tokens
-    console.log('Authenticating with Bullhorn...')
-    const tokens = await getBullhornTokens(
-      settings.bullhorn_client_id,
-      settings.bullhorn_client_secret,
-      settings.bullhorn_username,
-      settings.bullhorn_password
-    )
-    console.log('Bullhorn authenticated successfully')
+    console.log('Bullhorn tokens retrieved successfully')
 
     // Generate list name from run data
     const candidateName = (run.candidates_data as any[])?.[0]?.name || 'Unknown'

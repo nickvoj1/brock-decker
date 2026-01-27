@@ -41,6 +41,39 @@ export type Database = {
         }
         Relationships: []
       }
+      bullhorn_tokens: {
+        Row: {
+          access_token: string
+          bh_rest_token: string
+          created_at: string
+          expires_at: string | null
+          id: string
+          refresh_token: string | null
+          rest_url: string
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          bh_rest_token: string
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          refresh_token?: string | null
+          rest_url: string
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          bh_rest_token?: string
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          refresh_token?: string | null
+          rest_url?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       candidate_profiles: {
         Row: {
           candidate_id: string
