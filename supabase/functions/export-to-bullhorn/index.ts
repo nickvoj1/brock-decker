@@ -19,6 +19,134 @@ interface BullhornTokens {
   bhRestToken: string
 }
 
+interface SearchPreference {
+  industries?: string[]
+  roles?: string[]
+  location?: string
+}
+
+// Skills mapping based on Bullhorn patterns
+const INDUSTRY_SKILLS: Record<string, string[]> = {
+  'private equity': ['PE'],
+  'venture capital': ['VC'],
+  'hedge fund': ['HEDGE FUND'],
+  'investment bank': ['INVESTMENT BANK'],
+  'asset management': ['ASSET MAN'],
+  'mergers': ['M&A'],
+  'acquisitions': ['M&A'],
+  'm&a': ['M&A'],
+  'leveraged buyout': ['LBO'],
+  'lbo': ['LBO'],
+  'debt capital': ['DCM'],
+  'secondaries': ['SECN'],
+  'tier 1': ['TIER1'],
+  'tier1': ['TIER1'],
+  'bulge bracket': ['TIER1'],
+  'consulting': ['CONSULTING'],
+  'management consulting': ['CONSULTING'],
+}
+
+const LOCATION_SKILLS: Record<string, string[]> = {
+  'london': ['UK', 'LONDON'],
+  'united kingdom': ['UK'],
+  'uk': ['UK'],
+  'frankfurt': ['DACH', 'FRANKFURT', 'GERMANY'],
+  'munich': ['DACH', 'GERMANY'],
+  'berlin': ['DACH', 'GERMANY'],
+  'germany': ['DACH', 'GERMANY'],
+  'dach': ['DACH'],
+  'zurich': ['SWISS'],
+  'geneva': ['SWISS'],
+  'switzerland': ['SWISS'],
+  'dubai': ['UAE', 'DUBAI', 'MENA'],
+  'abu dhabi': ['UAE', 'MENA'],
+  'uae': ['UAE', 'MENA'],
+  'stockholm': ['NORDICS'],
+  'oslo': ['NORDICS'],
+  'copenhagen': ['NORDICS'],
+  'helsinki': ['NORDICS'],
+  'nordics': ['NORDICS'],
+  'amsterdam': ['BENELUX'],
+  'brussels': ['BENELUX'],
+  'benelux': ['BENELUX'],
+  'paris': ['FRANCE'],
+  'france': ['FRANCE'],
+  'milan': ['ITALY'],
+  'italy': ['ITALY'],
+  'madrid': ['SPAIN'],
+  'spain': ['SPAIN'],
+  'new york': ['NYC', 'US'],
+  'nyc': ['NYC', 'US'],
+  'boston': ['US'],
+  'chicago': ['US'],
+  'san francisco': ['US'],
+  'los angeles': ['US'],
+  'singapore': ['APAC', 'SINGAPORE'],
+  'hong kong': ['APAC', 'HK'],
+  'tokyo': ['APAC', 'JAPAN'],
+}
+
+const ROLE_SKILLS: Record<string, string[]> = {
+  'head': ['HEAD'],
+  'director': ['HEAD'],
+  'partner': ['HEAD'],
+  'managing director': ['HEAD'],
+  'md': ['HEAD'],
+  'principal': ['HEAD'],
+  'buy side': ['BUY SIDE'],
+  'buyside': ['BUY SIDE'],
+  'growth': ['GROWTH'],
+  'fundraising': ['FUNDRAISING'],
+  'investor relations': ['INVESTOR RELATIONS'],
+  'ir': ['INVESTOR RELATIONS'],
+}
+
+function generateSkillsString(
+  contact: ApolloContact,
+  searchPreferences?: SearchPreference
+): string {
+  const skills = new Set<string>()
+
+  // Match from search preferences (industries selected during search)
+  if (searchPreferences?.industries) {
+    for (const industry of searchPreferences.industries) {
+      const lowerIndustry = industry.toLowerCase()
+      for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
+        if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
+          skillCodes.forEach(s => skills.add(s))
+        }
+      }
+    }
+  }
+
+  // Match from company name
+  const companyLower = contact.company?.toLowerCase() || ''
+  for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
+    if (companyLower.includes(keyword)) {
+      skillCodes.forEach(s => skills.add(s))
+    }
+  }
+
+  // Match from location
+  const locationLower = contact.location?.toLowerCase() || ''
+  for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
+    if (locationLower.includes(keyword)) {
+      skillCodes.forEach(s => skills.add(s))
+    }
+  }
+
+  // Match from title (role-based skills)
+  const titleLower = contact.title?.toLowerCase() || ''
+  for (const [keyword, skillCodes] of Object.entries(ROLE_SKILLS)) {
+    if (titleLower.includes(keyword)) {
+      skillCodes.forEach(s => skills.add(s))
+    }
+  }
+
+  // Return comma-separated unique skills
+  return Array.from(skills).join(', ')
+}
+
 async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | null> {
   const { data: tokens } = await supabase
     .from('bullhorn_tokens')
@@ -88,7 +216,8 @@ async function findOrCreateClientContact(
   restUrl: string,
   bhRestToken: string,
   contact: ApolloContact,
-  clientCorporationId: number
+  clientCorporationId: number,
+  skillsString: string
 ): Promise<number> {
   // Search for existing ClientContact by email
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id`
@@ -109,6 +238,7 @@ async function findOrCreateClientContact(
           occupation: contact.title,
           address: { city: contact.location.split(',')[0]?.trim() || '' },
           clientCorporation: { id: clientCorporationId },
+          customText1: skillsString, // Skills field
         }),
       })
       return existingId
@@ -128,6 +258,7 @@ async function findOrCreateClientContact(
       address: { city: contact.location.split(',')[0]?.trim() || '' },
       status: 'Active',
       clientCorporation: { id: clientCorporationId },
+      customText1: skillsString, // Skills field
     }),
   })
 
@@ -205,6 +336,9 @@ Deno.serve(async (req) => {
       throw new Error('No contacts to export')
     }
 
+    // Extract search preferences for skills mapping
+    const searchPreferences = run.preferences_data as SearchPreference | undefined
+
     // Get stored Bullhorn tokens (from OAuth flow)
     console.log('Fetching stored Bullhorn tokens...')
     const tokens = await getStoredBullhornTokens(supabase)
@@ -244,12 +378,17 @@ Deno.serve(async (req) => {
           companyCache[companyName] = clientCorporationId
         }
         
-        // Then create the contact with the corporation reference
+        // Generate skills string based on contact data and search preferences
+        const skillsString = generateSkillsString(contact, searchPreferences)
+        console.log(`Skills for ${contact.name}: ${skillsString || '(none)'}`)
+        
+        // Then create the contact with the corporation reference and skills
         const contactId = await findOrCreateClientContact(
           tokens.restUrl,
           tokens.bhRestToken,
           contact,
-          clientCorporationId
+          clientCorporationId,
+          skillsString
         )
         contactIds.push(contactId)
       } catch (error: any) {
