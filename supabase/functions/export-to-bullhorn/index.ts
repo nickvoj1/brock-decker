@@ -379,6 +379,74 @@ async function parseLocation(location: string): Promise<{ city: string; state: s
   return { city, state, countryName, countryCode }
 }
 
+// Bullhorn uses a numeric countryID on the address object.
+// We resolve this at runtime to avoid hardcoding tenant-specific IDs.
+const countryIdCache: Record<string, number> = {}
+
+function normalizeCountryName(countryName: string, countryCode: string): string {
+  const name = (countryName || '').trim()
+  const code = (countryCode || '').trim().toUpperCase()
+  if (!name && !code) return ''
+
+  // Normalize common abbreviations/aliases to Bullhorn country names.
+  const byCode: Record<string, string> = {
+    US: 'United States',
+    GB: 'United Kingdom',
+    AE: 'United Arab Emirates',
+  }
+  if (byCode[code]) return byCode[code]
+
+  const lower = name.toLowerCase()
+  const byName: Record<string, string> = {
+    uk: 'United Kingdom',
+    'u.k.': 'United Kingdom',
+    usa: 'United States',
+    'u.s.': 'United States',
+    'u.s.a.': 'United States',
+    uae: 'United Arab Emirates',
+  }
+  if (byName[lower]) return byName[lower]
+
+  // Keep as-is (already human-readable from the Apollo location string)
+  return name
+}
+
+function escapeBullhornQueryValue(value: string): string {
+  // Bullhorn query strings are wrapped in quotes; escape any embedded quotes.
+  return (value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+async function getBullhornCountryId(
+  restUrl: string,
+  bhRestToken: string,
+  countryName: string,
+  countryCode: string
+): Promise<number | null> {
+  const normalizedName = normalizeCountryName(countryName, countryCode)
+  const cacheKey = (countryCode || normalizedName).toLowerCase()
+  if (!cacheKey) return null
+  if (countryIdCache[cacheKey]) return countryIdCache[cacheKey]
+
+  // Prefer searching by country name (most reliable across tenants)
+  const query = `name:"${escapeBullhornQueryValue(normalizedName)}"`
+  const searchUrl = `${restUrl}search/Country?BhRestToken=${encodeURIComponent(bhRestToken)}&query=${encodeURIComponent(query)}&fields=${encodeURIComponent('id,name')}&count=1`
+  const res = await fetch(searchUrl)
+
+  if (!res.ok) {
+    await res.text()
+    return null
+  }
+
+  const data = await res.json()
+  const id = data?.data?.[0]?.id
+  if (typeof id === 'number') {
+    countryIdCache[cacheKey] = id
+    return id
+  }
+
+  return null
+}
+
 async function findOrCreateClientContact(
   restUrl: string,
   bhRestToken: string,
@@ -391,8 +459,12 @@ async function findOrCreateClientContact(
   const firstName = nameParts[0] || 'Unknown'
   const lastName = nameParts.slice(1).join(' ') || '-' // Bullhorn requires lastName
 
+  // Explicitly set full name (some list views rely on this field)
+  const fullName = `${firstName} ${lastName}`.replace(/\s+/g, ' ').trim()
+
   // Parse location for city, state, and country
   const { city, state, countryName, countryCode } = await parseLocation(contact.location || '')
+  const countryID = await getBullhornCountryId(restUrl, bhRestToken, countryName, countryCode)
 
   // Truncate occupation to 100 chars (Bullhorn limit)
   const occupation = (contact.title || '').substring(0, 100)
@@ -400,11 +472,10 @@ async function findOrCreateClientContact(
   console.log(`Processing contact: ${firstName} ${lastName} (${contact.email}) - Location: ${city}, ${countryName} (${countryCode})`)
 
   // Build address object
-  const address: Record<string, string> = {}
+  const address: Record<string, any> = {}
   if (city) address.city = city
   if (state) address.state = state
-  if (countryName) address.countryName = countryName
-  if (countryCode) address.countryCode = countryCode
+  if (countryID) address.countryID = countryID
 
   // Search for existing ClientContact by email
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
@@ -419,6 +490,7 @@ async function findOrCreateClientContact(
       
       const updateUrl = `${restUrl}entity/ClientContact/${existingId}?BhRestToken=${bhRestToken}`
       const updatePayload = {
+        name: fullName,
         firstName,
         lastName,
         occupation,
@@ -449,6 +521,7 @@ async function findOrCreateClientContact(
   
   const createUrl = `${restUrl}entity/ClientContact?BhRestToken=${bhRestToken}`
   const createPayload = {
+    name: fullName,
     firstName,
     lastName,
     email: contact.email,
