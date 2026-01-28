@@ -662,9 +662,19 @@ async function createDistributionList(
   if (!listResponse.ok) {
     const errorText = await listResponse.text()
     console.error(`Failed to create DistributionList: ${errorText}`)
-    // Fallback to Tearsheet if DistributionList entity is not available
-    console.log('Falling back to Tearsheet creation...')
-    return await createDistributionListViaTearsheet(restUrl, bhRestToken, listName, contactIds)
+
+    // IMPORTANT: We must NEVER fall back to Tearsheet/Hotlists.
+    // Bullhorn explicitly blocks DistributionList via external API unless the instance has
+    // the internal API feature enabled / partner entitlements.
+    if (errorText.includes("bhInternalApi") || errorText.includes('errors.featureDisabled') || errorText.includes('"errorCode":403')) {
+      throw new Error(
+        "Bullhorn blocked Distribution Lists via API (Feature 'bhInternalApi' not enabled). This Bullhorn instance cannot create Distribution Lists through the external API. Please ask your Bullhorn admin/support to enable Distribution Lists API access (partner/internal API entitlements), then retry export."
+      )
+    }
+
+    throw new Error(
+      `Bullhorn could not create a Distribution List. Export was stopped to avoid creating a Hotlist instead. Details: ${errorText}`
+    )
   }
 
   const listData = await listResponse.json()
@@ -707,67 +717,26 @@ async function createDistributionList(
   return listId
 }
 
-// Fallback function using Tearsheet (in case DistributionList entity is not available in some Bullhorn instances)
-async function createDistributionListViaTearsheet(
-  restUrl: string,
-  bhRestToken: string,
-  listName: string,
-  contactIds: number[]
-): Promise<number> {
-  console.log(`Creating Tearsheet as fallback: ${listName} with ${contactIds.length} contacts`)
-  
-  const createTearsheetUrl = `${restUrl}entity/Tearsheet?BhRestToken=${bhRestToken}`
-  const tearsheetResponse = await bullhornFetch(createTearsheetUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: listName,
-      description: `Auto-generated from contact search (fallback)`,
-      isPrivate: false,
-    }),
-  })
+async function assertDistributionListsApiAvailable(restUrl: string, bhRestToken: string): Promise<void> {
+  // Fast preflight check to avoid doing work (creating contacts) when Distribution Lists
+  // are not available for this Bullhorn instance.
+  const metaUrl = `${restUrl}meta/DistributionList?BhRestToken=${encodeURIComponent(bhRestToken)}`
+  const res = await bullhornFetch(metaUrl)
 
-  if (!tearsheetResponse.ok) {
-    const errorText = await tearsheetResponse.text()
-    throw new Error(`Failed to create tearsheet: ${errorText}`)
+  if (res.ok) {
+    // Consume body
+    await res.text()
+    return
   }
 
-  const tearsheetData = await tearsheetResponse.json()
-  const tearsheetId = tearsheetData.changedEntityId
-  console.log(`Tearsheet created with ID: ${tearsheetId}`)
-
-  // Add contacts as TearsheetRecipients
-  console.log(`Adding ${contactIds.length} contacts as TearsheetRecipients...`)
-  let successCount = 0
-  
-  for (const contactId of contactIds) {
-    try {
-      const recipientUrl = `${restUrl}entity/TearsheetRecipient?BhRestToken=${bhRestToken}`
-      const recipientResponse = await bullhornFetch(recipientUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tearsheet: { id: tearsheetId },
-          person: { id: contactId },
-          comments: 'Added via automated contact search export',
-        }),
-      })
-      
-      if (recipientResponse.ok) {
-        successCount++
-      } else {
-        const errorText = await recipientResponse.text()
-        console.error(`Failed to add TearsheetRecipient for contact ${contactId}: ${errorText}`)
-      }
-    } catch (err: any) {
-      console.error(`Error adding contact ${contactId}: ${err.message}`)
-    }
-    
-    await sleep(100)
+  const errorText = await res.text()
+  if (errorText.includes("bhInternalApi") || errorText.includes('errors.featureDisabled') || errorText.includes('"errorCode":403')) {
+    throw new Error(
+      "Bullhorn blocked Distribution Lists via API (Feature 'bhInternalApi' not enabled). This Bullhorn instance cannot create Distribution Lists through the external API. Please ask your Bullhorn admin/support to enable Distribution Lists API access (partner/internal API entitlements), then retry export."
+    )
   }
-  
-  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to tearsheet ${tearsheetId}`)
-  return tearsheetId
+
+  throw new Error(`Distribution Lists API is not available in this Bullhorn instance. Details: ${errorText}`)
 }
 
 Deno.serve(async (req) => {
@@ -806,6 +775,9 @@ Deno.serve(async (req) => {
       throw new Error('Bullhorn not connected. Please connect via Settings → Bullhorn → Connect to Bullhorn.')
     }
     console.log('Bullhorn tokens retrieved successfully')
+
+    // Preflight: enforce Distribution Lists only (never Hotlists) and fail fast if unsupported.
+    await assertDistributionListsApiAvailable(tokens.restUrl, tokens.bhRestToken)
 
     // Detect the correct skills field name
     const skillsFieldName = await getSkillsFieldName(tokens.restUrl, tokens.bhRestToken)
@@ -862,19 +834,19 @@ Deno.serve(async (req) => {
     }
 
     console.log(`Creating distribution list: ${listName}`)
-    const tearsheetId = await createDistributionList(
+    const listId = await createDistributionList(
       tokens.restUrl,
       tokens.bhRestToken,
       listName,
       contactIds
     )
-    console.log(`Distribution list created with ID: ${tearsheetId}`)
+    console.log(`Distribution list created with ID: ${listId}`)
 
     await supabase
       .from('enrichment_runs')
       .update({
         bullhorn_list_name: listName,
-        bullhorn_list_id: tearsheetId,
+        bullhorn_list_id: listId,
         bullhorn_exported_at: new Date().toISOString(),
         bullhorn_errors: errors.length > 0 ? errors : null,
       })
@@ -884,7 +856,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         listName,
-        listId: tearsheetId,
+        listId,
         contactsExported: contactIds.length,
         errors: errors.length > 0 ? errors : undefined,
       }),
