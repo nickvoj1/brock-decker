@@ -447,19 +447,68 @@ export default function RunsHistory() {
     const preferences = normalizePreferencesData(run.preferences_data);
     const dateAdded = format(new Date(run.created_at), 'M/d/yyyy');
 
-    // Bullhorn CSV format with Email column added
-    const csvHeader = '"Name","Email","Job Title","Company","Country","Last Note","Skills","Skills Count","ClientCorporation.notes","General Comments","ClientCorporation.companyDescription","Vacancies","Consultant","Date Added","Notes","Status"';
-    const csvRows = filteredContacts.map(c => {
+    // Match the user's provided Bullhorn CSV template EXACTLY:
+    // 1) Header row with display names
+    // 2) Header row with Bullhorn field mappings
+    // 3) Data rows
+    const csvHeaderRow1 =
+      '"Name","Job Title","Company","Country","Last Note","Skills","Skills Count","ClientCorporation.notes","General Comments","ClientCorporation.companyDescription","Vacancies","Consultant","Date Added","Notes","Status","Work Email"';
+    const csvHeaderRow2 =
+      '"name","occupation","clientCorporation","countryID","dateLastComment","skills","skillsCount","clientCorporation.notes","comments","clientCorporation.companyDescription","jobOrders","owner","dateAdded","notes","status","email"';
+
+    const csvCell = (value?: string | number) => {
+      if (value === undefined || value === null || value === '') return '';
+      return `"${escapeCSV(String(value))}"`;
+    };
+
+    const deriveCountry = (location?: string) => {
+      if (!location) return '';
+      const parts = location
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      // We store location as "City, State, Country" in many cases; take the last segment.
+      return parts[parts.length - 1] || location.trim();
+    };
+
+    const consultant = profileName?.trim() || 'Webdeveloper API';
+    const csvRows = filteredContacts.map((c) => {
       const skills = generateSkillsString(c, preferences);
-      const skillsCount = skills ? skills.split(' ; ').length.toString() : '0';
-      const country = c.location || '';
-      
-      // Format: Name, Email, Job Title, Company, Country, Last Note, Skills, Skills Count, 
-      // ClientCorporation.notes, General Comments, ClientCorporation.companyDescription,
-      // Vacancies, Consultant, Date Added, Notes, Status
-      return `"${escapeCSV(c.name)}","${escapeCSV(c.email)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(country)}","","${escapeCSV(skills)}","${skillsCount}","","","","","","${dateAdded}","","Active"`;
+      const skillsCount = skills
+        ? skills
+            .split(' ; ')
+            .map((s) => s.trim())
+            .filter(Boolean).length
+            .toString()
+        : '0';
+
+      const country = deriveCountry(c.location);
+      const lastNoteDate = dateAdded;
+
+      // Column order MUST match csvHeaderRow1 exactly.
+      const cells: Array<string | number> = [
+        c.name,
+        c.title,
+        c.company,
+        country,
+        lastNoteDate,
+        skills,
+        skillsCount,
+        '', // ClientCorporation.notes
+        '', // General Comments
+        '', // ClientCorporation.companyDescription
+        '', // Vacancies
+        consultant, // Consultant
+        dateAdded, // Date Added
+        '', // Notes
+        'Active', // Status
+        c.email, // Work Email
+      ];
+
+      return cells.map(csvCell).join(',');
     });
-    const csvContent = [csvHeader, ...csvRows].join('\n');
+
+    const csvContent = [csvHeaderRow1, csvHeaderRow2, ...csvRows].join('\n');
 
     // Generate filename with date, time, and CV name
     const runDate = format(new Date(run.created_at), 'yyyy-MM-dd_HH-mm');
