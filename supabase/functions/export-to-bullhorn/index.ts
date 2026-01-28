@@ -776,8 +776,9 @@ Deno.serve(async (req) => {
     }
     console.log('Bullhorn tokens retrieved successfully')
 
-    // Preflight: enforce Distribution Lists only (never Hotlists) and fail fast if unsupported.
-    await assertDistributionListsApiAvailable(tokens.restUrl, tokens.bhRestToken)
+    // TEMPORARILY DISABLED: Distribution Lists API check - waiting for Bullhorn to enable access
+    // TODO: Re-enable when Bullhorn grants Distribution Lists API access
+    // await assertDistributionListsApiAvailable(tokens.restUrl, tokens.bhRestToken)
 
     // Detect the correct skills field name
     const skillsFieldName = await getSkillsFieldName(tokens.restUrl, tokens.bhRestToken)
@@ -833,14 +834,18 @@ Deno.serve(async (req) => {
       throw new Error('Failed to create any contacts in Bullhorn')
     }
 
-    console.log(`Creating distribution list: ${listName}`)
-    const listId = await createDistributionList(
-      tokens.restUrl,
-      tokens.bhRestToken,
-      listName,
-      contactIds
-    )
-    console.log(`Distribution list created with ID: ${listId}`)
+    // TEMPORARILY DISABLED: Distribution List creation - waiting for Bullhorn to enable access
+    // TODO: Re-enable when Bullhorn grants Distribution Lists API access
+    // console.log(`Creating distribution list: ${listName}`)
+    // const listId = await createDistributionList(
+    //   tokens.restUrl,
+    //   tokens.bhRestToken,
+    //   listName,
+    //   contactIds
+    // )
+    // console.log(`Distribution list created with ID: ${listId}`)
+    const listId = null // Placeholder until Distribution Lists are enabled
+    console.log(`Contacts exported to Bullhorn (Distribution List creation disabled pending API access)`)
 
     await supabase
       .from('enrichment_runs')
