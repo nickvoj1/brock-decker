@@ -414,9 +414,12 @@ export default function RunsHistory() {
       return data;
     },
     onSuccess: (data) => {
+      const listCreated = data?.listId !== null && data?.listId !== undefined;
       toast({
         title: "Exported to Bullhorn",
-        description: `Distribution list "${data.listName}" created with ${data.contactsExported} contacts.`,
+        description: listCreated
+          ? `Distribution list "${data.listName}" created with ${data.contactsExported} contacts.`
+          : `Exported ${data.contactsExported} contacts. (No Distribution List was created — your Bullhorn instance currently doesn’t allow list creation via API.)`,
       });
       queryClient.invalidateQueries({ queryKey: ['enrichment-runs'] });
     },
