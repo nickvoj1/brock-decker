@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
@@ -77,8 +77,15 @@ export default function RunsHistory() {
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
   const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
-  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number }>>({});
-  const checkedRunsRef = useRef<Set<string>>(new Set());
+  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number }>>(() => {
+    try {
+      const stored = localStorage.getItem('bullhorn-overlap-cache');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+  
 
   const selectedRunPreferences = selectedRun
     ? normalizePreferencesData(selectedRun.preferences_data)
@@ -141,17 +148,21 @@ export default function RunsHistory() {
     },
   });
 
-  // Auto-fetch Bullhorn overlap once per run on initial load
+  // Persist bullhorn overlap to localStorage
+  useEffect(() => {
+    if (Object.keys(bullhornOverlap).length > 0) {
+      localStorage.setItem('bullhorn-overlap-cache', JSON.stringify(bullhornOverlap));
+    }
+  }, [bullhornOverlap]);
+
+  // Auto-fetch Bullhorn overlap only for runs not already in cache
   useEffect(() => {
     if (!runs || runs.length === 0) return;
     
     runs.forEach(async (run) => {
       const contactCount = ((run.enriched_data as unknown) as ApolloContact[])?.length || 0;
-      // Skip if already checked or no contacts
-      if (checkedRunsRef.current.has(run.id) || contactCount === 0) return;
-      
-      // Mark as checked immediately to prevent duplicate calls
-      checkedRunsRef.current.add(run.id);
+      // Skip if already in cache or no contacts
+      if (bullhornOverlap[run.id] || contactCount === 0) return;
       
       try {
         const { data, error } = await supabase.functions.invoke('check-bullhorn-overlap', {
@@ -173,7 +184,7 @@ export default function RunsHistory() {
         // Silently fail for auto-fetch
       }
     });
-  }, [runs]);
+  }, [runs]); // Note: intentionally not including bullhornOverlap to prevent re-runs
 
   const checkBullhornOverlap = async (runId: string) => {
     setCheckingRunId(runId);
