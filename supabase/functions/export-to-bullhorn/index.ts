@@ -771,11 +771,10 @@ async function findOrCreateClientContact(
         address,
         clientCorporation: { id: clientCorporationId },
       }
-      // Set skills text field
+  // Set skills text field
       updatePayload[skillsFieldName] = skillsString
-      // Also set numEmployees as a workaround for skills count visibility (some Bullhorn instances use this)
-      // And set customText fields that may be mapped to skills display
-      updatePayload.customText1 = skillsString
+      // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
+      updatePayload.customText1 = skillsString.substring(0, 100)
       updatePayload.customInt1 = skillsCount
       
       const updateResponse = await bullhornFetch(updateUrl, {
@@ -810,8 +809,8 @@ async function findOrCreateClientContact(
   }
   // Set skills text field
   createPayload[skillsFieldName] = skillsString
-  // Also set customText1 for skills display and customInt1 for skills count
-  createPayload.customText1 = skillsString
+  // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
+  createPayload.customText1 = skillsString.substring(0, 100)
   createPayload.customInt1 = skillsCount
   
   console.log(`Create payload: ${JSON.stringify(createPayload)}`)
