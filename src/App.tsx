@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import UploadRun from "./pages/UploadRun";
 import RunsHistory from "./pages/RunsHistory";
 import PreviousCVs from "./pages/PreviousCVs";
+import GenerateMail from "./pages/GenerateMail";
 import SettingsPage from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -22,6 +23,7 @@ const App = () => (
           <Route path="/" element={<UploadRun />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/previous-cvs" element={<PreviousCVs />} />
+          <Route path="/generate-mail" element={<GenerateMail />} />
           <Route path="/history" element={<RunsHistory />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
