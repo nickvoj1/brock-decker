@@ -736,6 +736,89 @@ async function getSkillsFieldName(
   return 'skills'
 }
 
+// Cache for skill IDs
+const skillIdCache: Record<string, number | null> = {}
+
+async function lookupSkillId(
+  restUrl: string,
+  bhRestToken: string,
+  skillName: string
+): Promise<number | null> {
+  const cacheKey = skillName.toUpperCase().trim()
+  if (cacheKey in skillIdCache) {
+    return skillIdCache[cacheKey]
+  }
+
+  try {
+    // Search for skill by name
+    const searchUrl = `${restUrl}search/Skill?BhRestToken=${encodeURIComponent(bhRestToken)}&query=name:"${encodeURIComponent(skillName)}"&fields=id,name&count=1`
+    const res = await bullhornFetch(searchUrl)
+
+    if (!res.ok) {
+      await res.text()
+      skillIdCache[cacheKey] = null
+      return null
+    }
+
+    const data = await res.json()
+    if (data?.data && data.data.length > 0) {
+      const skillId = data.data[0].id
+      skillIdCache[cacheKey] = skillId
+      return skillId
+    }
+
+    // Skill doesn't exist in Bullhorn, cache as null
+    skillIdCache[cacheKey] = null
+    return null
+  } catch (e) {
+    console.error(`Error looking up skill "${skillName}":`, e)
+    skillIdCache[cacheKey] = null
+    return null
+  }
+}
+
+async function associateSkillsWithContact(
+  restUrl: string,
+  bhRestToken: string,
+  contactId: number,
+  skillsString: string
+): Promise<number> {
+  if (!skillsString) return 0
+
+  const skillNames = skillsString.split(' ; ').map(s => s.trim()).filter(Boolean)
+  if (skillNames.length === 0) return 0
+
+  // Look up skill IDs in parallel
+  const skillIdPromises = skillNames.map(name => lookupSkillId(restUrl, bhRestToken, name))
+  const skillIdResults = await Promise.all(skillIdPromises)
+
+  // Filter to valid skill IDs
+  const validSkillIds = skillIdResults.filter((id): id is number => id !== null)
+
+  if (validSkillIds.length === 0) {
+    console.log(`No valid skill IDs found for contact ${contactId} (skills: ${skillNames.join(', ')})`)
+    return 0
+  }
+
+  // Associate skills with the contact using PUT /association endpoint
+  // PUT /association/ClientContact/{entityId}/primarySkills/{associatedEntityIds}
+  const associationUrl = `${restUrl}association/ClientContact/${contactId}/primarySkills/${validSkillIds.join(',')}?BhRestToken=${encodeURIComponent(bhRestToken)}`
+
+  const res = await bullhornFetch(associationUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  if (!res.ok) {
+    const errorText = await res.text()
+    console.error(`Failed to associate skills with contact ${contactId}: ${errorText}`)
+    return 0
+  }
+
+  console.log(`Associated ${validSkillIds.length} skills with contact ${contactId} (IDs: ${validSkillIds.join(', ')})`)
+  return validSkillIds.length
+}
+
 async function findOrCreateClientContact(
   restUrl: string,
   bhRestToken: string,
@@ -743,7 +826,7 @@ async function findOrCreateClientContact(
   clientCorporationId: number,
   skillsString: string,
   skillsFieldName: string
-): Promise<number> {
+): Promise<{ contactId: number; skillsString: string }> {
   const nameParts = (contact.name || 'Unknown').trim().split(/\s+/)
   const firstName = nameParts[0] || 'Unknown'
   const lastName = nameParts.slice(1).join(' ') || '-'
@@ -783,13 +866,15 @@ async function findOrCreateClientContact(
         address,
         clientCorporation: { id: clientCorporationId },
       }
-      // Set skills text field
+      // Set skills text field (for CSV compatibility/display)
       updatePayload[skillsFieldName] = skillsString
       // If we detected desiredSkills exists but we're writing into a custom UI field,
       // also populate desiredSkills so the data remains consistent across layouts.
       if (skillsFieldName !== 'desiredSkills' && cachedHasDesiredSkillsField) {
         updatePayload.desiredSkills = skillsString
       }
+      // Also populate categorySkills if it exists (for Skills tab text display)
+      updatePayload.categorySkills = skillsString
       // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
       updatePayload.customText1 = skillsString.substring(0, 100)
       updatePayload.customInt1 = skillsCount
@@ -807,7 +892,7 @@ async function findOrCreateClientContact(
         console.log(`Updated contact ${existingId} with skills in ${skillsFieldName}: ${skillsString} (count: ${skillsCount})`)
       }
       
-      return existingId
+      return { contactId: existingId, skillsString }
     }
   }
 
@@ -831,6 +916,8 @@ async function findOrCreateClientContact(
   if (skillsFieldName !== 'desiredSkills' && cachedHasDesiredSkillsField) {
     createPayload.desiredSkills = skillsString
   }
+  // Also populate categorySkills if it exists (for Skills tab text display)
+  createPayload.categorySkills = skillsString
   // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
   createPayload.customText1 = skillsString.substring(0, 100)
   createPayload.customInt1 = skillsCount
@@ -840,7 +927,7 @@ async function findOrCreateClientContact(
   const createResponse = await bullhornFetch(createUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(createPayload),
+  body: JSON.stringify(createPayload),
   })
 
   if (!createResponse.ok) {
@@ -850,7 +937,7 @@ async function findOrCreateClientContact(
 
   const createData = await createResponse.json()
   console.log(`Created contact ID ${createData.changedEntityId}: ${fullName} (skills count: ${skillsCount})`)
-  return createData.changedEntityId
+  return { contactId: createData.changedEntityId, skillsString }
 }
 
 async function createDistributionList(
@@ -1034,7 +1121,7 @@ Deno.serve(async (req) => {
           
           const skillsString = generateSkillsString(contact, searchPreferences)
           
-          const contactId = await findOrCreateClientContact(
+          const { contactId, skillsString: generatedSkills } = await findOrCreateClientContact(
             tokens.restUrl,
             tokens.bhRestToken,
             contact,
@@ -1043,7 +1130,15 @@ Deno.serve(async (req) => {
             skillsFieldName
           )
           
-          console.log(`Created/updated contact ${contact.name} (ID: ${contactId})`)
+          // STEP 2: Associate skill entities with the contact for Skills tab + Count
+          const associatedCount = await associateSkillsWithContact(
+            tokens.restUrl,
+            tokens.bhRestToken,
+            contactId,
+            generatedSkills
+          )
+          
+          console.log(`Created/updated contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
           return contactId
         })
       )
