@@ -674,6 +674,7 @@ async function getBullhornCountryId(
 
 // Cache for skills field name detection
 let cachedSkillsFieldName: string | null = null
+let cachedHasDesiredSkillsField: boolean | null = null
 let skillsFieldChecked = false
 
 async function getSkillsFieldName(
@@ -696,24 +697,27 @@ async function getSkillsFieldName(
     const meta = await res.json()
     const fields: any[] = meta?.fields || []
 
-    // First check if desiredSkills field exists (standard Bullhorn field)
-    const desiredSkillsField = fields.find((f) => f?.name === 'desiredSkills')
-    if (desiredSkillsField) {
-      cachedSkillsFieldName = 'desiredSkills'
-      console.log('Using standard Bullhorn field: desiredSkills')
-      return 'desiredSkills'
-    }
+    const hasDesiredSkills = Boolean(fields.find((f) => f?.name === 'desiredSkills'))
+    cachedHasDesiredSkillsField = hasDesiredSkills
 
-    // Look for a custom field labeled "Skills" or similar
-    const skillsField = fields.find((f) => {
+    // Prefer a custom field labeled "Skills" (or containing "skills") if it exists.
+    // In many Bullhorn instances, the standard desiredSkills field exists but is not shown on the UI.
+    const customSkillsField = fields.find((f) => {
       const label = String(f?.label || '').toLowerCase()
       return label === 'skills' || label.includes('skills')
     })
 
-    if (skillsField?.name) {
-      cachedSkillsFieldName = skillsField.name
-      console.log(`Detected custom skills field: ${skillsField.name} (label: ${skillsField.label})`)
-      return skillsField.name
+    if (customSkillsField?.name) {
+      cachedSkillsFieldName = customSkillsField.name
+      console.log(`Detected custom skills field: ${customSkillsField.name} (label: ${customSkillsField.label})`)
+      return customSkillsField.name
+    }
+
+    // Fall back to desiredSkills if available
+    if (hasDesiredSkills) {
+      cachedSkillsFieldName = 'desiredSkills'
+      console.log('Using standard Bullhorn field: desiredSkills')
+      return 'desiredSkills'
     }
   } catch (e) {
     console.error('Error detecting skills field:', e)
@@ -771,8 +775,13 @@ async function findOrCreateClientContact(
         address,
         clientCorporation: { id: clientCorporationId },
       }
-  // Set skills text field
+      // Set skills text field
       updatePayload[skillsFieldName] = skillsString
+      // If we detected desiredSkills exists but we're writing into a custom UI field,
+      // also populate desiredSkills so the data remains consistent across layouts.
+      if (skillsFieldName !== 'desiredSkills' && cachedHasDesiredSkillsField) {
+        updatePayload.desiredSkills = skillsString
+      }
       // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
       updatePayload.customText1 = skillsString.substring(0, 100)
       updatePayload.customInt1 = skillsCount
@@ -809,6 +818,11 @@ async function findOrCreateClientContact(
   }
   // Set skills text field
   createPayload[skillsFieldName] = skillsString
+  // If we detected desiredSkills exists but we're writing into a custom UI field,
+  // also populate desiredSkills so the data remains consistent across layouts.
+  if (skillsFieldName !== 'desiredSkills' && cachedHasDesiredSkillsField) {
+    createPayload.desiredSkills = skillsString
+  }
   // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
   createPayload.customText1 = skillsString.substring(0, 100)
   createPayload.customInt1 = skillsCount
