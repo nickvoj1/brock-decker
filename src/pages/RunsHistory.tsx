@@ -78,7 +78,7 @@ export default function RunsHistory() {
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
   const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
-  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; total: number }>>({});
+  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; total: number }>>({});
 
   const selectedRunPreferences = selectedRun
     ? normalizePreferencesData(selectedRun.preferences_data)
@@ -154,11 +154,11 @@ export default function RunsHistory() {
     onSuccess: (data) => {
       setBullhornOverlap(prev => ({
         ...prev,
-        [data.runId]: { existing: data.existingCount, total: data.totalCount }
+        [data.runId]: { existing: data.existingCount, recentNotes: data.recentNoteCount || 0, total: data.totalCount }
       }));
       toast({
         title: "Bullhorn Check Complete",
-        description: `${data.existingCount} of ${data.totalCount} contacts already exist in Bullhorn.`,
+        description: `${data.existingCount} of ${data.totalCount} in Bullhorn${data.recentNoteCount ? `, ${data.recentNoteCount} contacted <2 weeks` : ''}.`,
       });
     },
     onError: (error: any) => {
@@ -388,9 +388,16 @@ export default function RunsHistory() {
                       </TableCell>
                       <TableCell>
                         {bullhornOverlap[run.id] ? (
-                          <span className="text-sm font-medium">
-                            {bullhornOverlap[run.id].existing}/{bullhornOverlap[run.id].total}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">
+                              {bullhornOverlap[run.id].existing}/{bullhornOverlap[run.id].total}
+                            </span>
+                            {bullhornOverlap[run.id].recentNotes > 0 && (
+                              <span className="text-xs text-orange-600" title="Contacts with notes in the last 2 weeks">
+                                {bullhornOverlap[run.id].recentNotes} recent
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <Button
                             variant="ghost"
