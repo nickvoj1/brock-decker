@@ -1,11 +1,18 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink } from "lucide-react";
+import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -23,6 +30,22 @@ interface BullhornToken {
   expires_at: string | null;
 }
 
+interface DistListTestResult {
+  test: string;
+  success: boolean;
+  details: string;
+  rawResponse?: any;
+}
+
+interface DistListTestResponse {
+  success: boolean;
+  accessLevel: string;
+  summary: string;
+  recommendation: string;
+  tests: DistListTestResult[];
+  error?: string;
+}
+
 export function BullhornSettingsCard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -37,6 +60,11 @@ export function BullhornSettingsCard() {
   const [testingBullhorn, setTestingBullhorn] = useState(false);
   const [bullhornStatus, setBullhornStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [connecting, setConnecting] = useState(false);
+  
+  // Distribution List API test state
+  const [testingDistList, setTestingDistList] = useState(false);
+  const [distListResults, setDistListResults] = useState<DistListTestResponse | null>(null);
+  const [showDistListModal, setShowDistListModal] = useState(false);
 
   // Check for OAuth callback results
   useEffect(() => {
@@ -207,6 +235,31 @@ export function BullhornSettingsCard() {
     }
   };
 
+  const testDistListAccess = async () => {
+    setTestingDistList(true);
+    setDistListResults(null);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('test-bullhorn-distlist');
+      
+      if (error) throw error;
+      setDistListResults(data as DistListTestResponse);
+      setShowDistListModal(true);
+    } catch (error: any) {
+      setDistListResults({
+        success: false,
+        accessLevel: 'ERROR',
+        summary: '❌ Test Failed',
+        recommendation: error.message,
+        tests: [],
+        error: error.message,
+      });
+      setShowDistListModal(true);
+    } finally {
+      setTestingDistList(false);
+    }
+  };
+
   const isBullhornConfigured = settings?.find(s => s.setting_key === 'bullhorn_client_id')?.is_configured;
   const isConnected = bullhornTokens && bullhornTokens.length > 0;
   const tokenInfo = bullhornTokens?.[0];
@@ -335,6 +388,19 @@ export function BullhornSettingsCard() {
             ) : null}
             Test Connection
           </Button>
+          <Button
+            variant="outline"
+            onClick={testDistListAccess}
+            disabled={testingDistList || !isConnected}
+            title={!isConnected ? "Connect to Bullhorn first" : "Test Distribution Lists API access"}
+          >
+            {testingDistList ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Shield className="mr-2 h-4 w-4" />
+            )}
+            Test DistList Access
+          </Button>
         </div>
 
         {isConnected && tokenInfo && (
@@ -352,6 +418,85 @@ export function BullhornSettingsCard() {
           </div>
         )}
       </CardContent>
+
+      {/* Distribution List API Test Results Modal */}
+      <Dialog open={showDistListModal} onOpenChange={setShowDistListModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Bullhorn Distribution Lists API Test</DialogTitle>
+            <DialogDescription>
+              Testing your Bullhorn instance's API access for Distribution Lists
+            </DialogDescription>
+          </DialogHeader>
+          
+          {distListResults && (
+            <div className="space-y-4">
+              {/* Summary */}
+              <div className={`rounded-lg border p-4 ${
+                distListResults.accessLevel === 'FULL_ACCESS' 
+                  ? 'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800' 
+                  : distListResults.accessLevel === 'QUERY_ONLY'
+                  ? 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800'
+                  : 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800'
+              }`}>
+                <div className="text-lg font-semibold">{distListResults.summary}</div>
+                <div className="text-sm text-muted-foreground mt-1">{distListResults.recommendation}</div>
+              </div>
+
+              {/* Test Results */}
+              <div className="space-y-2">
+                <h4 className="font-medium">Test Results</h4>
+                {distListResults.tests.map((test, index) => (
+                  <div
+                    key={index}
+                    className={`rounded border p-3 ${
+                      test.success 
+                        ? 'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800' 
+                        : 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {test.success ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-600" />
+                      )}
+                      <span className="font-medium">{test.test}</span>
+                    </div>
+                    <div className="text-sm mt-1 text-muted-foreground">{test.details}</div>
+                    {test.rawResponse && (
+                      <details className="mt-2">
+                        <summary className="text-xs cursor-pointer text-muted-foreground hover:text-foreground">
+                          View Raw Response
+                        </summary>
+                        <pre className="mt-1 text-xs bg-muted p-2 rounded overflow-x-auto max-h-32">
+                          {typeof test.rawResponse === 'string' 
+                            ? test.rawResponse 
+                            : JSON.stringify(test.rawResponse, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Access Level Badge */}
+              <div className="flex items-center gap-2 pt-2 border-t">
+                <span className="text-sm text-muted-foreground">Access Level:</span>
+                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                  distListResults.accessLevel === 'FULL_ACCESS' 
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
+                    : distListResults.accessLevel === 'QUERY_ONLY'
+                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                    : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                }`}>
+                  {distListResults.accessLevel}
+                </span>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
