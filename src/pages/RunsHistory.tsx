@@ -444,17 +444,17 @@ export default function RunsHistory() {
     const preferences = normalizePreferencesData(run.preferences_data);
     const dateAdded = format(new Date(run.created_at), 'M/d/yyyy');
 
-    // Bullhorn CSV format with all 15 columns
-    const csvHeader = '"Name","Job Title","Company","Country","Last Note","Skills","Skills Count","ClientCorporation.notes","General Comments","ClientCorporation.companyDescription","Vacancies","Consultant","Date Added","Notes","Status"';
+    // Bullhorn CSV format with Email column added
+    const csvHeader = '"Name","Email","Job Title","Company","Country","Last Note","Skills","Skills Count","ClientCorporation.notes","General Comments","ClientCorporation.companyDescription","Vacancies","Consultant","Date Added","Notes","Status"';
     const csvRows = filteredContacts.map(c => {
       const skills = generateSkillsString(c, preferences);
       const skillsCount = skills ? skills.split(' ; ').length.toString() : '0';
       const country = c.location || '';
       
-      // Format: Name, Job Title, Company, Country, Last Note, Skills, Skills Count, 
+      // Format: Name, Email, Job Title, Company, Country, Last Note, Skills, Skills Count, 
       // ClientCorporation.notes, General Comments, ClientCorporation.companyDescription,
       // Vacancies, Consultant, Date Added, Notes, Status
-      return `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(country)}","","${escapeCSV(skills)}","${skillsCount}","","","","","","${dateAdded}","","Active"`;
+      return `"${escapeCSV(c.name)}","${escapeCSV(c.email)}","${escapeCSV(c.title)}","${escapeCSV(c.company)}","${escapeCSV(country)}","","${escapeCSV(skills)}","${skillsCount}","","","","","","${dateAdded}","","Active"`;
     });
     const csvContent = [csvHeader, ...csvRows].join('\n');
 
