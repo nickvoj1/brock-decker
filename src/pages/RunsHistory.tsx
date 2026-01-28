@@ -45,17 +45,54 @@ interface ApolloContact {
 }
 
 interface SearchPreference {
+  industry?: string;
   industries?: string[];
+  sectors?: string[];
   roles?: string[];
+  targetRoles?: string[];
   locations?: string[];
 }
 
-// Skills mapping (matching export-to-bullhorn logic exactly)
+// Skills mapping - EXPANDED for 4+ skills per contact (matching export-to-bullhorn)
+
+// Direct industry name to skill mapping (from search preferences)
+const INDUSTRY_DIRECT_SKILLS: Record<string, string[]> = {
+  'real estate': ['RE', 'PROPERTY'],
+  'capital markets': ['CAP MKTS', 'FIN SVCS'],
+  'private equity': ['PE', 'BUY SIDE'],
+  'private equity (pe)': ['PE', 'BUY SIDE'],
+  'venture capital': ['VC', 'GROWTH'],
+  'venture capital (vc)': ['VC', 'GROWTH'],
+  'investment banking': ['IB', 'FIN SVCS'],
+  'management consulting': ['CONSULTING', 'ADVISORY'],
+  'hedge fund': ['HEDGE FUND', 'BUY SIDE'],
+  'asset management': ['ASSET MAN', 'BUY SIDE'],
+  'infrastructure': ['INFRA', 'RE'],
+  'corporate finance': ['CORP FIN', 'FIN SVCS'],
+  'wealth management': ['WEALTH MAN', 'FIN SVCS'],
+  'family office': ['FAMILY OFFICE', 'WEALTH MAN'],
+};
+
+// Sector to skill mapping
+const SECTOR_SKILLS: Record<string, string[]> = {
+  'real estate & construction': ['RE', 'PROPERTY'],
+  'financial services': ['FIN SVCS'],
+  'technology': ['TECH'],
+  'healthcare': ['HEALTHCARE'],
+  'energy': ['ENERGY'],
+  'industrials': ['INDUSTRIALS'],
+  'consumer': ['CONSUMER'],
+  'media': ['MEDIA'],
+  'telecommunications': ['TELECOM'],
+  'retail': ['RETAIL'],
+};
+
+// Skills mapping based on Bullhorn patterns
 const INDUSTRY_SKILLS: Record<string, string[]> = {
   'private equity': ['PE'],
   'venture capital': ['VC'],
   'hedge fund': ['HEDGE FUND'],
-  'investment bank': ['INVESTMENT BANK'],
+  'investment bank': ['IB'],
   'asset management': ['ASSET MAN'],
   'mergers': ['M&A'],
   'acquisitions': ['M&A'],
@@ -69,21 +106,29 @@ const INDUSTRY_SKILLS: Record<string, string[]> = {
   'bulge bracket': ['TIER1'],
   'consulting': ['CONSULTING'],
   'management consulting': ['CONSULTING'],
+  'real estate': ['RE'],
+  'property': ['RE', 'PROPERTY'],
+  'infrastructure': ['INFRA'],
+  'credit': ['CREDIT'],
+  'distressed': ['DISTRESSED'],
+  'growth equity': ['GROWTH'],
+  'buyout': ['LBO'],
 };
 
 const LOCATION_SKILLS: Record<string, string[]> = {
   'london': ['UK', 'LONDON'],
   'united kingdom': ['UK'],
   'uk': ['UK'],
-  'frankfurt': ['DACH', 'FRANKFURT', 'GERMANY'],
+  'england': ['UK'],
+  'frankfurt': ['DACH', 'GERMANY'],
   'munich': ['DACH', 'GERMANY'],
   'berlin': ['DACH', 'GERMANY'],
   'germany': ['DACH', 'GERMANY'],
   'dach': ['DACH'],
-  'zurich': ['SWISS'],
-  'geneva': ['SWISS'],
-  'switzerland': ['SWISS'],
-  'dubai': ['UAE', 'DUBAI', 'MENA'],
+  'zurich': ['SWISS', 'DACH'],
+  'geneva': ['SWISS', 'DACH'],
+  'switzerland': ['SWISS', 'DACH'],
+  'dubai': ['UAE', 'MENA'],
   'abu dhabi': ['UAE', 'MENA'],
   'uae': ['UAE', 'MENA'],
   'stockholm': ['NORDICS'],
@@ -98,41 +143,82 @@ const LOCATION_SKILLS: Record<string, string[]> = {
   'france': ['FRANCE'],
   'milan': ['ITALY'],
   'italy': ['ITALY'],
+  'rome': ['ITALY'],
   'madrid': ['SPAIN'],
   'spain': ['SPAIN'],
   'new york': ['NYC', 'US'],
   'nyc': ['NYC', 'US'],
-  'boston': ['US'],
-  'chicago': ['US'],
-  'san francisco': ['US'],
-  'los angeles': ['US'],
+  'boston': ['US', 'NORTHEAST'],
+  'chicago': ['US', 'MIDWEST'],
+  'san francisco': ['US', 'WEST COAST'],
+  'los angeles': ['US', 'WEST COAST'],
+  'texas': ['US', 'SOUTH'],
+  'dallas': ['US', 'SOUTH'],
+  'houston': ['US', 'SOUTH'],
+  'atlanta': ['US', 'SOUTH'],
+  'miami': ['US', 'SOUTH'],
+  'united states': ['US'],
+  'usa': ['US'],
   'singapore': ['APAC', 'SINGAPORE'],
   'hong kong': ['APAC', 'HK'],
   'tokyo': ['APAC', 'JAPAN'],
+  'australia': ['APAC', 'ANZ'],
+  'sydney': ['APAC', 'ANZ'],
 };
 
 const ROLE_SKILLS: Record<string, string[]> = {
-  'head': ['HEAD'],
-  'director': ['HEAD'],
-  'partner': ['HEAD'],
-  'managing director': ['HEAD'],
-  'md': ['HEAD'],
-  'principal': ['HEAD'],
+  'head': ['HEAD', 'SENIOR'],
+  'director': ['HEAD', 'SENIOR'],
+  'partner': ['HEAD', 'SENIOR'],
+  'managing director': ['HEAD', 'MD'],
+  'md': ['HEAD', 'MD'],
+  'principal': ['HEAD', 'SENIOR'],
+  'vice president': ['VP'],
+  'vp': ['VP'],
+  'senior': ['SENIOR'],
+  'associate': ['ASSOCIATE'],
+  'analyst': ['ANALYST'],
+  'manager': ['MANAGER'],
+  'portfolio manager': ['PM', 'BUY SIDE'],
+  'investment manager': ['IM', 'BUY SIDE'],
   'buy side': ['BUY SIDE'],
   'buyside': ['BUY SIDE'],
   'growth': ['GROWTH'],
-  'fundraising': ['FUNDRAISING'],
-  'investor relations': ['INVESTOR RELATIONS'],
-  'ir': ['INVESTOR RELATIONS'],
+  'fundraising': ['FUNDRAISING', 'IR'],
+  'investor relations': ['IR', 'FUNDRAISING'],
+  'ir': ['IR'],
+  'cfo': ['CFO', 'C-SUITE'],
+  'ceo': ['CEO', 'C-SUITE'],
+  'chief': ['C-SUITE'],
+  'founder': ['FOUNDER', 'C-SUITE'],
+  'hr': ['HR', 'TALENT'],
+  'human resources': ['HR', 'TALENT'],
+  'talent': ['TALENT', 'HR'],
+  'recruiting': ['TALENT', 'HR'],
 };
 
 function generateSkillsString(contact: ApolloContact, preferences?: SearchPreference): string {
   const skills = new Set<string>();
 
-  // Match from search preferences (industries)
+  // 1. Match from search preferences - direct industry mapping
+  if (preferences?.industry) {
+    const lowerIndustry = preferences.industry.toLowerCase();
+    for (const [keyword, skillCodes] of Object.entries(INDUSTRY_DIRECT_SKILLS)) {
+      if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
+        skillCodes.forEach(s => skills.add(s));
+      }
+    }
+  }
+
+  // 2. Match from industries array in preferences
   if (preferences?.industries) {
     for (const industry of preferences.industries) {
       const lowerIndustry = industry.toLowerCase();
+      for (const [keyword, skillCodes] of Object.entries(INDUSTRY_DIRECT_SKILLS)) {
+        if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
+          skillCodes.forEach(s => skills.add(s));
+        }
+      }
       for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
         if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
           skillCodes.forEach(s => skills.add(s));
@@ -141,7 +227,19 @@ function generateSkillsString(contact: ApolloContact, preferences?: SearchPrefer
     }
   }
 
-  // Match from company name
+  // 3. Match from sectors in preferences
+  if (preferences?.sectors) {
+    for (const sector of preferences.sectors) {
+      const lowerSector = sector.toLowerCase();
+      for (const [keyword, skillCodes] of Object.entries(SECTOR_SKILLS)) {
+        if (lowerSector.includes(keyword) || keyword.includes(lowerSector)) {
+          skillCodes.forEach(s => skills.add(s));
+        }
+      }
+    }
+  }
+
+  // 4. Match from company name
   const companyLower = contact.company?.toLowerCase() || '';
   for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
     if (companyLower.includes(keyword)) {
@@ -149,7 +247,7 @@ function generateSkillsString(contact: ApolloContact, preferences?: SearchPrefer
     }
   }
 
-  // Match from location
+  // 5. Match from contact location
   const locationLower = contact.location?.toLowerCase() || '';
   for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
     if (locationLower.includes(keyword)) {
@@ -157,11 +255,35 @@ function generateSkillsString(contact: ApolloContact, preferences?: SearchPrefer
     }
   }
 
-  // Match from title (role-based skills)
+  // 6. Match from search preference locations
+  if (preferences?.locations) {
+    for (const loc of preferences.locations) {
+      const lowerLoc = loc.toLowerCase();
+      for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
+        if (lowerLoc.includes(keyword) || keyword.includes(lowerLoc)) {
+          skillCodes.forEach(s => skills.add(s));
+        }
+      }
+    }
+  }
+
+  // 7. Match from title (role-based skills)
   const titleLower = contact.title?.toLowerCase() || '';
   for (const [keyword, skillCodes] of Object.entries(ROLE_SKILLS)) {
     if (titleLower.includes(keyword)) {
       skillCodes.forEach(s => skills.add(s));
+    }
+  }
+
+  // 8. Match from target roles in preferences
+  if (preferences?.targetRoles) {
+    for (const role of preferences.targetRoles) {
+      const lowerRole = role.toLowerCase();
+      for (const [keyword, skillCodes] of Object.entries(ROLE_SKILLS)) {
+        if (lowerRole.includes(keyword) || keyword.includes(lowerRole)) {
+          skillCodes.forEach(s => skills.add(s));
+        }
+      }
     }
   }
 
