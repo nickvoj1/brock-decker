@@ -749,8 +749,8 @@ async function findOrCreateClientContact(
   if (state) address.state = state
   if (countryID) address.countryID = countryID
 
-  // Calculate skills count from comma-separated skills string
-  const skillsArray = skillsString ? skillsString.split(',').map(s => s.trim()).filter(Boolean) : []
+  // Calculate skills count from semicolon-separated skills string (Bullhorn requires semicolons)
+  const skillsArray = skillsString ? skillsString.split(' ; ').map(s => s.trim()).filter(Boolean) : []
   const skillsCount = skillsArray.length
 
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
