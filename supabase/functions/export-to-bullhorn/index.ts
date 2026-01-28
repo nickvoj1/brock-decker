@@ -713,6 +713,14 @@ async function getSkillsFieldName(
       return customSkillsField.name
     }
 
+    // Try lowercase "skills" field first (some Bullhorn instances use this)
+    const lowerSkillsField = fields.find((f) => f?.name === 'skills')
+    if (lowerSkillsField) {
+      cachedSkillsFieldName = 'skills'
+      console.log('Using lowercase Bullhorn field: skills')
+      return 'skills'
+    }
+
     // Fall back to desiredSkills if available
     if (hasDesiredSkills) {
       cachedSkillsFieldName = 'desiredSkills'
@@ -723,9 +731,9 @@ async function getSkillsFieldName(
     console.error('Error detecting skills field:', e)
   }
 
-  // Default to desiredSkills (standard Bullhorn field for ClientContact)
-  console.log('Using default skills field: desiredSkills')
-  return 'desiredSkills'
+  // Default to lowercase "skills" first, then fallback
+  console.log('Using default skills field: skills')
+  return 'skills'
 }
 
 async function findOrCreateClientContact(
