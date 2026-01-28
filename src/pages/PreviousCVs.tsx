@@ -31,19 +31,19 @@ export default function PreviousCVs() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchProfiles = async () => {
+    if (!profileName) {
+      setProfiles([]);
+      setIsLoading(false);
+      return;
+    }
+    
     setIsLoading(true);
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from("candidate_profiles")
         .select("*")
+        .eq("profile_name", profileName)
         .order("created_at", { ascending: false });
-      
-      // Filter by current user profile
-      if (profileName) {
-        query = query.eq("profile_name", profileName);
-      }
-      
-      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -167,7 +167,17 @@ export default function PreviousCVs() {
               />
             </div>
 
-            {isLoading ? (
+            {!profileName ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                  <User className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <h3 className="font-medium text-foreground mb-1">Select a Profile</h3>
+                <p className="text-sm text-muted-foreground">
+                  Choose your profile from the header to view your saved CVs
+                </p>
+              </div>
+            ) : isLoading ? (
               <div className="text-center py-8 text-muted-foreground">
                 Loading profiles...
               </div>
