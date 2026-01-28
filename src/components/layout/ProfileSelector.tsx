@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { User, ChevronDown, Check, Lock, KeyRound } from "lucide-react";
+import { User, ChevronDown, Check, Lock, KeyRound, Shield, HelpCircle } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { AdminPinReset } from "./AdminPinReset";
 
 const DEFAULT_PROFILE_NAMES = [
   "Denis Radchenko",
@@ -61,11 +62,14 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [showSetupDialog, setShowSetupDialog] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [pendingProfile, setPendingProfile] = useState<string>("");
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [profilePinStatus, setProfilePinStatus] = useState<Record<string, boolean>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
 
   // Check PIN status for all profiles on mount
   useEffect(() => {
@@ -78,8 +82,20 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
       sessionStorage.setItem(PROFILE_VERIFIED_KEY, "true");
       onProfileChange?.(selectedProfile);
       window.dispatchEvent(new Event("profile-name-changed"));
+      checkAdminStatus(selectedProfile);
     }
   }, [selectedProfile, onProfileChange]);
+
+  const checkAdminStatus = async (profile: string) => {
+    try {
+      const { data } = await supabase.functions.invoke('verify-profile-pin', {
+        body: { action: 'check-admin', profileName: profile }
+      });
+      setIsAdmin(data?.isAdmin || false);
+    } catch {
+      setIsAdmin(false);
+    }
+  };
 
   const checkAllProfilePinStatus = async () => {
     const status: Record<string, boolean> = {};
@@ -100,7 +116,7 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
     setIsOpen(false);
     setPendingProfile(name);
     setPin("");
-    setConfirmPin("");
+    setResetRequested(false);
 
     // Check if this profile has a PIN
     try {
@@ -222,10 +238,36 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
     localStorage.removeItem(PROFILE_NAME_KEY);
     sessionStorage.removeItem(PROFILE_VERIFIED_KEY);
     window.dispatchEvent(new Event("profile-name-changed"));
+    setIsAdmin(false);
     toast({
       title: "Signed out",
       description: "You have been signed out",
     });
+  };
+
+  const handleForgotPin = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('verify-profile-pin', {
+        body: { action: 'request-reset', profileName: pendingProfile }
+      });
+
+      if (error) throw error;
+
+      setResetRequested(true);
+      toast({
+        title: "Reset Requested",
+        description: "An admin will reset your PIN. Please try again later.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Request Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -265,6 +307,15 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
           {selectedProfile && (
             <>
               <DropdownMenuSeparator />
+              {isAdmin && (
+                <DropdownMenuItem
+                  onClick={() => setShowAdminPanel(true)}
+                  className="cursor-pointer"
+                >
+                  <Shield className="h-4 w-4 mr-2" />
+                  Admin: PIN Resets
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={handleLogout}
                 className="text-destructive cursor-pointer"
@@ -307,10 +358,26 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
             <Button 
               className="w-full" 
               onClick={handleVerifyPin}
-              disabled={isLoading || pin.length < 4}
+              disabled={isLoading || pin.length < 4 || resetRequested}
             >
               {isLoading ? "Verifying..." : "Sign In"}
             </Button>
+            {resetRequested ? (
+              <p className="text-sm text-center text-muted-foreground">
+                Reset requested. Please wait for an admin to process it.
+              </p>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full text-muted-foreground"
+                onClick={handleForgotPin}
+                disabled={isLoading}
+              >
+                <HelpCircle className="h-4 w-4 mr-1" />
+                Forgot PIN?
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -366,6 +433,15 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Admin PIN Reset Panel */}
+      {isAdmin && (
+        <AdminPinReset
+          open={showAdminPanel}
+          onOpenChange={setShowAdminPanel}
+          adminProfile={selectedProfile}
+        />
+      )}
     </>
   );
 }
