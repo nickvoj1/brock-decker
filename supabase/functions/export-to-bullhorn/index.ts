@@ -986,41 +986,65 @@ Deno.serve(async (req) => {
     
     const companyCache: Record<string, number> = {}
 
-    for (const contact of contacts) {
-      try {
-        let clientCorporationId: number
-        const companyName = contact.company || 'Unknown Company'
-        
-        if (companyCache[companyName]) {
-          clientCorporationId = companyCache[companyName]
-        } else {
-          clientCorporationId = await findOrCreateClientCorporation(
+    // Process contacts in batches of 5 for better throughput
+    const BATCH_SIZE = 5
+    for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
+      const batch = contacts.slice(i, i + BATCH_SIZE)
+      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(contacts.length / BATCH_SIZE)} (contacts ${i + 1}-${Math.min(i + BATCH_SIZE, contacts.length)})`)
+      
+      // Process batch in parallel
+      const batchResults = await Promise.allSettled(
+        batch.map(async (contact) => {
+          let clientCorporationId: number
+          const companyName = contact.company || 'Unknown Company'
+          
+          // Check cache first (synchronous)
+          if (companyCache[companyName]) {
+            clientCorporationId = companyCache[companyName]
+          } else {
+            clientCorporationId = await findOrCreateClientCorporation(
+              tokens.restUrl,
+              tokens.bhRestToken,
+              companyName
+            )
+            companyCache[companyName] = clientCorporationId
+          }
+          
+          const skillsString = generateSkillsString(contact, searchPreferences)
+          
+          const contactId = await findOrCreateClientContact(
             tokens.restUrl,
             tokens.bhRestToken,
-            companyName
+            contact,
+            clientCorporationId,
+            skillsString,
+            skillsFieldName
           )
-          companyCache[companyName] = clientCorporationId
+          
+          console.log(`Created/updated contact ${contact.name} (ID: ${contactId})`)
+          return contactId
+        })
+      )
+      
+      // Collect results
+      for (let j = 0; j < batchResults.length; j++) {
+        const result = batchResults[j]
+        if (result.status === 'fulfilled') {
+          contactIds.push(result.value)
+        } else {
+          const contact = batch[j]
+          console.error(`Error creating contact ${contact.email}:`, result.reason?.message || result.reason)
+          errors.push(`${contact.email}: ${result.reason?.message || 'Unknown error'}`)
         }
-        
-        const skillsString = generateSkillsString(contact, searchPreferences)
-        console.log(`Skills for ${contact.name}: ${skillsString || '(none)'}`)
-        
-        const contactId = await findOrCreateClientContact(
-          tokens.restUrl,
-          tokens.bhRestToken,
-          contact,
-          clientCorporationId,
-          skillsString,
-          skillsFieldName
-        )
-        contactIds.push(contactId)
-      } catch (error: any) {
-        console.error(`Error creating contact ${contact.email}:`, error.message)
-        errors.push(`${contact.email}: ${error.message}`)
       }
-      // Small delay between contacts
-      await sleep(150)
+      
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < contacts.length) {
+        await sleep(100)
+      }
     }
+    
+    console.log(`Export complete: ${contactIds.length}/${contacts.length} contacts processed`)
 
     if (contactIds.length === 0) {
       throw new Error('Failed to create any contacts in Bullhorn')
