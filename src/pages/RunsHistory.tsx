@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2 } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, Search } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -77,6 +77,8 @@ export default function RunsHistory() {
   const [selectedRun, setSelectedRun] = useState<EnrichmentRun | null>(null);
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
+  const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
+  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; total: number }>>({});
 
   const selectedRunPreferences = selectedRun
     ? normalizePreferencesData(selectedRun.preferences_data)
@@ -134,6 +136,38 @@ export default function RunsHistory() {
     },
     onSettled: () => {
       setExportingRunId(null);
+    },
+  });
+
+  const checkBullhornOverlapMutation = useMutation({
+    mutationFn: async (runId: string) => {
+      setCheckingRunId(runId);
+      const { data, error } = await supabase.functions.invoke('check-bullhorn-overlap', {
+        body: { runId }
+      });
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error);
+      return { runId, ...data };
+    },
+    onSuccess: (data) => {
+      setBullhornOverlap(prev => ({
+        ...prev,
+        [data.runId]: { existing: data.existingCount, total: data.totalCount }
+      }));
+      toast({
+        title: "Bullhorn Check Complete",
+        description: `${data.existingCount} of ${data.totalCount} contacts already exist in Bullhorn.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Check failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+    onSettled: () => {
+      setCheckingRunId(null);
     },
   });
 
@@ -319,6 +353,7 @@ export default function RunsHistory() {
                     <TableHead>Candidate</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Contacts Found</TableHead>
+                    <TableHead>In Bullhorn</TableHead>
                     <TableHead>Max Requested</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -338,6 +373,27 @@ export default function RunsHistory() {
                           <Users className="h-4 w-4 text-muted-foreground" />
                           {getTotalContactCount(run)}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {bullhornOverlap[run.id] ? (
+                          <span className="text-sm font-medium">
+                            {bullhornOverlap[run.id].existing}/{bullhornOverlap[run.id].total}
+                          </span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => checkBullhornOverlapMutation.mutate(run.id)}
+                            disabled={getTotalContactCount(run) === 0 || checkingRunId === run.id}
+                            title="Check how many contacts already exist in Bullhorn"
+                          >
+                            {checkingRunId === run.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Search className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
                       </TableCell>
                       <TableCell>{run.search_counter}</TableCell>
                       <TableCell>
