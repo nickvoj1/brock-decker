@@ -49,79 +49,241 @@ function normalizePreferences(raw: unknown): SearchPreference | undefined {
 // Skills mapping using EXACT Bullhorn Skill entity names
 // These MUST match the skill names in the Bullhorn Skill table for association to work
 
-// Direct industry name to skill mapping (from search preferences)
-const INDUSTRY_DIRECT_SKILLS: Record<string, string[]> = {
-  'real estate': ['AREC', 'CONSTRUCTION'],
-  'capital markets': ['CAPITAL MARKETS'],
-  'private equity': ['BUY SIDE', 'CORP M&A'],
-  'private equity (pe)': ['BUY SIDE', 'CORP M&A'],
-  'venture capital': ['CORP VC', 'BUY SIDE'],
-  'venture capital (vc)': ['CORP VC', 'BUY SIDE'],
-  'investment banking': ['CORPORATE BANKING', 'CAPITAL MARKETS'],
-  'management consulting': ['CONSULT', 'ADVISORY INVESMENT'],
-  'hedge fund': ['BUY SIDE', 'ALT INVESTMENT'],
-  'asset management': ['ASS MAN', 'BUY SIDE'],
-  'infrastructure': ['CONSTRUCTION', 'CAPITAL GOODS'],
-  'corporate finance': ['CORP FIN', 'CORPORATE BANKING'],
-  'wealth management': ['AFFLUENT BANKING', 'ADVISORY INVESMENT'],
-  'family office': ['AFFLUENT BANKING', 'BUY SIDE'],
+// Company name to skill mapping - specific firms get specific skills
+const COMPANY_SKILLS: Record<string, string[]> = {
+  // Investment Banks
+  'goldman sachs': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'morgan stanley': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'jp morgan': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'jpmorgan': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'bank of america': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'bofa': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'citi': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'citigroup': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'barclays': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'deutsche bank': ['CORPORATE BANKING', 'DACH', 'TIER 1'],
+  'ubs': ['CORPORATE BANKING', 'DACH', 'TIER 1'],
+  'credit suisse': ['CORPORATE BANKING', 'DACH'],
+  'hsbc': ['CORPORATE BANKING', 'ASIA'],
+  'lazard': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'evercore': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'moelis': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'centerview': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'perella weinberg': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'rothschild': ['CORP M&A', 'ADVISORY INVESMENT'],
+  'greenhill': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'pjt partners': ['CORP M&A', 'ADVISORY INVESMENT', 'BOUTIQUE'],
+  'guggenheim': ['CORP M&A', 'ADVISORY INVESMENT'],
+  'jefferies': ['CORPORATE BANKING', 'CAPITAL MARKETS'],
+  'nomura': ['CORPORATE BANKING', 'ASIA'],
+  'macquarie': ['CORPORATE BANKING', 'AUSTRALIA'],
+  // Private Equity
+  'blackstone': ['BUY SIDE', 'CORP M&A', 'TIER 1'],
+  'kkr': ['BUY SIDE', 'CORP M&A', 'TIER 1'],
+  'carlyle': ['BUY SIDE', 'CORP M&A', 'TIER 1'],
+  'apollo': ['BUY SIDE', 'CREDIT', 'TIER 1'],
+  'tpg': ['BUY SIDE', 'CORP M&A'],
+  'warburg pincus': ['BUY SIDE', 'CORP M&A'],
+  'advent': ['BUY SIDE', 'CORP M&A'],
+  'bain capital': ['BUY SIDE', 'CORP M&A'],
+  'permira': ['BUY SIDE', 'CORP M&A'],
+  'cvc': ['BUY SIDE', 'CORP M&A'],
+  'apax': ['BUY SIDE', 'CORP M&A'],
+  'bc partners': ['BUY SIDE', 'CORP M&A'],
+  'eqt': ['BUY SIDE', 'CORP M&A', 'COPENHAGEN'],
+  'cinven': ['BUY SIDE', 'CORP M&A'],
+  'pai partners': ['BUY SIDE', 'CORP M&A', 'PARIS'],
+  'bridgepoint': ['BUY SIDE', 'CORP M&A'],
+  'ardian': ['BUY SIDE', 'CORP M&A', 'PARIS'],
+  'partners group': ['BUY SIDE', 'DACH'],
+  'general atlantic': ['BUY SIDE', 'CORP VC'],
+  'silver lake': ['BUY SIDE', 'DATA'],
+  'thoma bravo': ['BUY SIDE', 'DATA'],
+  'vista equity': ['BUY SIDE', 'DATA'],
+  'hellman & friedman': ['BUY SIDE', 'CORP M&A'],
+  'providence': ['BUY SIDE', 'CORP M&A'],
+  'onex': ['BUY SIDE', 'CREDIT'],
+  // Credit / Debt
+  'ares': ['CREDIT', 'Debt', 'BUY SIDE'],
+  'blue owl': ['CREDIT', 'Debt'],
+  'owl rock': ['CREDIT', 'Debt'],
+  'golub': ['CREDIT', 'Debt'],
+  'antares': ['CREDIT', 'Debt'],
+  'hps': ['CREDIT', 'Debt'],
+  'sixth street': ['CREDIT', 'Debt'],
+  'oak hill': ['CREDIT', 'Debt'],
+  'goldentree': ['CREDIT', 'Debt'],
+  'oaktree': ['CREDIT', 'DISTRESSED', 'Debt'],
+  'cerberus': ['CREDIT', 'DISTRESSED'],
+  'pgim': ['CREDIT', 'ASS MAN'],
+  'prudential': ['CREDIT', 'ASSURANCE'],
+  'pimco': ['BOND', 'Debt', 'ASS MAN'],
+  'blackrock': ['ASS MAN', 'BUY SIDE'],
+  'vanguard': ['ASS MAN'],
+  'fidelity': ['ASS MAN'],
+  'wellington': ['ASS MAN'],
+  't. rowe price': ['ASS MAN'],
+  'invesco': ['ASS MAN'],
+  'franklin templeton': ['ASS MAN'],
+  'nuveen': ['ASS MAN', 'CREDIT'],
+  'octagon': ['CREDIT', 'Debt'],
+  'eagle point': ['CREDIT', 'Debt'],
+  'comvest': ['CREDIT', 'Debt'],
+  'alignment credit': ['CREDIT', 'Debt'],
+  'willow tree': ['CREDIT', 'Debt'],
+  // Hedge Funds
+  'citadel': ['ALT INVESTMENT', 'BUY SIDE'],
+  'millennium': ['ALT INVESTMENT', 'BUY SIDE'],
+  'point72': ['ALT INVESTMENT', 'BUY SIDE'],
+  'bridgewater': ['ALT INVESTMENT', 'BUY SIDE'],
+  'two sigma': ['ALT INVESTMENT', 'DATA'],
+  'de shaw': ['ALT INVESTMENT', 'DATA'],
+  'renaissance': ['ALT INVESTMENT', 'DATA'],
+  'elliott': ['ALT INVESTMENT', 'DISTRESSED'],
+  'baupost': ['ALT INVESTMENT', 'BUY SIDE'],
+  // Consulting
+  'mckinsey': ['CONSULT', 'CORP STRATEGY'],
+  'bain': ['CONSULT', 'CORP STRATEGY'],
+  'boston consulting': ['CONSULT', 'CORP STRATEGY'],
+  'bcg': ['CONSULT', 'CORP STRATEGY'],
+  'deloitte': ['CONSULT', 'AUDIT'],
+  'pwc': ['CONSULT', 'AUDIT'],
+  'kpmg': ['CONSULT', 'AUDIT'],
+  'ey': ['CONSULT', 'AUDIT'],
+  'ernst & young': ['CONSULT', 'AUDIT'],
+  'accenture': ['CONSULT', 'DATA'],
+  'oliver wyman': ['CONSULT', 'CORP STRATEGY'],
+  'roland berger': ['CONSULT', 'DACH'],
+  'alvarez & marsal': ['CONSULT', 'BANKRUPCY'],
+  'fti consulting': ['CONSULT', 'BANKRUPCY'],
+  // Real Estate
+  'brookfield': ['AREC', 'CONSTRUCTION'],
+  'blackstone real estate': ['AREC', 'BUY SIDE'],
+  'starwood': ['AREC', 'BUY SIDE'],
+  'colony': ['AREC'],
+  'cushman': ['AREC', 'CONSULT'],
+  'cbre': ['AREC', 'CONSULT'],
+  'jll': ['AREC', 'CONSULT'],
+  'hines': ['AREC'],
+  // VC
+  'sequoia': ['CORP VC', 'DATA'],
+  'andreessen': ['CORP VC', 'DATA'],
+  'a16z': ['CORP VC', 'DATA'],
+  'benchmark': ['CORP VC'],
+  'accel': ['CORP VC'],
+  'kleiner': ['CORP VC'],
+  'greylock': ['CORP VC'],
+  'lightspeed': ['CORP VC'],
+  'general catalyst': ['CORP VC'],
+  'index ventures': ['CORP VC'],
+  'insight partners': ['CORP VC', 'BUY SIDE'],
+  // Banks / Credit Unions
+  'federal reserve': ['BANK', 'CENTRAL BANK'],
+  'fed': ['BANK', 'CENTRAL BANK'],
+  'credit union': ['BANK', 'RETAIL BANKING'],
+  'teachers federal': ['BANK', 'RETAIL BANKING'],
+}
+
+// Title-specific skill mapping - more granular
+const TITLE_SKILLS: Record<string, string[]> = {
+  // Seniority indicators
+  'head of': ['BUSINESS', 'C-SUITE'],
+  'chief': ['BUSINESS', 'C-SUITE'],
+  'managing director': ['BUSINESS', 'SENIOR'],
+  'senior managing director': ['BUSINESS', 'SENIOR'],
+  'managing partner': ['BUSINESS', 'BOUTIQUE', 'SENIOR'],
+  'partner': ['BUSINESS', 'BOUTIQUE'],
+  'senior partner': ['BUSINESS', 'BOUTIQUE', 'SENIOR'],
+  'principal': ['BUSINESS', 'MID-LEVEL'],
+  'senior principal': ['BUSINESS', 'SENIOR'],
+  'director': ['BUSINESS', 'MID-LEVEL'],
+  'senior director': ['BUSINESS', 'SENIOR'],
+  'vice president': ['BUSINESS', 'MID-LEVEL'],
+  'senior vice president': ['BUSINESS', 'SENIOR'],
+  'svp': ['BUSINESS', 'SENIOR'],
+  'evp': ['BUSINESS', 'SENIOR'],
+  'executive vice president': ['BUSINESS', 'SENIOR'],
+  'associate': ['BUSINESS', 'JUNIOR'],
+  'senior associate': ['BUSINESS', 'MID-LEVEL'],
+  'analyst': ['ANALYSIS', 'JUNIOR'],
+  'senior analyst': ['ANALYSIS', 'MID-LEVEL'],
+  // Function-specific
+  'portfolio manager': ['BUY SIDE', 'ASS MAN', 'INVESTMENT'],
+  'investment manager': ['BUY SIDE', 'ASS MAN', 'INVESTMENT'],
+  'fund manager': ['BUY SIDE', 'ASS MAN'],
+  'credit analyst': ['CREDIT', 'ANALYSIS'],
+  'credit officer': ['CREDIT', 'RISK'],
+  'credit principal': ['CREDIT', 'SENIOR'],
+  'credit director': ['CREDIT', 'SENIOR'],
+  'debt': ['Debt', 'CREDIT'],
+  'fixed income': ['BOND', 'Debt'],
+  'leveraged finance': ['Debt', 'ACQUISITION FINANCE'],
   'private credit': ['CREDIT', 'Debt', 'BUY SIDE'],
-  'credit': ['CREDIT', 'Debt'],
-  'distressed': ['CREDIT', 'BANKRUPCY', 'Debt'],
-}
-
-// Sector to skill mapping
-const SECTOR_SKILLS: Record<string, string[]> = {
-  'real estate & construction': ['AREC', 'CONSTRUCTION'],
-  'financial services': ['CORPORATE BANKING', 'CAPITAL MARKETS'],
-  'technology': ['DATA', 'AUTOMATION'],
-  'healthcare': ['CLINICAL', 'BIOTEC'],
-  'energy': ['ATOMIC ENERGY', 'CLEANTECH'],
-  'industrials': ['CAPITAL GOODS', 'AUTOMATION'],
-  'consumer': ['CONSUMER GOOD', 'B2C'],
-  'media': ['COMMUNICATION', 'ADVERTISING'],
-  'telecommunications': ['COMMUNICATION'],
-  'retail': ['B2C', 'CONSUMER GOOD'],
-}
-
-// Skills mapping based on Bullhorn Skill entity names
-const INDUSTRY_SKILLS: Record<string, string[]> = {
-  'private equity': ['BUY SIDE'],
-  'venture capital': ['CORP VC'],
-  'hedge fund': ['BUY SIDE', 'ALT INVESTMENT'],
-  'investment bank': ['CORPORATE BANKING'],
-  'asset management': ['ASS MAN'],
+  'private debt': ['Debt', 'BUY SIDE'],
+  'direct lending': ['CREDIT', 'Debt'],
+  'structured': ['STRUCTURED PRODUCTS', 'Debt'],
+  'securitization': ['STRUCTURED PRODUCTS', 'ABS'],
+  // HR / Talent
+  'talent acquisition': ['C&B', 'TALENT'],
+  'talent': ['C&B', 'TALENT'],
+  'recruiting': ['C&B', 'TALENT'],
+  'recruiter': ['C&B', 'TALENT'],
+  'human resources': ['C&B', 'COMPENSATION'],
+  'human capital': ['C&B', 'COMPENSATION'],
+  'hr business partner': ['C&B', 'COMPENSATION'],
+  'hr director': ['C&B', 'SENIOR'],
+  'head of hr': ['C&B', 'SENIOR'],
+  'head of talent': ['C&B', 'SENIOR'],
+  'chief people': ['C&B', 'C-SUITE'],
+  'people operations': ['C&B'],
+  // Investment roles
+  'origination': ['BUS DEV', 'ORIGINATION'],
+  'underwriting': ['CREDIT', 'UNDERWRITING'],
+  'investor relations': ['Capital Formation', 'IR'],
+  'fundraising': ['Capital Formation'],
+  'capital markets': ['CAPITAL MARKETS', 'DCM'],
+  'dcm': ['DCM', 'Debt'],
+  'ecm': ['CAPITAL MARKETS', 'ECM'],
+  'syndicate': ['CAPITAL MARKETS', 'SYNDICATION'],
+  'm&a': ['CORP M&A'],
   'mergers': ['CORP M&A'],
   'acquisitions': ['CORP M&A', 'ACQUISITION FINANCE'],
-  'm&a': ['CORP M&A'],
-  'leveraged buyout': ['Debt', 'BUY SIDE'],
-  'lbo': ['Debt', 'BUY SIDE'],
-  'debt capital': ['DCM', 'Debt'],
-  'dcm': ['DCM'],
-  'consulting': ['CONSULT'],
-  'management consulting': ['CONSULT'],
-  'real estate': ['AREC'],
-  'property': ['AREC', 'CONSTRUCTION'],
-  'infrastructure': ['CONSTRUCTION', 'CAPITAL GOODS'],
-  'credit': ['CREDIT', 'Debt'],
-  'distressed': ['CREDIT', 'BANKRUPCY'],
-  'growth equity': ['BUY SIDE', 'CORP VC'],
-  'buyout': ['BUY SIDE', 'Debt'],
-  'commodities': ['COMMODITIES'],
-  'derivatives': ['CDS', 'CVA'],
-  'trading': ['DEALER'],
-  'bonds': ['BOND', 'Debt'],
-  'fixed income': ['BOND', 'Debt'],
-  'equities': ['CAPITAL MARKETS'],
-  'crypto': ['CRYPTO', 'BLOCKCHAIN'],
-  'blockchain': ['BLOCKCHAIN'],
-  'fintech': ['AUTOMATION', 'DATA'],
-  'insurance': ['ASSURANCE'],
-  'banking': ['BANK', 'CORPORATE BANKING'],
-  'clearing': ['CLEARING', 'CUSTODY'],
-  'custody': ['CUSTODY'],
+  'corporate development': ['CORP DEV', 'CORP M&A'],
+  'business development': ['BUS DEV'],
+  'strategy': ['CORP STRATEGY'],
+  'strategic': ['CORP STRATEGY'],
+  // Risk & Compliance
+  'risk': ['RISK', 'CYBER RISK'],
+  'credit risk': ['CREDIT', 'RISK'],
+  'market risk': ['RISK', 'CAPITAL MARKETS'],
+  'operational risk': ['RISK', 'CONTROL'],
+  'compliance': ['COMPLIANCE', 'CENTRAL COMPLIANCE'],
+  'regulatory': ['COMPLIANCE', 'CONDUCT RISK'],
+  'legal': ['COMPLIANCE', 'ARBITRATION'],
+  'general counsel': ['COMPLIANCE', 'C-SUITE'],
+  'audit': ['AUDIT', 'CONTROL'],
+  // Operations
+  'operations': ['CONTROL', 'BACK OFFICE'],
+  'middle office': ['CONTROL', 'MIDDLE OFFICE'],
+  'back office': ['BACK OFFICE'],
+  'fund administration': ['BACK OFFICE', 'ASS MAN'],
+  'treasury': ['TREASURY', 'CORP FIN'],
+  'finance': ['CORP FIN', 'ACCOUNTING'],
+  'controller': ['ACCOUNTING', 'CONTROL'],
+  'cfo': ['CORP FIN', 'C-SUITE'],
+  'coo': ['CONTROL', 'C-SUITE'],
+  // Technology
+  'technology': ['DATA', 'AUTOMATION'],
+  'engineer': ['APPLICATION DEVELOPER', 'AUTOMATION'],
+  'developer': ['APPLICATION DEVELOPER'],
+  'data': ['DATA', 'DATASCIENCE'],
+  'quantitative': ['DATA', 'QUANT'],
+  'quant': ['DATA', 'QUANT'],
+  'cto': ['DATA', 'C-SUITE'],
+  'cio': ['DATA', 'C-SUITE'],
 }
 
+// Location to skill mapping
 const LOCATION_SKILLS: Record<string, string[]> = {
   // Europe
   'london': ['LONDON'],
@@ -129,144 +291,102 @@ const LOCATION_SKILLS: Record<string, string[]> = {
   'uk': ['LONDON'],
   'england': ['LONDON'],
   'frankfurt': ['DACH', 'FRANKFURT'],
-  'munich': ['DACH'],
+  'munich': ['DACH', 'MUNICH'],
   'berlin': ['BERLIN', 'DACH'],
   'germany': ['DACH'],
   'dach': ['DACH'],
-  'zurich': ['DACH', 'BASEL'],
-  'geneva': ['DACH'],
-  'switzerland': ['DACH', 'BASEL'],
-  'dubai': ['ABU DHABI'],
+  'zurich': ['DACH', 'ZURICH'],
+  'geneva': ['DACH', 'GENEVA'],
+  'switzerland': ['DACH'],
+  'dubai': ['DUBAI', 'ABU DHABI'],
   'abu dhabi': ['ABU DHABI'],
   'uae': ['ABU DHABI'],
-  'stockholm': ['COPENHAGEN'],
-  'oslo': ['COPENHAGEN'],
+  'stockholm': ['STOCKHOLM', 'COPENHAGEN'],
+  'oslo': ['OSLO', 'COPENHAGEN'],
   'copenhagen': ['COPENHAGEN'],
-  'helsinki': ['COPENHAGEN'],
+  'helsinki': ['HELSINKI', 'COPENHAGEN'],
   'nordics': ['COPENHAGEN'],
   'amsterdam': ['AMSTERDAM', 'BENELUX'],
   'brussels': ['BRUSSEL', 'BENELUX'],
-  'benelux': ['BENELUX', 'AMSTERDAM'],
+  'benelux': ['BENELUX'],
   'paris': ['PARIS'],
   'france': ['PARIS'],
   'milan': ['MILAN'],
   'italy': ['MILAN'],
   'rome': ['MILAN'],
-  'madrid': ['BARCELONA'],
+  'madrid': ['MADRID', 'BARCELONA'],
   'spain': ['BARCELONA'],
   'barcelona': ['BARCELONA'],
+  'lisbon': ['LISBON'],
+  'portugal': ['LISBON'],
+  'dublin': ['DUBLIN'],
+  'ireland': ['DUBLIN'],
+  'edinburgh': ['EDINBURGH', 'LONDON'],
+  'luxembourg': ['LUXEMBOURG', 'BENELUX'],
+  'vienna': ['VIENNA', 'DACH'],
+  'austria': ['VIENNA', 'DACH'],
+  'warsaw': ['WARSAW', 'CEE'],
+  'prague': ['PRAGUE', 'CEE'],
   // Americas
   'new york': ['NEW YORK', 'AMERICAS'],
   'nyc': ['NEW YORK', 'AMERICAS'],
-  'boston': ['Boston', 'AMERICAS'],
+  'manhattan': ['NEW YORK', 'AMERICAS'],
+  'boston': ['BOSTON', 'AMERICAS'],
   'chicago': ['CHICAGO', 'AMERICAS'],
-  'san francisco': ['California', 'AMERICAS'],
-  'los angeles': ['California', 'AMERICAS'],
+  'san francisco': ['SAN FRANCISCO', 'California', 'AMERICAS'],
+  'los angeles': ['LOS ANGELES', 'California', 'AMERICAS'],
   'texas': ['DALLAS', 'AMERICAS'],
   'dallas': ['DALLAS', 'AMERICAS'],
-  'houston': ['DALLAS', 'AMERICAS'],
-  'atlanta': ['ATL', 'AMERICAS'],
-  'miami': ['AMERICAS'],
+  'houston': ['HOUSTON', 'AMERICAS'],
+  'atlanta': ['ATLANTA', 'AMERICAS'],
+  'miami': ['MIAMI', 'AMERICAS'],
   'charlotte': ['CHARLOTTE', 'AMERICAS'],
+  'denver': ['DENVER', 'AMERICAS'],
+  'seattle': ['SEATTLE', 'AMERICAS'],
+  'washington': ['WASHINGTON DC', 'AMERICAS'],
   'united states': ['AMERICAS'],
   'usa': ['AMERICAS'],
   'canada': ['CANADA', 'AMERICAS'],
+  'toronto': ['TORONTO', 'CANADA', 'AMERICAS'],
+  'montreal': ['MONTREAL', 'CANADA', 'AMERICAS'],
   'brazil': ['BRAZIL', 'AMERICAS'],
+  'sao paulo': ['SAO PAULO', 'BRAZIL', 'AMERICAS'],
+  'mexico': ['MEXICO', 'AMERICAS'],
   // APAC
-  'singapore': ['APAC', 'ASIA'],
-  'hong kong': ['APAC', 'ASIA', 'CHINA'],
-  'tokyo': ['APAC', 'ASIA'],
-  'japan': ['APAC', 'ASIA'],
+  'singapore': ['SINGAPORE', 'APAC', 'ASIA'],
+  'hong kong': ['HONG KONG', 'APAC', 'ASIA'],
+  'tokyo': ['TOKYO', 'APAC', 'ASIA'],
+  'japan': ['TOKYO', 'APAC', 'ASIA'],
   'australia': ['AUSTRALIA', 'APAC'],
-  'sydney': ['AUSTRALIA', 'APAC'],
+  'sydney': ['SYDNEY', 'AUSTRALIA', 'APAC'],
+  'melbourne': ['MELBOURNE', 'AUSTRALIA', 'APAC'],
   'china': ['CHINA', 'APAC', 'ASIA'],
   'beijing': ['BEIJING', 'CHINA', 'APAC'],
+  'shanghai': ['SHANGHAI', 'CHINA', 'APAC'],
   'bangkok': ['BANGKOK', 'APAC'],
   'asia': ['ASIA', 'APAC'],
+  'mumbai': ['MUMBAI', 'INDIA', 'APAC'],
+  'india': ['INDIA', 'APAC'],
+  'seoul': ['SEOUL', 'APAC', 'ASIA'],
+  'korea': ['SEOUL', 'APAC', 'ASIA'],
   // Middle East / Africa
   'bahrain': ['BAHRAIN'],
+  'qatar': ['QATAR'],
+  'doha': ['DOHA', 'QATAR'],
+  'riyadh': ['RIYADH', 'SAUDI'],
+  'saudi': ['SAUDI'],
   'cairo': ['CAIRO', 'AFRICA'],
-  'africa': ['AFRICA', 'AFRICAN'],
+  'africa': ['AFRICA'],
+  'johannesburg': ['JOHANNESBURG', 'AFRICA'],
+  'south africa': ['AFRICA'],
   // CEE
   'czech republic': ['CZECH REPUBLIC', 'CEE'],
-  'poland': ['CEE'],
-  'hungary': ['CEE'],
-  'romania': ['CEE'],
+  'czechia': ['CZECH REPUBLIC', 'CEE'],
+  'poland': ['WARSAW', 'CEE'],
+  'hungary': ['BUDAPEST', 'CEE'],
+  'romania': ['BUCHAREST', 'CEE'],
   'bulgaria': ['BULGARIA', 'CEE'],
   'croatia': ['CROATIA', 'CEE'],
-}
-
-const ROLE_SKILLS: Record<string, string[]> = {
-  // Leadership
-  'head': ['BUSINESS'],
-  'director': ['BUSINESS'],
-  'partner': ['BUSINESS', 'BOUTIQUE'],
-  'managing partner': ['BUSINESS', 'BOUTIQUE'],
-  'senior partner': ['BUSINESS', 'BOUTIQUE'],
-  'equity partner': ['BUSINESS', 'BOUTIQUE'],
-  'managing director': ['BUSINESS'],
-  'md': ['BUSINESS'],
-  'principal': ['BUSINESS'],
-  'vice president': ['BUSINESS'],
-  'vp': ['BUSINESS'],
-  'svp': ['BUSINESS'],
-  'evp': ['BUSINESS'],
-  'senior': ['BUSINESS'],
-  'associate': ['BUSINESS'],
-  'analyst': ['ANALYSIS'],
-  'manager': ['BUSINESS'],
-  // Investment
-  'portfolio manager': ['BUY SIDE', 'ASS MAN'],
-  'investment manager': ['BUY SIDE', 'ASS MAN'],
-  'fund manager': ['BUY SIDE', 'ASS MAN'],
-  'buy side': ['BUY SIDE'],
-  'buyside': ['BUY SIDE'],
-  'growth': ['CORP VC'],
-  'fundraising': ['Capital Formation'],
-  'investor relations': ['Capital Formation'],
-  'ir': ['Capital Formation'],
-  // C-Suite
-  'cfo': ['CORP FIN', 'ACCOUNTING'],
-  'ceo': ['BUSINESS'],
-  'coo': ['CONTROL', 'BUSINESS'],
-  'cio': ['DATA', 'BUSINESS'],
-  'cto': ['DATA', 'AUTOMATION'],
-  'chief': ['BUSINESS'],
-  'founder': ['BUSINESS'],
-  'co-founder': ['BUSINESS'],
-  // HR & Talent
-  'hr': ['C&B', 'COMPENSATION'],
-  'human resources': ['C&B', 'COMPENSATION'],
-  'talent': ['C&B'],
-  'recruiting': ['C&B'],
-  'recruiter': ['C&B'],
-  // Legal
-  'general counsel': ['COMPLIANCE', 'ARBITRATION'],
-  'gc': ['COMPLIANCE'],
-  'legal counsel': ['COMPLIANCE', 'ARBITRATION'],
-  'counsel': ['COMPLIANCE'],
-  'attorney': ['ARBITRATION'],
-  'lawyer': ['ARBITRATION'],
-  'legal director': ['COMPLIANCE'],
-  'head of legal': ['COMPLIANCE'],
-  'chief legal officer': ['COMPLIANCE'],
-  'clo': ['COMPLIANCE'],
-  'compliance': ['COMPLIANCE', 'CENTRAL COMPLIANCE'],
-  'regulatory': ['COMPLIANCE', 'CONDUCT RISK'],
-  // Operations & Strategy
-  'operations': ['CONTROL', 'BACK OFFICE'],
-  'strategy': ['CORP STRATEGY'],
-  'business development': ['BUS DEV'],
-  'bd': ['BUS DEV'],
-  'corporate development': ['CORP DEV', 'CORP M&A'],
-  // Risk
-  'risk': ['CYBER RISK', 'CONDUCT RISK'],
-  'audit': ['AUDIT', 'CONTROL'],
-  // Tech
-  'developer': ['APPLICATION DEVELOPER'],
-  'engineer': ['APPLICATION DEVELOPER', 'AUTOMATION'],
-  'data': ['DATA', 'DATASCIENCE', 'BIG DATA'],
-  'cloud': ['CLOUD', 'AWS', 'AZURE'],
 }
 
 function generateSkillsString(
@@ -275,102 +395,109 @@ function generateSkillsString(
 ): string {
   const skills = new Set<string>()
 
-  // 1. Match from search preferences - direct industry mapping
-  if (searchPreferences?.industry) {
-    const lowerIndustry = searchPreferences.industry.toLowerCase()
-    for (const [keyword, skillCodes] of Object.entries(INDUSTRY_DIRECT_SKILLS)) {
-      if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
-        skillCodes.forEach(s => skills.add(s))
-      }
-    }
-  }
-
-  // 2. Match from industries array in preferences
-  if (searchPreferences?.industries) {
-    for (const industry of searchPreferences.industries) {
-      const lowerIndustry = industry.toLowerCase()
-      for (const [keyword, skillCodes] of Object.entries(INDUSTRY_DIRECT_SKILLS)) {
-        if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
-          skillCodes.forEach(s => skills.add(s))
-        }
-      }
-      for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
-        if (lowerIndustry.includes(keyword) || keyword.includes(lowerIndustry)) {
-          skillCodes.forEach(s => skills.add(s))
-        }
-      }
-    }
-  }
-
-  // 3. Match from sectors in preferences
-  if (searchPreferences?.sectors) {
-    for (const sector of searchPreferences.sectors) {
-      const lowerSector = sector.toLowerCase()
-      for (const [keyword, skillCodes] of Object.entries(SECTOR_SKILLS)) {
-        if (lowerSector.includes(keyword) || keyword.includes(lowerSector)) {
-          skillCodes.forEach(s => skills.add(s))
-        }
-      }
-    }
-  }
-
-  // 4. Match from company name
+  // 1. PRIMARY: Match from contact's COMPANY (most specific to this contact)
   const companyLower = contact.company?.toLowerCase() || ''
-  for (const [keyword, skillCodes] of Object.entries(INDUSTRY_SKILLS)) {
+  for (const [keyword, skillCodes] of Object.entries(COMPANY_SKILLS)) {
     if (companyLower.includes(keyword)) {
-      skillCodes.forEach(s => skills.add(s))
+      skillCodes.forEach((s: string) => skills.add(s))
     }
   }
 
-  // 5. Match from contact location AND extract city name
+  // 2. PRIMARY: Match from contact's TITLE (contact-specific)
+  const titleLower = contact.title?.toLowerCase() || ''
+  for (const [keyword, skillCodes] of Object.entries(TITLE_SKILLS)) {
+    if (titleLower.includes(keyword)) {
+      skillCodes.forEach((s: string) => skills.add(s))
+    }
+  }
+
+  // 3. PRIMARY: Match from contact's LOCATION (contact-specific)
   const locationLower = contact.location?.toLowerCase() || ''
   for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
     if (locationLower.includes(keyword)) {
-      skillCodes.forEach(s => skills.add(s))
+      skillCodes.forEach((s: string) => skills.add(s))
     }
   }
 
-  // 5b. ALWAYS add a city identifier (first segment of location)
+  // 4. Extract and add city name directly (always add the specific city)
   if (contact.location) {
     const city = contact.location.split(',')[0]?.trim()
-    if (city) skills.add(city.toUpperCase())
-  }
-
-  // 6. Match from search preference locations
-  if (searchPreferences?.locations) {
-    for (const loc of searchPreferences.locations) {
-      const lowerLoc = loc.toLowerCase()
-      for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
-        if (lowerLoc.includes(keyword) || keyword.includes(lowerLoc)) {
-          skillCodes.forEach(s => skills.add(s))
-        }
-      }
+    if (city && city.length > 2) {
+      skills.add(city.toUpperCase())
     }
   }
 
-  // 7. Match from title (role-based skills)
-  const titleLower = contact.title?.toLowerCase() || ''
-  for (const [keyword, skillCodes] of Object.entries(ROLE_SKILLS)) {
-    if (titleLower.includes(keyword)) {
-      skillCodes.forEach(s => skills.add(s))
+  // 5. SECONDARY: Add industry context from search preferences (shared across run)
+  // Only add 1-2 skills from preferences to avoid overwhelming contact-specific data
+  if (searchPreferences?.industry) {
+    const lowerIndustry = searchPreferences.industry.toLowerCase()
+    // Map common industries
+    if (lowerIndustry.includes('credit') || lowerIndustry.includes('debt')) {
+      skills.add('CREDIT')
+      skills.add('Debt')
+    }
+    if (lowerIndustry.includes('private equity') || lowerIndustry.includes('pe')) {
+      skills.add('BUY SIDE')
+    }
+    if (lowerIndustry.includes('venture') || lowerIndustry.includes('vc')) {
+      skills.add('CORP VC')
+    }
+    if (lowerIndustry.includes('hedge')) {
+      skills.add('ALT INVESTMENT')
+    }
+    if (lowerIndustry.includes('real estate')) {
+      skills.add('AREC')
+    }
+    if (lowerIndustry.includes('investment bank')) {
+      skills.add('CORPORATE BANKING')
+    }
+    if (lowerIndustry.includes('asset management')) {
+      skills.add('ASS MAN')
+    }
+    if (lowerIndustry.includes('distressed')) {
+      skills.add('DISTRESSED')
+      skills.add('BANKRUPCY')
+    }
+    if (lowerIndustry.includes('capital markets') || lowerIndustry.includes('dcm')) {
+      skills.add('CAPITAL MARKETS')
+      skills.add('DCM')
     }
   }
 
-  // 8. Match from target roles in preferences (adds context about search intent)
-  if (searchPreferences?.targetRoles) {
-    for (const role of searchPreferences.targetRoles) {
-      const lowerRole = role.toLowerCase()
-      for (const [keyword, skillCodes] of Object.entries(ROLE_SKILLS)) {
-        if (lowerRole.includes(keyword) || keyword.includes(lowerRole)) {
-          skillCodes.forEach(s => skills.add(s))
-        }
-      }
+  // 6. Add industries array if present (limit to first 2 to avoid duplication)
+  if (searchPreferences?.industries && searchPreferences.industries.length > 0) {
+    const firstTwo = searchPreferences.industries.slice(0, 2)
+    for (const industry of firstTwo) {
+      const lower = industry.toLowerCase()
+      if (lower.includes('credit')) skills.add('CREDIT')
+      if (lower.includes('private equity')) skills.add('BUY SIDE')
+      if (lower.includes('venture')) skills.add('CORP VC')
+      if (lower.includes('distressed')) skills.add('DISTRESSED')
+      if (lower.includes('debt') || lower.includes('dcm')) skills.add('Debt')
+    }
+  }
+
+  // 7. Ensure minimum skill count (at least 4 skills required)
+  if (skills.size < 4) {
+    // Add generic business skill
+    skills.add('BUSINESS')
+    // If still under 4, add from title seniority
+    if (titleLower.includes('senior') || titleLower.includes('head') || titleLower.includes('director') || titleLower.includes('partner')) {
+      skills.add('SENIOR')
+    } else if (titleLower.includes('associate') || titleLower.includes('analyst')) {
+      skills.add('JUNIOR')
+    }
+    // Add functional area if not enough
+    if (skills.size < 4 && titleLower.includes('hr') || titleLower.includes('talent') || titleLower.includes('recruit')) {
+      skills.add('C&B')
+      skills.add('TALENT')
     }
   }
 
   // Hard guarantee: never return empty Skills
   if (skills.size === 0) {
     skills.add('BUSINESS')
+    skills.add('AMERICAS')
   }
 
   // Return semicolon-separated unique skills (Bullhorn requires semicolons for Skills Count to work)
