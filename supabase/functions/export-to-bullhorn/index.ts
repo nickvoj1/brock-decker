@@ -795,24 +795,82 @@ async function lookupSkillId(
   }
 
   try {
-    // Search for skill by name
-    const searchUrl = `${restUrl}search/Skill?BhRestToken=${encodeURIComponent(bhRestToken)}&query=name:"${encodeURIComponent(skillName)}"&fields=id,name&count=1`
-    const res = await bullhornFetch(searchUrl)
-
-    if (!res.ok) {
-      await res.text()
+    const raw = String(skillName || '').trim()
+    if (!raw) {
       skillIdCache[cacheKey] = null
       return null
     }
 
-    const data = await res.json()
-    if (data?.data && data.data.length > 0) {
-      const skillId = data.data[0].id
-      skillIdCache[cacheKey] = skillId
-      return skillId
+    // Try a few safe variants in case Skill name matching is case-sensitive in this instance.
+    // (We keep it small for performance; cacheKey ensures we only do this once per unique skill.)
+    const variants = Array.from(
+      new Set([
+        raw,
+        raw.toUpperCase(),
+        raw
+          .split(/\s+/)
+          .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+          .join(' '),
+      ])
+    )
+
+    const tryQuery = async (name: string): Promise<number | null> => {
+      const where = `name='${name.replace(/'/g, "''")}'`
+      const params = new URLSearchParams({
+        BhRestToken: bhRestToken,
+        where,
+        fields: 'id,name',
+        count: '1',
+      })
+      const url = `${restUrl}query/Skill?${params.toString()}`
+      const res = await bullhornFetch(url)
+      if (!res.ok) {
+        await res.text()
+        return null
+      }
+      const json = await res.json().catch(() => null)
+      const rows = (json as any)?.data
+      const first = Array.isArray(rows) ? rows[0] : null
+      const id = first?.id
+      return typeof id === 'number' ? id : null
     }
 
-    // Skill doesn't exist in Bullhorn, cache as null
+    const trySearch = async (name: string): Promise<number | null> => {
+      const query = `name:"${name.replace(/"/g, '\\"')}"`
+      const params = new URLSearchParams({
+        BhRestToken: bhRestToken,
+        query,
+        fields: 'id,name',
+        count: '1',
+      })
+      const url = `${restUrl}search/Skill?${params.toString()}`
+      const res = await bullhornFetch(url)
+      if (!res.ok) {
+        await res.text()
+        return null
+      }
+      const json = await res.json().catch(() => null)
+      const rows = (json as any)?.data
+      const first = Array.isArray(rows) ? rows[0] : null
+      const id = first?.id
+      return typeof id === 'number' ? id : null
+    }
+
+    for (const name of variants) {
+      // Prefer query() (exact match), fall back to search() (Lucene)
+      const idFromQuery = await tryQuery(name)
+      if (typeof idFromQuery === 'number') {
+        skillIdCache[cacheKey] = idFromQuery
+        return idFromQuery
+      }
+
+      const idFromSearch = await trySearch(name)
+      if (typeof idFromSearch === 'number') {
+        skillIdCache[cacheKey] = idFromSearch
+        return idFromSearch
+      }
+    }
+
     skillIdCache[cacheKey] = null
     return null
   } catch (e) {
@@ -845,20 +903,21 @@ async function associateSkillsWithContact(
     return 0
   }
 
-  // Associate skills with the contact using PUT /association endpoint
-  // PUT /association/ClientContact/{entityId}/primarySkills/{associatedEntityIds}
-  const associationUrl = `${restUrl}association/ClientContact/${contactId}/primarySkills/${validSkillIds.join(',')}?BhRestToken=${encodeURIComponent(bhRestToken)}`
+  // Associate skills with the contact using the documented to-many association endpoint:
+  // PUT /entity/ClientContact/{id}/primarySkills/{skillId1,skillId2,...}
+  const params = new URLSearchParams({ BhRestToken: bhRestToken })
+  const associationUrl = `${restUrl}entity/ClientContact/${contactId}/primarySkills/${validSkillIds.join(',')}?${params.toString()}`
 
-  const res = await bullhornFetch(associationUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-  })
+  const res = await bullhornFetch(associationUrl, { method: 'PUT' })
 
   if (!res.ok) {
     const errorText = await res.text()
     console.error(`Failed to associate skills with contact ${contactId}: ${errorText}`)
     return 0
   }
+
+  // Consume body (Bullhorn often returns an empty body but we should still read it)
+  await res.text().catch(() => undefined)
 
   console.log(`Associated ${validSkillIds.length} skills with contact ${contactId} (IDs: ${validSkillIds.join(', ')})`)
   return validSkillIds.length
