@@ -23,6 +23,7 @@ import { format, subDays, startOfDay } from "date-fns";
 interface DashboardStats {
   totalSearches: number;
   totalContacts: number;
+  newContacts: number;
   savedCVs: number;
   successRate: number;
   lastWeekSearches: number;
@@ -44,6 +45,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     totalSearches: 0,
     totalContacts: 0,
+    newContacts: 0,
     savedCVs: 0,
     successRate: 0,
     lastWeekSearches: 0,
@@ -108,9 +110,30 @@ export default function Dashboard() {
         .slice(0, 5)
         .map(([name, count]) => ({ name, count }));
 
+      // Calculate existing contacts in Bullhorn (sample recent runs)
+      let existingInBullhorn = 0;
+      const recentRuns = allRuns.slice(0, 5);
+      for (const run of recentRuns) {
+        if (Array.isArray(run.enriched_data) && run.enriched_data.length > 0) {
+          try {
+            const { data } = await supabase.functions.invoke('check-bullhorn-overlap', {
+              body: { runId: run.id }
+            });
+            if (data?.success) {
+              existingInBullhorn += data.existingCount || 0;
+            }
+          } catch {
+            // Ignore errors
+          }
+        }
+      }
+
+      const newContacts = Math.max(0, totalContacts - existingInBullhorn);
+
       setStats({
         totalSearches: allRuns.length,
         totalContacts,
+        newContacts,
         savedCVs: allCVs.length,
         successRate: allRuns.length > 0 ? Math.round((successfulRuns.length / allRuns.length) * 100) : 0,
         lastWeekSearches,
@@ -227,13 +250,13 @@ export default function Dashboard() {
 
           <Card className="animate-slide-up" style={{ animationDelay: '50ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Contacts Found</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">New Contacts</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{isLoading ? '-' : stats.totalContacts}</div>
+              <div className="text-2xl font-bold">{isLoading ? '-' : stats.newContacts}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                Across all searches
+                {stats.totalContacts} total, {stats.totalContacts - stats.newContacts} in Bullhorn
               </p>
             </CardContent>
           </Card>
