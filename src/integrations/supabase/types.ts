@@ -191,6 +191,30 @@ export type Database = {
         }
         Relationships: []
       }
+      profile_pins: {
+        Row: {
+          created_at: string
+          id: string
+          pin_hash: string
+          profile_name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          pin_hash: string
+          profile_name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          pin_hash?: string
+          profile_name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       used_contacts: {
         Row: {
           added_at: string
