@@ -87,15 +87,16 @@ export default function RunsHistory() {
   const { data: runs, isLoading } = useQuery({
     queryKey: ['enrichment-runs', statusFilter, profileName],
     queryFn: async () => {
+      // If no profile selected, return empty array
+      if (!profileName) {
+        return [];
+      }
+      
       let query = supabase
         .from('enrichment_runs')
         .select('*')
+        .eq('uploaded_by', profileName)
         .order('created_at', { ascending: false });
-      
-      // Filter by current user profile
-      if (profileName) {
-        query = query.eq('uploaded_by', profileName);
-      }
       
       if (statusFilter !== 'all') {
         query = query.eq('status', statusFilter as RunStatus);
@@ -105,6 +106,7 @@ export default function RunsHistory() {
       if (error) throw error;
       return data as EnrichmentRun[];
     },
+    enabled: !!profileName, // Only run query if profile is selected
   });
 
   const exportTooBullhornMutation = useMutation({
@@ -342,7 +344,17 @@ export default function RunsHistory() {
             </div>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {!profileName ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                  <Users className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <h3 className="font-medium text-foreground mb-1">Select a Profile</h3>
+                <p className="text-sm text-muted-foreground">
+                  Choose your profile from the header to view your search history
+                </p>
+              </div>
+            ) : isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>

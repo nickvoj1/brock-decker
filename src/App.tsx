@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Dashboard from "./pages/Dashboard";
 import UploadRun from "./pages/UploadRun";
 import RunsHistory from "./pages/RunsHistory";
 import PreviousCVs from "./pages/PreviousCVs";
@@ -19,6 +20,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<UploadRun />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/previous-cvs" element={<PreviousCVs />} />
           <Route path="/history" element={<RunsHistory />} />
           <Route path="/settings" element={<SettingsPage />} />
