@@ -80,26 +80,52 @@ async function refreshBullhornTokens(supabase: any, refreshToken: string) {
   };
 }
 
-async function checkContactExistsInBullhorn(
+async function checkContactInBullhorn(
   restUrl: string,
   bhRestToken: string,
   email: string
-): Promise<boolean> {
+): Promise<{ exists: boolean; recentNote: boolean }> {
   try {
+    // Search for the contact by email
     const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${email}"&fields=id&count=1`;
     const response = await fetch(searchUrl);
     
     if (response.status === 429) {
-      // Rate limited, wait and retry
       await new Promise(resolve => setTimeout(resolve, 500));
-      return checkContactExistsInBullhorn(restUrl, bhRestToken, email);
+      return checkContactInBullhorn(restUrl, bhRestToken, email);
     }
     
     const data = await response.json();
-    return data.count > 0;
+    
+    if (data.count === 0) {
+      return { exists: false, recentNote: false };
+    }
+    
+    const contactId = data.data[0].id;
+    
+    // Check for notes on this contact from the last 2 weeks
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    const twoWeeksAgoTimestamp = twoWeeksAgo.getTime();
+    
+    const notesUrl = `${restUrl}query/Note?BhRestToken=${bhRestToken}&where=personReference.id=${contactId} AND dateAdded>${twoWeeksAgoTimestamp}&fields=id,dateAdded&count=1`;
+    const notesResponse = await fetch(notesUrl);
+    
+    if (notesResponse.status === 429) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // Retry the notes check
+      const retryNotesResponse = await fetch(notesUrl);
+      const retryNotesData = await retryNotesResponse.json();
+      return { exists: true, recentNote: (retryNotesData.count || 0) > 0 };
+    }
+    
+    const notesData = await notesResponse.json();
+    const hasRecentNote = (notesData.count || 0) > 0;
+    
+    return { exists: true, recentNote: hasRecentNote };
   } catch (error) {
     console.error(`Error checking contact ${email}:`, error);
-    return false;
+    return { exists: false, recentNote: false };
   }
 }
 
@@ -146,21 +172,27 @@ serve(async (req) => {
 
     // Check each contact in batches to avoid rate limits
     const existingEmails: string[] = [];
+    const recentNoteEmails: string[] = [];
     const batchSize = 5;
     
     for (let i = 0; i < contacts.length; i += batchSize) {
       const batch = contacts.slice(i, i + batchSize);
       const results = await Promise.all(
         batch.map(async (contact: any) => {
-          if (!contact.email) return { email: null, exists: false };
-          const exists = await checkContactExistsInBullhorn(restUrl, bhRestToken, contact.email);
-          return { email: contact.email, exists };
+          if (!contact.email) return { email: null, exists: false, recentNote: false };
+          const result = await checkContactInBullhorn(restUrl, bhRestToken, contact.email);
+          return { email: contact.email, ...result };
         })
       );
       
       for (const result of results) {
-        if (result.exists && result.email) {
-          existingEmails.push(result.email);
+        if (result.email) {
+          if (result.exists) {
+            existingEmails.push(result.email);
+          }
+          if (result.recentNote) {
+            recentNoteEmails.push(result.email);
+          }
         }
       }
       
@@ -170,14 +202,16 @@ serve(async (req) => {
       }
     }
 
-    console.log(`Found ${existingEmails.length} contacts already in Bullhorn`);
+    console.log(`Found ${existingEmails.length} contacts already in Bullhorn, ${recentNoteEmails.length} with recent notes`);
 
     return new Response(
       JSON.stringify({
         success: true,
         existingCount: existingEmails.length,
+        recentNoteCount: recentNoteEmails.length,
         totalCount: contacts.length,
         existingEmails,
+        recentNoteEmails,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
