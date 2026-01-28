@@ -323,8 +323,8 @@ function generateSkillsString(
     }
   }
 
-  // Return comma-separated unique skills
-  return Array.from(skills).join(', ')
+  // Return semicolon-separated unique skills (Bullhorn requires semicolons for Skills Count to work)
+  return Array.from(skills).join(' ; ')
 }
 
 // Helper: sleep for retry backoff
