@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2 } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,8 @@ export default function RunsHistory() {
   const [selectedRun, setSelectedRun] = useState<EnrichmentRun | null>(null);
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
-  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number; loading: boolean }>>({});
+  const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
+  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number }>>({});
 
   const selectedRunPreferences = selectedRun
     ? normalizePreferencesData(selectedRun.preferences_data)
@@ -140,50 +141,46 @@ export default function RunsHistory() {
     },
   });
 
-  // Auto-fetch Bullhorn overlap for all runs
-  useEffect(() => {
-    if (!runs || runs.length === 0) return;
-    
-    runs.forEach(async (run) => {
-      if (bullhornOverlap[run.id] || getTotalContactCount(run) === 0) return;
+  const checkBullhornOverlap = async (runId: string) => {
+    setCheckingRunId(runId);
+    try {
+      const { data, error } = await supabase.functions.invoke('check-bullhorn-overlap', {
+        body: { runId }
+      });
       
-      // Mark as loading
+      if (error || !data?.success) {
+        toast({
+          title: "Check failed",
+          description: error?.message || data?.error || "Unknown error",
+          variant: "destructive",
+        });
+        return;
+      }
+      
       setBullhornOverlap(prev => ({
         ...prev,
-        [run.id]: { existing: 0, recentNotes: 0, recentNoteEmails: [], total: 0, loading: true }
+        [runId]: { 
+          existing: data.existingCount, 
+          recentNotes: data.recentNoteCount || 0, 
+          recentNoteEmails: data.recentNoteEmails || [],
+          total: data.totalCount 
+        }
       }));
       
-      try {
-        const { data, error } = await supabase.functions.invoke('check-bullhorn-overlap', {
-          body: { runId: run.id }
-        });
-        
-        if (error || !data?.success) {
-          setBullhornOverlap(prev => ({
-            ...prev,
-            [run.id]: { existing: 0, recentNotes: 0, recentNoteEmails: [], total: getTotalContactCount(run), loading: false }
-          }));
-          return;
-        }
-        
-        setBullhornOverlap(prev => ({
-          ...prev,
-          [run.id]: { 
-            existing: data.existingCount, 
-            recentNotes: data.recentNoteCount || 0, 
-            recentNoteEmails: data.recentNoteEmails || [],
-            total: data.totalCount,
-            loading: false 
-          }
-        }));
-      } catch {
-        setBullhornOverlap(prev => ({
-          ...prev,
-          [run.id]: { existing: 0, recentNotes: 0, recentNoteEmails: [], total: getTotalContactCount(run), loading: false }
-        }));
-      }
-    });
-  }, [runs]);
+      toast({
+        title: "Bullhorn Check Complete",
+        description: `${data.existingCount} of ${data.totalCount} in Bullhorn${data.recentNoteCount ? `, ${data.recentNoteCount} contacted <2 weeks` : ''}.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Check failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setCheckingRunId(null);
+    }
+  };
 
   const downloadCSV = (run: EnrichmentRun, excludedEmails: Set<string> = new Set()) => {
     const contacts = (run.enriched_data as unknown) as ApolloContact[];
@@ -400,9 +397,7 @@ export default function RunsHistory() {
                       </TableCell>
                       <TableCell>
                         {bullhornOverlap[run.id] ? (
-                          bullhornOverlap[run.id].loading ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                          ) : (
+                          <div className="flex items-center gap-2">
                             <div className="flex flex-col">
                               <span className="text-sm font-medium">
                                 {bullhornOverlap[run.id].existing}/{bullhornOverlap[run.id].total}
@@ -413,11 +408,37 @@ export default function RunsHistory() {
                                 </span>
                               )}
                             </div>
-                          )
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={() => checkBullhornOverlap(run.id)}
+                              disabled={checkingRunId === run.id}
+                              title="Refresh Bullhorn check"
+                            >
+                              {checkingRunId === run.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
                         ) : getTotalContactCount(run) === 0 ? (
                           <span className="text-sm text-muted-foreground">-</span>
                         ) : (
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => checkBullhornOverlap(run.id)}
+                            disabled={checkingRunId === run.id}
+                            title="Check Bullhorn overlap"
+                          >
+                            {checkingRunId === run.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              "Check"
+                            )}
+                          </Button>
                         )}
                       </TableCell>
                       <TableCell>{run.search_counter}</TableCell>
