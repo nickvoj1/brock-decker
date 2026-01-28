@@ -1,4 +1,4 @@
-import { Upload, History, Settings, Zap, Users, LayoutDashboard } from "lucide-react";
+import { Upload, History, Settings, Zap, Users, LayoutDashboard, Mail } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Sidebar,
@@ -16,6 +16,7 @@ const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Upload & Run", url: "/", icon: Upload },
   { title: "Previous CVs", url: "/previous-cvs", icon: Users },
+  { title: "Generate Mail", url: "/generate-mail", icon: Mail },
   { title: "Runs History", url: "/history", icon: History },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
