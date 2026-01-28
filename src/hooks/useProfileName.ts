@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 
 const PROFILE_NAME_KEY = "apollo-search-profile-name";
-const REMEMBER_ME_KEY = "apollo-search-remember-me";
+const PROFILE_VERIFIED_KEY = "apollo-search-profile-verified";
 
 export function useProfileName() {
   const [profileName, setProfileName] = useState<string>(() => {
-    const savedRemember = localStorage.getItem(REMEMBER_ME_KEY) === "true";
-    if (savedRemember) {
+    // Only return profile if verified in this session
+    const verified = sessionStorage.getItem(PROFILE_VERIFIED_KEY);
+    if (verified === "true") {
       return localStorage.getItem(PROFILE_NAME_KEY) || "";
     }
     return "";
@@ -14,8 +15,13 @@ export function useProfileName() {
 
   useEffect(() => {
     const handleStorageChange = () => {
-      const name = localStorage.getItem(PROFILE_NAME_KEY) || "";
-      setProfileName(name);
+      const verified = sessionStorage.getItem(PROFILE_VERIFIED_KEY);
+      if (verified === "true") {
+        const name = localStorage.getItem(PROFILE_NAME_KEY) || "";
+        setProfileName(name);
+      } else {
+        setProfileName("");
+      }
     };
 
     // Listen for storage changes from other components
