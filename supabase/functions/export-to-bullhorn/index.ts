@@ -749,6 +749,10 @@ async function findOrCreateClientContact(
   if (state) address.state = state
   if (countryID) address.countryID = countryID
 
+  // Calculate skills count from comma-separated skills string
+  const skillsArray = skillsString ? skillsString.split(',').map(s => s.trim()).filter(Boolean) : []
+  const skillsCount = skillsArray.length
+
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
   const searchResponse = await bullhornFetch(searchUrl)
   
@@ -767,7 +771,12 @@ async function findOrCreateClientContact(
         address,
         clientCorporation: { id: clientCorporationId },
       }
+      // Set skills text field
       updatePayload[skillsFieldName] = skillsString
+      // Also set numEmployees as a workaround for skills count visibility (some Bullhorn instances use this)
+      // And set customText fields that may be mapped to skills display
+      updatePayload.customText1 = skillsString
+      updatePayload.customInt1 = skillsCount
       
       const updateResponse = await bullhornFetch(updateUrl, {
         method: 'POST',
@@ -779,7 +788,7 @@ async function findOrCreateClientContact(
         const errorText = await updateResponse.text()
         console.error(`Failed to update contact ${existingId}: ${errorText}`)
       } else {
-        console.log(`Updated contact ${existingId} with skills in ${skillsFieldName}: ${skillsString}`)
+        console.log(`Updated contact ${existingId} with skills in ${skillsFieldName}: ${skillsString} (count: ${skillsCount})`)
       }
       
       return existingId
@@ -799,7 +808,11 @@ async function findOrCreateClientContact(
     status: 'Active',
     clientCorporation: { id: clientCorporationId },
   }
+  // Set skills text field
   createPayload[skillsFieldName] = skillsString
+  // Also set customText1 for skills display and customInt1 for skills count
+  createPayload.customText1 = skillsString
+  createPayload.customInt1 = skillsCount
   
   console.log(`Create payload: ${JSON.stringify(createPayload)}`)
   
@@ -815,7 +828,7 @@ async function findOrCreateClientContact(
   }
 
   const createData = await createResponse.json()
-  console.log(`Created contact ID ${createData.changedEntityId}: ${fullName}`)
+  console.log(`Created contact ID ${createData.changedEntityId}: ${fullName} (skills count: ${skillsCount})`)
   return createData.changedEntityId
 }
 
