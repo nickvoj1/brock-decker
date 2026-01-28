@@ -1170,52 +1170,38 @@ async function findOrCreateClientContact(
   const skillsArray = skillsString ? skillsString.split(' ; ').map(s => s.trim()).filter(Boolean) : []
   const skillsCount = skillsArray.length
 
+  // Check if contact with this email already exists - if so, DELETE it first
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
   const searchResponse = await bullhornFetch(searchUrl)
   
   if (searchResponse.ok) {
     const searchData = await searchResponse.json()
     if (searchData.data && searchData.data.length > 0) {
-      const existingId = searchData.data[0].id
-      console.log(`Updating existing contact ID ${existingId}: ${fullName}`)
-      
-      const updateUrl = `${restUrl}entity/ClientContact/${existingId}?BhRestToken=${bhRestToken}`
-      const updatePayload: Record<string, any> = {
-        name: fullName,
-        firstName,
-        lastName,
-        occupation,
-        address,
-        clientCorporation: { id: clientCorporationId },
+      // Delete ALL existing contacts with this email (there could be duplicates)
+      for (const existing of searchData.data) {
+        const existingId = existing.id
+        console.log(`Deleting existing contact ID ${existingId} (${existing.firstName} ${existing.lastName}) to recreate from CV`)
+        
+        const deleteUrl = `${restUrl}entity/ClientContact/${existingId}?BhRestToken=${bhRestToken}`
+        const deleteResponse = await bullhornFetch(deleteUrl, {
+          method: 'DELETE',
+        })
+        
+        if (!deleteResponse.ok) {
+          const errorText = await deleteResponse.text()
+          console.error(`Failed to delete contact ${existingId}: ${errorText}`)
+          // Continue anyway - we'll try to create the new one
+        } else {
+          await deleteResponse.text() // Consume body
+          console.log(`Deleted existing contact ${existingId}`)
+        }
+        
+        // Small delay after delete to let Bullhorn index update
+        await sleep(100)
       }
-      // Set skills text field (for CSV compatibility/display)
-      updatePayload[skillsFieldName] = skillsString
-      // If we detected desiredSkills exists but we're writing into a custom UI field,
-      // also populate desiredSkills so the data remains consistent across layouts.
-      if (skillsFieldName !== 'desiredSkills' && cachedHasDesiredSkillsField) {
-        updatePayload.desiredSkills = skillsString
-      }
-      // Also populate categorySkills if it exists (for Skills tab text display)
-      updatePayload.categorySkills = skillsString
-      // Also set customText1 (max 100 chars in Bullhorn) and customInt1 for skills count
-      updatePayload.customText1 = skillsString.substring(0, 100)
-      updatePayload.customInt1 = skillsCount
-      
-      const updateResponse = await bullhornFetch(updateUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatePayload),
-      })
-      
-      if (!updateResponse.ok) {
-        const errorText = await updateResponse.text()
-        console.error(`Failed to update contact ${existingId}: ${errorText}`)
-      } else {
-        console.log(`Updated contact ${existingId} with skills in ${skillsFieldName}: ${skillsString} (count: ${skillsCount})`)
-      }
-      
-      return { contactId: existingId, skillsString }
     }
+  } else {
+    await searchResponse.text() // Consume body
   }
 
   console.log(`Creating new contact: ${fullName}`)
