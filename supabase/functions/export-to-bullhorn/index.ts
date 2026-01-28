@@ -29,6 +29,23 @@ interface SearchPreference {
   location?: string
 }
 
+function normalizePreferences(raw: unknown): SearchPreference | undefined {
+  const anyRaw = raw as any
+  if (!anyRaw) return undefined
+
+  // Stored as an array of per-industry preference objects in DB
+  if (Array.isArray(anyRaw)) {
+    const first = anyRaw[0] || {}
+    const industries = anyRaw.map((p: any) => p?.industry).filter(Boolean)
+    return {
+      ...first,
+      industries: industries.length ? industries : first.industries,
+    } as SearchPreference
+  }
+
+  return anyRaw as SearchPreference
+}
+
 // Skills mapping based on Bullhorn patterns - EXPANDED for 4+ skills per contact
 
 // Direct industry name to skill mapping (from search preferences)
@@ -262,22 +279,16 @@ function generateSkillsString(
 
   // 5. Match from contact location AND extract city name
   const locationLower = contact.location?.toLowerCase() || ''
-  let cityFound = false
   for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
     if (locationLower.includes(keyword)) {
       skillCodes.forEach(s => skills.add(s))
-      cityFound = true
     }
   }
-  
-  // 5b. ALWAYS extract city from location if not matched above
-  if (!cityFound && contact.location) {
-    // Extract first part as city (before comma)
-    const locationParts = contact.location.split(',').map(p => p.trim())
-    if (locationParts.length > 0 && locationParts[0]) {
-      const city = locationParts[0].toUpperCase()
-      skills.add(city)
-    }
+
+  // 5b. ALWAYS add a city identifier (first segment of location)
+  if (contact.location) {
+    const city = contact.location.split(',')[0]?.trim()
+    if (city) skills.add(city.toUpperCase())
   }
 
   // 6. Match from search preference locations
@@ -935,7 +946,7 @@ Deno.serve(async (req) => {
       throw new Error('No contacts to export')
     }
 
-    const searchPreferences = run.preferences_data as SearchPreference | undefined
+    const searchPreferences = normalizePreferences(run.preferences_data)
 
     console.log('Fetching stored Bullhorn tokens...')
     const tokens = await getStoredBullhornTokens(supabase)

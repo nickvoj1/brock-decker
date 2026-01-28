@@ -68,6 +68,7 @@ const roleCategories: RoleCategory[] = [
       { value: "Head of Legal", label: "Head of Legal" },
       { value: "Legal Counsel", label: "Legal Counsel" },
       { value: "Counsel", label: "Counsel" },
+      { value: "Legal Partner", label: "Legal Partner" },
       { value: "Attorney", label: "Attorney" },
       { value: "Lawyer", label: "Lawyer" },
       { value: "Compliance", label: "Compliance Officer" },

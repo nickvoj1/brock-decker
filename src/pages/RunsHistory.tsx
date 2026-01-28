@@ -231,6 +231,23 @@ const ROLE_SKILLS: Record<string, string[]> = {
   'corporate development': ['CORP DEV', 'M&A'],
 };
 
+function normalizePreferencesData(raw: Json): SearchPreference | undefined {
+  const anyRaw = raw as unknown as any;
+  if (!anyRaw) return undefined;
+
+  // Stored as an array of per-industry preference objects.
+  if (Array.isArray(anyRaw)) {
+    const first = anyRaw[0] || {};
+    const industries = anyRaw.map((p: any) => p?.industry).filter(Boolean);
+    return {
+      ...first,
+      industries: industries.length ? industries : first.industries,
+    } as SearchPreference;
+  }
+
+  return anyRaw as SearchPreference;
+}
+
 function generateSkillsString(contact: ApolloContact, preferences?: SearchPreference): string {
   const skills = new Set<string>();
 
@@ -283,22 +300,16 @@ function generateSkillsString(contact: ApolloContact, preferences?: SearchPrefer
 
   // 5. Match from contact location AND extract city name
   const locationLower = contact.location?.toLowerCase() || '';
-  let cityFound = false;
   for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
     if (locationLower.includes(keyword)) {
       skillCodes.forEach(s => skills.add(s));
-      cityFound = true;
     }
   }
-  
-  // 5b. ALWAYS extract city from location if not matched above
-  if (!cityFound && contact.location) {
-    // Extract first part as city (before comma)
-    const locationParts = contact.location.split(',').map(p => p.trim());
-    if (locationParts.length > 0 && locationParts[0]) {
-      const city = locationParts[0].toUpperCase();
-      skills.add(city);
-    }
+
+  // 5b. ALWAYS add a city identifier (first segment of location)
+  if (contact.location) {
+    const city = contact.location.split(',')[0]?.trim();
+    if (city) skills.add(city.toUpperCase());
   }
 
   // 6. Match from search preference locations
@@ -363,6 +374,10 @@ export default function RunsHistory() {
   const [selectedRun, setSelectedRun] = useState<EnrichmentRun | null>(null);
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
+
+  const selectedRunPreferences = selectedRun
+    ? normalizePreferencesData(selectedRun.preferences_data)
+    : undefined;
   
   const { data: runs, isLoading } = useQuery({
     queryKey: ['enrichment-runs', statusFilter, profileName],
@@ -425,13 +440,13 @@ export default function RunsHistory() {
     if (filteredContacts.length === 0) return;
 
     // Get preferences for skills generation
-    const preferences = run.preferences_data as SearchPreference | null;
+    const preferences = normalizePreferencesData(run.preferences_data);
     const dateAdded = format(new Date(run.created_at), 'M/d/yyyy');
 
     // Bullhorn CSV format with all 15 columns
     const csvHeader = '"Name","Job Title","Company","Country","Last Note","Skills","Skills Count","ClientCorporation.notes","General Comments","ClientCorporation.companyDescription","Vacancies","Consultant","Date Added","Notes","Status"';
     const csvRows = filteredContacts.map(c => {
-      const skills = generateSkillsString(c, preferences || undefined);
+      const skills = generateSkillsString(c, preferences);
       const skillsCount = skills ? skills.split(',').length.toString() : '0';
       const country = c.location || '';
       
@@ -708,6 +723,7 @@ export default function RunsHistory() {
                             <TableHead>Name</TableHead>
                             <TableHead>Title</TableHead>
                             <TableHead>Company</TableHead>
+                            <TableHead>Skills</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead>Phone</TableHead>
                             <TableHead className="w-[80px]">Action</TableHead>
@@ -716,11 +732,15 @@ export default function RunsHistory() {
                         <TableBody>
                           {((selectedRun.enriched_data as unknown) as ApolloContact[]).map((contact, i) => {
                             const isRemoved = removedContacts.has(contact.email);
+                            const skills = generateSkillsString(contact, selectedRunPreferences);
                             return (
                               <TableRow key={i} className={isRemoved ? 'opacity-40 bg-muted/50' : ''}>
                                 <TableCell className="font-medium">{contact.name || '-'}</TableCell>
                                 <TableCell>{contact.title || '-'}</TableCell>
                                 <TableCell>{contact.company || '-'}</TableCell>
+                                <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground" title={skills}>
+                                  {skills || '-'}
+                                </TableCell>
                                 <TableCell className="text-primary">{contact.email || '-'}</TableCell>
                                 <TableCell>{contact.phone || '-'}</TableCell>
                                 <TableCell>
