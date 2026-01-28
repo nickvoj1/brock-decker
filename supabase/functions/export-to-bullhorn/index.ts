@@ -368,6 +368,11 @@ function generateSkillsString(
     }
   }
 
+  // Hard guarantee: never return empty Skills
+  if (skills.size === 0) {
+    skills.add('BUSINESS')
+  }
+
   // Return semicolon-separated unique skills (Bullhorn requires semicolons for Skills Count to work)
   return Array.from(skills).join(' ; ')
 }
@@ -722,6 +727,14 @@ let cachedSkillsFieldName: string | null = null
 let cachedHasDesiredSkillsField: boolean | null = null
 let skillsFieldChecked = false
 
+type ClientContactSkillAssociationTarget = {
+  fieldName: string
+  associatedEntity: 'Skill' | 'Category'
+}
+
+let cachedClientContactSkillAssociation: ClientContactSkillAssociationTarget | null = null
+let clientContactSkillAssociationChecked = false
+
 async function getSkillsFieldName(
   restUrl: string,
   bhRestToken: string
@@ -781,8 +794,65 @@ async function getSkillsFieldName(
   return 'skills'
 }
 
+async function detectClientContactSkillAssociation(
+  restUrl: string,
+  bhRestToken: string
+): Promise<ClientContactSkillAssociationTarget | null> {
+  if (clientContactSkillAssociationChecked) {
+    return cachedClientContactSkillAssociation
+  }
+  clientContactSkillAssociationChecked = true
+
+  try {
+    const metaUrl = `${restUrl}meta/ClientContact?BhRestToken=${encodeURIComponent(bhRestToken)}&fields=*`
+    const res = await bullhornFetch(metaUrl)
+    if (!res.ok) {
+      await res.text().catch(() => undefined)
+      return null
+    }
+
+    const meta = await res.json().catch(() => null)
+    const fields: any[] = (meta as any)?.fields || []
+
+    // 1) Prefer an actual Skill association (populates the Skills tab)
+    const skillAssoc = fields.find((f) => {
+      const type = String(f?.type || '').toUpperCase()
+      const entity = String(f?.associatedEntity?.entity || '')
+      return type === 'TO_MANY' && entity === 'Skill'
+    })
+
+    if (skillAssoc?.name) {
+      cachedClientContactSkillAssociation = { fieldName: skillAssoc.name, associatedEntity: 'Skill' }
+      console.log(`Detected ClientContact Skill association field: ${skillAssoc.name}`)
+      return cachedClientContactSkillAssociation
+    }
+
+    // 2) Fallback: some instances model "Skills" as Categories (Admin → Categories)
+    const categoryAssoc = fields.find((f) => {
+      const type = String(f?.type || '').toUpperCase()
+      const entity = String(f?.associatedEntity?.entity || '')
+      const label = String(f?.label || '').toLowerCase()
+      const name = String(f?.name || '').toLowerCase()
+      return type === 'TO_MANY' && entity === 'Category' && (label.includes('skill') || name.includes('skill'))
+    })
+
+    if (categoryAssoc?.name) {
+      cachedClientContactSkillAssociation = { fieldName: categoryAssoc.name, associatedEntity: 'Category' }
+      console.log(`Detected ClientContact Category-based skills association field: ${categoryAssoc.name}`)
+      return cachedClientContactSkillAssociation
+    }
+  } catch (e) {
+    console.error('Error detecting ClientContact skill association field:', e)
+  }
+
+  return null
+}
+
 // Cache for skill IDs
 const skillIdCache: Record<string, number | null> = {}
+
+// Cache for Category IDs (in case this instance models Skills as Categories)
+const categoryIdCache: Record<string, number | null> = {}
 
 async function lookupSkillId(
   restUrl: string,
@@ -880,6 +950,126 @@ async function lookupSkillId(
   }
 }
 
+async function lookupCategoryId(
+  restUrl: string,
+  bhRestToken: string,
+  categoryName: string
+): Promise<number | null> {
+  const cacheKey = String(categoryName || '').toUpperCase().trim()
+  if (cacheKey in categoryIdCache) return categoryIdCache[cacheKey]
+
+  try {
+    const raw = String(categoryName || '').trim()
+    if (!raw) {
+      categoryIdCache[cacheKey] = null
+      return null
+    }
+
+    const variants = Array.from(
+      new Set([
+        raw,
+        raw.toUpperCase(),
+        raw
+          .split(/\s+/)
+          .map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+          .join(' '),
+      ])
+    )
+
+    const tryQuery = async (name: string): Promise<number | null> => {
+      const where = `name='${name.replace(/'/g, "''")}'`
+      const params = new URLSearchParams({
+        BhRestToken: bhRestToken,
+        where,
+        fields: 'id,name',
+        count: '1',
+      })
+      const url = `${restUrl}query/Category?${params.toString()}`
+      const res = await bullhornFetch(url)
+      if (!res.ok) {
+        await res.text().catch(() => undefined)
+        return null
+      }
+      const json = await res.json().catch(() => null)
+      const rows = (json as any)?.data
+      const first = Array.isArray(rows) ? rows[0] : null
+      const id = first?.id
+      return typeof id === 'number' ? id : null
+    }
+
+    const trySearch = async (name: string): Promise<number | null> => {
+      const query = `name:"${name.replace(/"/g, '\\"')}"`
+      const params = new URLSearchParams({
+        BhRestToken: bhRestToken,
+        query,
+        fields: 'id,name',
+        count: '1',
+      })
+      const url = `${restUrl}search/Category?${params.toString()}`
+      const res = await bullhornFetch(url)
+      if (!res.ok) {
+        await res.text().catch(() => undefined)
+        return null
+      }
+      const json = await res.json().catch(() => null)
+      const rows = (json as any)?.data
+      const first = Array.isArray(rows) ? rows[0] : null
+      const id = first?.id
+      return typeof id === 'number' ? id : null
+    }
+
+    for (const name of variants) {
+      const idFromQuery = await tryQuery(name)
+      if (typeof idFromQuery === 'number') {
+        categoryIdCache[cacheKey] = idFromQuery
+        return idFromQuery
+      }
+
+      const idFromSearch = await trySearch(name)
+      if (typeof idFromSearch === 'number') {
+        categoryIdCache[cacheKey] = idFromSearch
+        return idFromSearch
+      }
+    }
+
+    categoryIdCache[cacheKey] = null
+    return null
+  } catch (e) {
+    console.error(`Error looking up category "${categoryName}":`, e)
+    categoryIdCache[cacheKey] = null
+    return null
+  }
+}
+
+async function getExistingClientContactToManyIds(
+  restUrl: string,
+  bhRestToken: string,
+  contactId: number,
+  toManyFieldName: string
+): Promise<number[]> {
+  try {
+    const params = new URLSearchParams({
+      BhRestToken: bhRestToken,
+      fields: 'id',
+      count: '500',
+      start: '0',
+    })
+    const url = `${restUrl}entity/ClientContact/${contactId}/${toManyFieldName}?${params.toString()}`
+    const res = await bullhornFetch(url)
+    if (!res.ok) {
+      await res.text().catch(() => undefined)
+      return []
+    }
+    const json = await res.json().catch(() => null)
+    const rows = (json as any)?.data
+    return Array.isArray(rows)
+      ? rows.map((r: any) => r?.id).filter((id: any) => typeof id === 'number')
+      : []
+  } catch (_e) {
+    return []
+  }
+}
+
 async function associateSkillsWithContact(
   restUrl: string,
   bhRestToken: string,
@@ -888,39 +1078,67 @@ async function associateSkillsWithContact(
 ): Promise<number> {
   if (!skillsString) return 0
 
-  const skillNames = skillsString.split(' ; ').map(s => s.trim()).filter(Boolean)
-  if (skillNames.length === 0) return 0
-
-  // Look up skill IDs in parallel
-  const skillIdPromises = skillNames.map(name => lookupSkillId(restUrl, bhRestToken, name))
-  const skillIdResults = await Promise.all(skillIdPromises)
-
-  // Filter to valid skill IDs
-  const validSkillIds = skillIdResults.filter((id): id is number => id !== null)
-
-  if (validSkillIds.length === 0) {
-    console.log(`No valid skill IDs found for contact ${contactId} (skills: ${skillNames.join(', ')})`)
+  const assoc = await detectClientContactSkillAssociation(restUrl, bhRestToken)
+  if (!assoc) {
+    console.warn(
+      'Could not detect a ClientContact to-many association for Skills in this Bullhorn instance; leaving Skills text fields populated only.'
+    )
     return 0
   }
 
-  // Associate skills with the contact using the documented to-many association endpoint:
-  // PUT /entity/ClientContact/{id}/primarySkills/{skillId1,skillId2,...}
+  const names = skillsString.split(' ; ').map((s) => s.trim()).filter(Boolean)
+  if (names.length === 0) return 0
+
+  const idPromises =
+    assoc.associatedEntity === 'Skill'
+      ? names.map((n) => lookupSkillId(restUrl, bhRestToken, n))
+      : names.map((n) => lookupCategoryId(restUrl, bhRestToken, n))
+  const idResults = await Promise.all(idPromises)
+  const desiredIds = idResults.filter((id): id is number => id !== null)
+
+  if (desiredIds.length === 0) {
+    console.log(`No valid ${assoc.associatedEntity} IDs found for contact ${contactId} (skills: ${names.join(', ')})`)
+    return 0
+  }
+
+  // Make it deterministic (so skills actually update): remove extras, then add missing
+  const existingIds = await getExistingClientContactToManyIds(restUrl, bhRestToken, contactId, assoc.fieldName)
+  const desiredSet = new Set(desiredIds)
+  const existingSet = new Set(existingIds)
+
+  const toRemove = existingIds.filter((id) => !desiredSet.has(id))
+  const toAdd = desiredIds.filter((id) => !existingSet.has(id))
+
   const params = new URLSearchParams({ BhRestToken: bhRestToken })
-  const associationUrl = `${restUrl}entity/ClientContact/${contactId}/primarySkills/${validSkillIds.join(',')}?${params.toString()}`
 
-  const res = await bullhornFetch(associationUrl, { method: 'PUT' })
+  if (toRemove.length > 0) {
+    const disUrl = `${restUrl}entity/ClientContact/${contactId}/${assoc.fieldName}/${toRemove.join(',')}?${params.toString()}`
+    const disRes = await bullhornFetch(disUrl, { method: 'DELETE' })
+    if (!disRes.ok) {
+      const errorText = await disRes.text().catch(() => '')
+      console.error(`Failed to disassociate ${assoc.fieldName} from contact ${contactId}: ${errorText}`)
+    } else {
+      await disRes.text().catch(() => undefined)
+      console.log(`Disassociated ${toRemove.length} ${assoc.associatedEntity}(s) from contact ${contactId}`)
+    }
+  }
 
-  if (!res.ok) {
-    const errorText = await res.text()
+  if (toAdd.length === 0) {
+    console.log(`Skills already up to date for contact ${contactId} (${assoc.associatedEntity} via ${assoc.fieldName})`)
+    return desiredIds.length
+  }
+
+  const addUrl = `${restUrl}entity/ClientContact/${contactId}/${assoc.fieldName}/${toAdd.join(',')}?${params.toString()}`
+  const addRes = await bullhornFetch(addUrl, { method: 'PUT' })
+  if (!addRes.ok) {
+    const errorText = await addRes.text().catch(() => '')
     console.error(`Failed to associate skills with contact ${contactId}: ${errorText}`)
     return 0
   }
 
-  // Consume body (Bullhorn often returns an empty body but we should still read it)
-  await res.text().catch(() => undefined)
-
-  console.log(`Associated ${validSkillIds.length} skills with contact ${contactId} (IDs: ${validSkillIds.join(', ')})`)
-  return validSkillIds.length
+  await addRes.text().catch(() => undefined)
+  console.log(`Associated ${toAdd.length} ${assoc.associatedEntity}(s) with contact ${contactId} via ${assoc.fieldName}`)
+  return desiredIds.length
 }
 
 async function findOrCreateClientContact(
