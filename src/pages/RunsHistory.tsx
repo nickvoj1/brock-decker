@@ -344,7 +344,8 @@ function generateSkillsString(contact: ApolloContact, preferences?: SearchPrefer
     }
   }
 
-  return Array.from(skills).join(', ');
+  // Use semicolon separator for Bullhorn compatibility (Skills Count requires semicolons)
+  return Array.from(skills).join(' ; ');
 }
 
 interface EnrichmentRun {
@@ -447,7 +448,7 @@ export default function RunsHistory() {
     const csvHeader = '"Name","Job Title","Company","Country","Last Note","Skills","Skills Count","ClientCorporation.notes","General Comments","ClientCorporation.companyDescription","Vacancies","Consultant","Date Added","Notes","Status"';
     const csvRows = filteredContacts.map(c => {
       const skills = generateSkillsString(c, preferences);
-      const skillsCount = skills ? skills.split(',').length.toString() : '0';
+      const skillsCount = skills ? skills.split(' ; ').length.toString() : '0';
       const country = c.location || '';
       
       // Format: Name, Job Title, Company, Country, Last Note, Skills, Skills Count, 
