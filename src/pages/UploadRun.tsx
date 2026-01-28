@@ -61,6 +61,11 @@ export default function UploadRun() {
     return localStorage.getItem(PROFILE_NAME_KEY) || '';
   });
   
+  // Quick search mode (no CV)
+  const [isQuickSearch, setIsQuickSearch] = useState(false);
+  const [quickSearchName, setQuickSearchName] = useState('');
+  const [existingSearchNames, setExistingSearchNames] = useState<string[]>([]);
+  
   // CV file states
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [cvData, setCvData] = useState<ParsedCandidate | null>(null);
@@ -97,6 +102,27 @@ export default function UploadRun() {
   
   // Industry suggestions based on CV
   const industrySuggestions = useIndustrySuggestions(cvData);
+
+  // Fetch existing search names for uniqueness validation
+  useEffect(() => {
+    const fetchExistingNames = async () => {
+      const { data } = await supabase
+        .from('enrichment_runs')
+        .select('candidates_data')
+        .eq('uploaded_by', profileName);
+      
+      if (data) {
+        const names = data
+          .map(r => {
+            const candidates = r.candidates_data as any[];
+            return candidates?.[0]?.name;
+          })
+          .filter(Boolean);
+        setExistingSearchNames(names);
+      }
+    };
+    if (profileName) fetchExistingNames();
+  }, [profileName]);
 
   // Check for profile selected from PreviousCVs page
   useEffect(() => {
@@ -264,7 +290,11 @@ export default function UploadRun() {
     }
   };
 
-  const canRun = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning && !isParsingCV;
+  const isSearchNameUnique = quickSearchName.trim() && !existingSearchNames.includes(quickSearchName.trim());
+  
+  const canRunCvMode = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning && !isParsingCV;
+  const canRunQuickMode = isQuickSearch && isSearchNameUnique && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning;
+  const canRun = isQuickSearch ? canRunQuickMode : canRunCvMode;
 
   // Convert selected industries to preferences data format for backend
   const getPreferencesData = () => {
@@ -279,7 +309,20 @@ export default function UploadRun() {
   };
 
   const handleRunEnrichment = async () => {
-    if (!cvData || selectedIndustries.length === 0) return;
+    // For quick search, create a placeholder candidate
+    const candidateData = isQuickSearch 
+      ? {
+          candidate_id: `QS-${Date.now()}`,
+          name: quickSearchName.trim(),
+          current_title: 'Quick Search',
+          location: selectedLocations[0] || '',
+          skills: [],
+          work_history: [],
+          education: [],
+        }
+      : cvData;
+    
+    if (!candidateData || selectedIndustries.length === 0) return;
     
     const preferencesData = getPreferencesData();
     
@@ -295,7 +338,7 @@ export default function UploadRun() {
           preferences_count: selectedIndustries.length,
           status: 'running' as const,
           bullhorn_enabled: false,
-          candidates_data: JSON.parse(JSON.stringify([cvData])) as Json,
+          candidates_data: JSON.parse(JSON.stringify([candidateData])) as Json,
           preferences_data: JSON.parse(JSON.stringify(preferencesData)) as Json,
           uploaded_by: profileName.trim() || null, // Track who created this run
         }])
@@ -306,7 +349,7 @@ export default function UploadRun() {
 
       toast({
         title: "Searching for contacts",
-        description: `Finding up to ${maxContacts} hiring contacts for ${cvData.name}`,
+        description: `Finding up to ${maxContacts} hiring contacts${isQuickSearch ? ` for "${quickSearchName}"` : ` for ${candidateData.name}`}`,
       });
 
       // Call the enrichment edge function
@@ -359,7 +402,7 @@ export default function UploadRun() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `contacts-${cvData?.name?.replace(/\s+/g, '-') || 'export'}-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `contacts-${isQuickSearch ? quickSearchName.replace(/\s+/g, '-') : (cvData?.name?.replace(/\s+/g, '-') || 'export')}-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     
@@ -381,24 +424,55 @@ export default function UploadRun() {
       description="Upload a CV and find relevant hiring contacts on Apollo.io"
     >
       <div className="max-w-4xl space-y-6">
-        {/* Step 1: Upload CV & Select Industries */}
+        {/* Step 1: Upload CV or Quick Search */}
         <Card className="animate-slide-up">
           <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <FileText className="h-4 w-4" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <FileText className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Step 1: {isQuickSearch ? 'Name Your Search' : 'Upload CV'} & Select Industries</CardTitle>
+                  <CardDescription>{isQuickSearch ? 'Enter a unique search name' : 'Upload a candidate CV or select from history'}, then choose target industries</CardDescription>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-lg">Step 1: Upload CV & Select Industries</CardTitle>
-                <CardDescription>Upload a candidate CV or select from history, then choose target industries</CardDescription>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setIsQuickSearch(!isQuickSearch);
+                  if (!isQuickSearch) {
+                    handleCvClear();
+                  }
+                }}
+              >
+                {isQuickSearch ? 'Use CV' : 'Quick Search'}
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid gap-6 md:grid-cols-2">
-              {/* CV Upload or Loaded Profile Display */}
+              {/* CV Upload or Quick Search Name */}
               <div className="space-y-3">
-                {loadedFromHistory && cvData ? (
+                {isQuickSearch ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="quickSearchName">Search Name (must be unique)</Label>
+                    <Input
+                      id="quickSearchName"
+                      placeholder="e.g., Private Equity London Q1"
+                      value={quickSearchName}
+                      onChange={(e) => setQuickSearchName(e.target.value)}
+                      className={quickSearchName && !isSearchNameUnique ? 'border-destructive' : ''}
+                    />
+                    {quickSearchName && !isSearchNameUnique && (
+                      <p className="text-xs text-destructive">This name already exists. Please choose a unique name.</p>
+                    )}
+                    {quickSearchName && isSearchNameUnique && (
+                      <p className="text-xs text-success">✓ Name is unique</p>
+                    )}
+                  </div>
+                ) : loadedFromHistory && cvData ? (
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-foreground">Selected Candidate</label>
                     <div className="rounded-lg border-2 border-success bg-success/5 p-4">
@@ -444,10 +518,12 @@ export default function UploadRun() {
                     isProcessing={isParsingCV}
                   />
                 )}
-                {/* Saved Profiles Selector - smaller, below upload */}
-                <SavedProfilesSelector
-                  onSelectProfile={handleSelectSavedProfile}
-                />
+                {/* Saved Profiles Selector - only show in CV mode */}
+                {!isQuickSearch && (
+                  <SavedProfilesSelector
+                    onSelectProfile={handleSelectSavedProfile}
+                  />
+                )}
               </div>
               <div className="space-y-4">
                 <IndustrySelector
