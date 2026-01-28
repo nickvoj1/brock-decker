@@ -110,22 +110,20 @@ export default function Dashboard() {
         .slice(0, 5)
         .map(([name, count]) => ({ name, count }));
 
-      // Calculate existing contacts in Bullhorn (sample recent runs)
+      // Use cached Bullhorn overlap data from localStorage instead of fetching
       let existingInBullhorn = 0;
-      const recentRuns = allRuns.slice(0, 5);
-      for (const run of recentRuns) {
-        if (Array.isArray(run.enriched_data) && run.enriched_data.length > 0) {
-          try {
-            const { data } = await supabase.functions.invoke('check-bullhorn-overlap', {
-              body: { runId: run.id }
-            });
-            if (data?.success) {
-              existingInBullhorn += data.existingCount || 0;
+      try {
+        const cached = localStorage.getItem('bullhorn-overlap-cache');
+        if (cached) {
+          const overlapData = JSON.parse(cached);
+          allRuns.forEach(run => {
+            if (overlapData[run.id]) {
+              existingInBullhorn += overlapData[run.id].existing || 0;
             }
-          } catch {
-            // Ignore errors
-          }
+          });
         }
+      } catch {
+        // Ignore cache errors
       }
 
       const newContacts = Math.max(0, totalContacts - existingInBullhorn);
