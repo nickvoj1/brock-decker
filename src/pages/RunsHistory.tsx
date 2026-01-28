@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
@@ -49,7 +49,6 @@ interface ApolloContact {
   location?: string;
 }
 
-
 interface EnrichmentRun {
   id: string;
   created_at: string;
@@ -79,6 +78,7 @@ export default function RunsHistory() {
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
   const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
   const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number }>>({});
+  const checkedRunsRef = useRef<Set<string>>(new Set());
 
   const selectedRunPreferences = selectedRun
     ? normalizePreferencesData(selectedRun.preferences_data)
@@ -140,6 +140,40 @@ export default function RunsHistory() {
       setExportingRunId(null);
     },
   });
+
+  // Auto-fetch Bullhorn overlap once per run on initial load
+  useEffect(() => {
+    if (!runs || runs.length === 0) return;
+    
+    runs.forEach(async (run) => {
+      const contactCount = ((run.enriched_data as unknown) as ApolloContact[])?.length || 0;
+      // Skip if already checked or no contacts
+      if (checkedRunsRef.current.has(run.id) || contactCount === 0) return;
+      
+      // Mark as checked immediately to prevent duplicate calls
+      checkedRunsRef.current.add(run.id);
+      
+      try {
+        const { data, error } = await supabase.functions.invoke('check-bullhorn-overlap', {
+          body: { runId: run.id }
+        });
+        
+        if (!error && data?.success) {
+          setBullhornOverlap(prev => ({
+            ...prev,
+            [run.id]: { 
+              existing: data.existingCount, 
+              recentNotes: data.recentNoteCount || 0, 
+              recentNoteEmails: data.recentNoteEmails || [],
+              total: data.totalCount 
+            }
+          }));
+        }
+      } catch {
+        // Silently fail for auto-fetch
+      }
+    });
+  }, [runs]);
 
   const checkBullhornOverlap = async (runId: string) => {
     setCheckingRunId(runId);
@@ -426,19 +460,7 @@ export default function RunsHistory() {
                         ) : getTotalContactCount(run) === 0 ? (
                           <span className="text-sm text-muted-foreground">-</span>
                         ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => checkBullhornOverlap(run.id)}
-                            disabled={checkingRunId === run.id}
-                            title="Check Bullhorn overlap"
-                          >
-                            {checkingRunId === run.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              "Check"
-                            )}
-                          </Button>
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                         )}
                       </TableCell>
                       <TableCell>{run.search_counter}</TableCell>
