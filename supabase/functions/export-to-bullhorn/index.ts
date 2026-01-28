@@ -647,14 +647,82 @@ async function createDistributionList(
 ): Promise<number> {
   console.log(`Creating Distribution List: ${listName} with ${contactIds.length} contacts`)
   
-  // Step 1: Create a Tearsheet first (required for Distribution List recipients)
+  // Step 1: Create a DistributionList (NOT Tearsheet - Tearsheet = Hotlists)
+  // DistributionList is the entity that appears under Menu > Distribution Lists
+  const createListUrl = `${restUrl}entity/DistributionList?BhRestToken=${bhRestToken}`
+  const listResponse = await bullhornFetch(createListUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: listName,
+      description: `Auto-generated distribution list from contact search`,
+    }),
+  })
+
+  if (!listResponse.ok) {
+    const errorText = await listResponse.text()
+    console.error(`Failed to create DistributionList: ${errorText}`)
+    // Fallback to Tearsheet if DistributionList entity is not available
+    console.log('Falling back to Tearsheet creation...')
+    return await createDistributionListViaTearsheet(restUrl, bhRestToken, listName, contactIds)
+  }
+
+  const listData = await listResponse.json()
+  const listId = listData.changedEntityId
+  console.log(`DistributionList created with ID: ${listId}`)
+
+  // Step 2: Add contacts as DistributionListMembers
+  console.log(`Adding ${contactIds.length} contacts as DistributionListMembers...`)
+  let successCount = 0
+  
+  for (const contactId of contactIds) {
+    try {
+      // Create DistributionListMember entry - this links contacts to the Distribution List
+      const memberUrl = `${restUrl}entity/DistributionListMember?BhRestToken=${bhRestToken}`
+      const memberResponse = await bullhornFetch(memberUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          distributionList: { id: listId },
+          person: { id: contactId },
+        }),
+      })
+      
+      if (memberResponse.ok) {
+        successCount++
+        console.log(`Added DistributionListMember for contact ${contactId}`)
+      } else {
+        const errorText = await memberResponse.text()
+        console.error(`Failed to add DistributionListMember for contact ${contactId}: ${errorText}`)
+      }
+    } catch (err: any) {
+      console.error(`Error adding contact ${contactId}: ${err.message}`)
+    }
+    
+    // Small delay to avoid rate limiting
+    await sleep(100)
+  }
+  
+  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to distribution list ${listId}`)
+  return listId
+}
+
+// Fallback function using Tearsheet (in case DistributionList entity is not available in some Bullhorn instances)
+async function createDistributionListViaTearsheet(
+  restUrl: string,
+  bhRestToken: string,
+  listName: string,
+  contactIds: number[]
+): Promise<number> {
+  console.log(`Creating Tearsheet as fallback: ${listName} with ${contactIds.length} contacts`)
+  
   const createTearsheetUrl = `${restUrl}entity/Tearsheet?BhRestToken=${bhRestToken}`
   const tearsheetResponse = await bullhornFetch(createTearsheetUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: listName,
-      description: `Auto-generated distribution list from contact search`,
+      description: `Auto-generated from contact search (fallback)`,
       isPrivate: false,
     }),
   })
@@ -668,14 +736,12 @@ async function createDistributionList(
   const tearsheetId = tearsheetData.changedEntityId
   console.log(`Tearsheet created with ID: ${tearsheetId}`)
 
-  // Step 2: Add contacts as TearsheetRecipients (this makes them appear in Distribution Lists tab)
+  // Add contacts as TearsheetRecipients
   console.log(`Adding ${contactIds.length} contacts as TearsheetRecipients...`)
   let successCount = 0
   
   for (const contactId of contactIds) {
     try {
-      // Create TearsheetRecipient entry with required 'person' field (not clientContact!)
-      // This is what makes contacts appear in Distribution Lists tab (not Hotlists)
       const recipientUrl = `${restUrl}entity/TearsheetRecipient?BhRestToken=${bhRestToken}`
       const recipientResponse = await bullhornFetch(recipientUrl, {
         method: 'PUT',
@@ -689,7 +755,6 @@ async function createDistributionList(
       
       if (recipientResponse.ok) {
         successCount++
-        console.log(`Added TearsheetRecipient for contact ${contactId}`)
       } else {
         const errorText = await recipientResponse.text()
         console.error(`Failed to add TearsheetRecipient for contact ${contactId}: ${errorText}`)
@@ -698,11 +763,10 @@ async function createDistributionList(
       console.error(`Error adding contact ${contactId}: ${err.message}`)
     }
     
-    // Small delay to avoid rate limiting
     await sleep(100)
   }
   
-  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to distribution list ${tearsheetId}`)
+  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to tearsheet ${tearsheetId}`)
   return tearsheetId
 }
 
