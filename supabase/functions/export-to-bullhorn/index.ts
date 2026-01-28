@@ -143,34 +143,68 @@ const LOCATION_SKILLS: Record<string, string[]> = {
 }
 
 const ROLE_SKILLS: Record<string, string[]> = {
+  // Leadership
   'head': ['HEAD', 'SENIOR'],
   'director': ['HEAD', 'SENIOR'],
-  'partner': ['HEAD', 'SENIOR'],
+  'partner': ['HEAD', 'SENIOR', 'PARTNER'],
+  'managing partner': ['HEAD', 'SENIOR', 'PARTNER', 'MP'],
+  'senior partner': ['HEAD', 'SENIOR', 'PARTNER'],
+  'equity partner': ['HEAD', 'SENIOR', 'PARTNER'],
   'managing director': ['HEAD', 'MD'],
   'md': ['HEAD', 'MD'],
   'principal': ['HEAD', 'SENIOR'],
   'vice president': ['VP'],
   'vp': ['VP'],
+  'svp': ['VP', 'SENIOR'],
+  'evp': ['VP', 'SENIOR', 'C-SUITE'],
   'senior': ['SENIOR'],
   'associate': ['ASSOCIATE'],
   'analyst': ['ANALYST'],
   'manager': ['MANAGER'],
+  // Investment
   'portfolio manager': ['PM', 'BUY SIDE'],
   'investment manager': ['IM', 'BUY SIDE'],
+  'fund manager': ['FM', 'BUY SIDE'],
   'buy side': ['BUY SIDE'],
   'buyside': ['BUY SIDE'],
   'growth': ['GROWTH'],
   'fundraising': ['FUNDRAISING', 'IR'],
   'investor relations': ['IR', 'FUNDRAISING'],
   'ir': ['IR'],
+  // C-Suite
   'cfo': ['CFO', 'C-SUITE'],
   'ceo': ['CEO', 'C-SUITE'],
+  'coo': ['COO', 'C-SUITE'],
+  'cio': ['CIO', 'C-SUITE'],
+  'cto': ['CTO', 'C-SUITE'],
   'chief': ['C-SUITE'],
   'founder': ['FOUNDER', 'C-SUITE'],
+  'co-founder': ['FOUNDER', 'C-SUITE'],
+  // HR & Talent
   'hr': ['HR', 'TALENT'],
   'human resources': ['HR', 'TALENT'],
   'talent': ['TALENT', 'HR'],
   'recruiting': ['TALENT', 'HR'],
+  'recruiter': ['TALENT', 'HR'],
+  // Legal
+  'general counsel': ['LEGAL', 'GC', 'C-SUITE'],
+  'gc': ['LEGAL', 'GC'],
+  'legal counsel': ['LEGAL'],
+  'counsel': ['LEGAL'],
+  'attorney': ['LEGAL'],
+  'lawyer': ['LEGAL'],
+  'legal director': ['LEGAL', 'HEAD'],
+  'head of legal': ['LEGAL', 'HEAD'],
+  'chief legal officer': ['LEGAL', 'CLO', 'C-SUITE'],
+  'clo': ['LEGAL', 'CLO', 'C-SUITE'],
+  'compliance': ['COMPLIANCE', 'LEGAL'],
+  'regulatory': ['REGULATORY', 'COMPLIANCE'],
+  // Operations & Strategy
+  'operations': ['OPS'],
+  'strategy': ['STRATEGY'],
+  'business development': ['BD'],
+  'bd': ['BD'],
+  'corporate development': ['CORP DEV', 'M&A'],
 }
 
 function generateSkillsString(
@@ -226,11 +260,23 @@ function generateSkillsString(
     }
   }
 
-  // 5. Match from contact location
+  // 5. Match from contact location AND extract city name
   const locationLower = contact.location?.toLowerCase() || ''
+  let cityFound = false
   for (const [keyword, skillCodes] of Object.entries(LOCATION_SKILLS)) {
     if (locationLower.includes(keyword)) {
       skillCodes.forEach(s => skills.add(s))
+      cityFound = true
+    }
+  }
+  
+  // 5b. ALWAYS extract city from location if not matched above
+  if (!cityFound && contact.location) {
+    // Extract first part as city (before comma)
+    const locationParts = contact.location.split(',').map(p => p.trim())
+    if (locationParts.length > 0 && locationParts[0]) {
+      const city = locationParts[0].toUpperCase()
+      skills.add(city)
     }
   }
 
