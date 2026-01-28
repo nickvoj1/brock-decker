@@ -25,9 +25,9 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { action, profileName, pin } = await req.json();
+    const { action, profileName, pin, adminProfile } = await req.json();
 
-    if (!profileName) {
+    if (!profileName && action !== "list-reset-requests" && action !== "get-admins") {
       return new Response(
         JSON.stringify({ success: false, error: "Profile name is required" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
@@ -38,14 +38,18 @@ serve(async (req) => {
     if (action === "check") {
       const { data, error } = await supabase
         .from("profile_pins")
-        .select("id")
+        .select("id, reset_requested_at")
         .eq("profile_name", profileName)
         .maybeSingle();
 
       if (error) throw error;
 
       return new Response(
-        JSON.stringify({ success: true, hasPin: !!data }),
+        JSON.stringify({ 
+          success: true, 
+          hasPin: !!data,
+          resetRequested: data?.reset_requested_at ? true : false
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -72,7 +76,7 @@ serve(async (req) => {
         // Update existing
         const { error } = await supabase
           .from("profile_pins")
-          .update({ pin_hash: pinHash })
+          .update({ pin_hash: pinHash, reset_requested_at: null })
           .eq("profile_name", profileName);
 
         if (error) throw error;
@@ -120,6 +124,114 @@ serve(async (req) => {
 
       return new Response(
         JSON.stringify({ success: true, valid: isValid }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Request PIN reset (by user who forgot their PIN)
+    if (action === "request-reset") {
+      const { error } = await supabase
+        .from("profile_pins")
+        .update({ reset_requested_at: new Date().toISOString() })
+        .eq("profile_name", profileName);
+
+      if (error) throw error;
+
+      return new Response(
+        JSON.stringify({ success: true, message: "Reset request submitted. An admin will process it." }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Check if user is admin
+    if (action === "check-admin") {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", profileName)
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (error) throw error;
+
+      return new Response(
+        JSON.stringify({ success: true, isAdmin: !!data }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // List all reset requests (admin only)
+    if (action === "list-reset-requests") {
+      if (!adminProfile) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Admin profile required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      // Verify admin status
+      const { data: adminData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", adminProfile)
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (!adminData) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Unauthorized - admin access required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+
+      const { data, error } = await supabase
+        .from("profile_pins")
+        .select("profile_name, reset_requested_at")
+        .not("reset_requested_at", "is", null)
+        .order("reset_requested_at", { ascending: false });
+
+      if (error) throw error;
+
+      return new Response(
+        JSON.stringify({ success: true, requests: data || [] }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Reset PIN (admin only)
+    if (action === "admin-reset") {
+      if (!adminProfile) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Admin profile required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      // Verify admin status
+      const { data: adminData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", adminProfile)
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (!adminData) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Unauthorized - admin access required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+
+      // Delete the PIN so user can set a new one
+      const { error } = await supabase
+        .from("profile_pins")
+        .delete()
+        .eq("profile_name", profileName);
+
+      if (error) throw error;
+
+      return new Response(
+        JSON.stringify({ success: true, message: `PIN reset for ${profileName}. They can now set a new PIN.` }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
