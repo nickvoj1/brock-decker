@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Mail, Loader2, Sparkles, Copy, Check, FileText } from "lucide-react";
+import { Mail, Loader2, Sparkles, Copy, Check, FileText, Save, Trash2, History, Plus, BookTemplate } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
@@ -10,8 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useProfileName } from "@/hooks/useProfileName";
+import { format } from "date-fns";
 
 interface WorkExperience {
   company: string;
@@ -38,8 +44,47 @@ interface ParsedCandidate {
   education: Education[];
 }
 
+interface PitchTemplate {
+  id: string;
+  profile_name: string;
+  name: string;
+  subject_template: string | null;
+  body_template: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+interface GeneratedPitch {
+  id: string;
+  profile_name: string;
+  template_id: string | null;
+  candidate_name: string;
+  candidate_title: string | null;
+  subject: string | null;
+  body: string;
+  industries: string[];
+  locations: string[];
+  created_at: string;
+}
+
 export default function GenerateMail() {
   const { toast } = useToast();
+  const profileName = useProfileName();
+  
+  // Templates
+  const [templates, setTemplates] = useState<PitchTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  
+  // Save template dialog
+  const [showSaveTemplateDialog, setShowSaveTemplateDialog] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  
+  // Pitch history
+  const [pitchHistory, setPitchHistory] = useState<GeneratedPitch[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [showHistoryDialog, setShowHistoryDialog] = useState(false);
   
   // Pitch template
   const [preferredPitch, setPreferredPitch] = useState("");
@@ -62,6 +107,178 @@ export default function GenerateMail() {
   const [generatedPitch, setGeneratedPitch] = useState("");
   const [generatedSubject, setGeneratedSubject] = useState("");
   const [copied, setCopied] = useState<"pitch" | "subject" | null>(null);
+
+  // Load templates when profile changes
+  useEffect(() => {
+    if (profileName) {
+      loadTemplates();
+      loadPitchHistory();
+    } else {
+      setTemplates([]);
+      setPitchHistory([]);
+    }
+  }, [profileName]);
+
+  const loadTemplates = async () => {
+    if (!profileName) return;
+    
+    setIsLoadingTemplates(true);
+    try {
+      const { data, error } = await supabase
+        .from('pitch_templates')
+        .select('*')
+        .eq('profile_name', profileName)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setTemplates(data || []);
+      
+      // Auto-select default template
+      const defaultTemplate = data?.find(t => t.is_default);
+      if (defaultTemplate && !selectedTemplateId) {
+        setSelectedTemplateId(defaultTemplate.id);
+        setPreferredPitch(defaultTemplate.body_template);
+        setSubject(defaultTemplate.subject_template || "");
+      }
+    } catch (error: any) {
+      console.error('Error loading templates:', error);
+    } finally {
+      setIsLoadingTemplates(false);
+    }
+  };
+
+  const loadPitchHistory = async () => {
+    if (!profileName) return;
+    
+    setIsLoadingHistory(true);
+    try {
+      const { data, error } = await supabase
+        .from('generated_pitches')
+        .select('*')
+        .eq('profile_name', profileName)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      setPitchHistory(data || []);
+    } catch (error: any) {
+      console.error('Error loading pitch history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const handleSelectTemplate = (templateId: string) => {
+    const template = templates.find(t => t.id === templateId);
+    if (template) {
+      setSelectedTemplateId(templateId);
+      setPreferredPitch(template.body_template);
+      setSubject(template.subject_template || "");
+      toast({
+        title: "Template loaded",
+        description: `Loaded "${template.name}"`,
+      });
+    }
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!profileName || !preferredPitch.trim() || !newTemplateName.trim()) return;
+    
+    setIsSavingTemplate(true);
+    try {
+      const isFirst = templates.length === 0;
+      
+      const { data, error } = await supabase
+        .from('pitch_templates')
+        .insert({
+          profile_name: profileName,
+          name: newTemplateName.trim(),
+          subject_template: subject.trim() || null,
+          body_template: preferredPitch.trim(),
+          is_default: isFirst,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      setTemplates(prev => [data, ...prev]);
+      setSelectedTemplateId(data.id);
+      setNewTemplateName("");
+      setShowSaveTemplateDialog(false);
+      
+      toast({
+        title: "Template saved",
+        description: `"${data.name}" has been saved to your templates`,
+      });
+    } catch (error: any) {
+      console.error('Error saving template:', error);
+      toast({
+        title: "Error saving template",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    try {
+      const { error } = await supabase
+        .from('pitch_templates')
+        .delete()
+        .eq('id', templateId);
+
+      if (error) throw error;
+      
+      setTemplates(prev => prev.filter(t => t.id !== templateId));
+      if (selectedTemplateId === templateId) {
+        setSelectedTemplateId(null);
+      }
+      
+      toast({
+        title: "Template deleted",
+      });
+    } catch (error: any) {
+      console.error('Error deleting template:', error);
+      toast({
+        title: "Error deleting template",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSetDefaultTemplate = async (templateId: string) => {
+    try {
+      // First, unset all defaults
+      await supabase
+        .from('pitch_templates')
+        .update({ is_default: false })
+        .eq('profile_name', profileName);
+
+      // Then set the new default
+      const { error } = await supabase
+        .from('pitch_templates')
+        .update({ is_default: true })
+        .eq('id', templateId);
+
+      if (error) throw error;
+      
+      setTemplates(prev => prev.map(t => ({
+        ...t,
+        is_default: t.id === templateId,
+      })));
+      
+      toast({
+        title: "Default template updated",
+      });
+    } catch (error: any) {
+      console.error('Error setting default:', error);
+    }
+  };
 
   const handleCvFileSelect = async (file: File) => {
     setCvFile(file);
@@ -140,10 +357,20 @@ export default function GenerateMail() {
     });
   };
 
-  const canGenerate = cvData && preferredPitch.trim() && selectedIndustries.length > 0 && selectedLocations.length > 0 && !isGenerating;
+  const handleLoadFromHistory = (pitch: GeneratedPitch) => {
+    setGeneratedPitch(pitch.body);
+    setGeneratedSubject(pitch.subject || "");
+    setShowHistoryDialog(false);
+    toast({
+      title: "Pitch loaded",
+      description: `Loaded pitch for ${pitch.candidate_name}`,
+    });
+  };
+
+  const canGenerate = profileName && cvData && preferredPitch.trim() && selectedIndustries.length > 0 && selectedLocations.length > 0 && !isGenerating;
 
   const handleGenerate = async () => {
-    if (!cvData || !preferredPitch.trim()) return;
+    if (!cvData || !preferredPitch.trim() || !profileName) return;
     
     setIsGenerating(true);
     setGeneratedPitch("");
@@ -163,8 +390,28 @@ export default function GenerateMail() {
 
       if (error) throw error;
 
-      setGeneratedPitch(data.pitch || "");
-      setGeneratedSubject(data.subject || subject.trim());
+      const pitch = data.pitch || "";
+      const subjectLine = data.subject || subject.trim();
+      
+      setGeneratedPitch(pitch);
+      setGeneratedSubject(subjectLine);
+      
+      // Save to history
+      await supabase
+        .from('generated_pitches')
+        .insert({
+          profile_name: profileName,
+          template_id: selectedTemplateId,
+          candidate_name: cvData.name,
+          candidate_title: cvData.current_title || null,
+          subject: subjectLine || null,
+          body: pitch,
+          industries: selectedIndustries,
+          locations: selectedLocations,
+        });
+      
+      // Refresh history
+      loadPitchHistory();
       
       toast({
         title: "Pitch generated",
@@ -192,23 +439,225 @@ export default function GenerateMail() {
     });
   };
 
+  if (!profileName) {
+    return (
+      <AppLayout 
+        title="Generate Mail" 
+        description="Generate personalized pitch emails for candidates"
+      >
+        <Card className="max-w-md mx-auto">
+          <CardContent className="pt-6 text-center">
+            <Mail className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+            <h3 className="font-semibold text-lg mb-2">Select a Profile</h3>
+            <p className="text-sm text-muted-foreground">
+              Please sign in from the header to generate pitches and save templates.
+            </p>
+          </CardContent>
+        </Card>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout 
       title="Generate Mail" 
       description="Generate personalized pitch emails for candidates"
     >
       <div className="max-w-4xl space-y-6">
+        {/* Template Management Bar */}
+        <Card className="animate-slide-up">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <BookTemplate className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Your Templates</CardTitle>
+                  <CardDescription>
+                    {templates.length > 0 
+                      ? `${templates.length} saved template${templates.length > 1 ? 's' : ''}`
+                      : "No templates yet - save your first pitch template below"
+                    }
+                  </CardDescription>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Dialog open={showHistoryDialog} onOpenChange={setShowHistoryDialog}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <History className="h-4 w-4 mr-2" />
+                      History ({pitchHistory.length})
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl max-h-[80vh]">
+                    <DialogHeader>
+                      <DialogTitle>Generated Pitches History</DialogTitle>
+                      <DialogDescription>
+                        Your previously generated pitches
+                      </DialogDescription>
+                    </DialogHeader>
+                    <ScrollArea className="h-[50vh]">
+                      {pitchHistory.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8">
+                          No pitches generated yet
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {pitchHistory.map((pitch) => (
+                            <div 
+                              key={pitch.id} 
+                              className="p-3 border rounded-lg hover:bg-muted/50 cursor-pointer transition-colors"
+                              onClick={() => handleLoadFromHistory(pitch)}
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <div>
+                                  <p className="font-medium">{pitch.candidate_name}</p>
+                                  {pitch.candidate_title && (
+                                    <p className="text-sm text-muted-foreground">{pitch.candidate_title}</p>
+                                  )}
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {format(new Date(pitch.created_at), "MMM d, yyyy HH:mm")}
+                                </span>
+                              </div>
+                              {pitch.subject && (
+                                <p className="text-sm font-medium text-primary mb-1">
+                                  {pitch.subject}
+                                </p>
+                              )}
+                              <p className="text-sm text-muted-foreground line-clamp-2">
+                                {pitch.body}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </ScrollArea>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+          </CardHeader>
+          {templates.length > 0 && (
+            <CardContent className="pt-0">
+              <div className="flex flex-wrap gap-2">
+                {templates.map((template) => (
+                  <div
+                    key={template.id}
+                    className={`
+                      group flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all
+                      ${selectedTemplateId === template.id 
+                        ? 'border-primary bg-primary/5' 
+                        : 'hover:border-primary/50 hover:bg-muted/50'
+                      }
+                    `}
+                    onClick={() => handleSelectTemplate(template.id)}
+                  >
+                    <span className="text-sm font-medium">{template.name}</span>
+                    {template.is_default && (
+                      <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                        Default
+                      </span>
+                    )}
+                    <div className="hidden group-hover:flex items-center gap-1 ml-1">
+                      {!template.is_default && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSetDefaultTemplate(template.id);
+                          }}
+                          title="Set as default"
+                        >
+                          <Check className="h-3 w-3" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 text-destructive hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteTemplate(template.id);
+                        }}
+                        title="Delete template"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+
         {/* Step 1: Template & CV */}
         <Card className="animate-slide-up">
           <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Mail className="h-4 w-4" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Mail className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Step 1: Pitch Template & Candidate</CardTitle>
+                  <CardDescription>Provide your preferred pitch style and select a candidate</CardDescription>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-lg">Step 1: Pitch Template & Candidate</CardTitle>
-                <CardDescription>Provide your preferred pitch style and select a candidate</CardDescription>
-              </div>
+              {preferredPitch.trim() && (
+                <Dialog open={showSaveTemplateDialog} onOpenChange={setShowSaveTemplateDialog}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Save className="h-4 w-4 mr-2" />
+                      Save as Template
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Save Template</DialogTitle>
+                      <DialogDescription>
+                        Save your current pitch as a reusable template
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="templateName">Template Name</Label>
+                        <Input
+                          id="templateName"
+                          placeholder="e.g., PE Candidate Pitch"
+                          value={newTemplateName}
+                          onChange={(e) => setNewTemplateName(e.target.value)}
+                        />
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        <p><strong>Subject:</strong> {subject || "(none)"}</p>
+                        <p className="mt-1"><strong>Body preview:</strong></p>
+                        <p className="line-clamp-3 mt-1">{preferredPitch}</p>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setShowSaveTemplateDialog(false)}>
+                        Cancel
+                      </Button>
+                      <Button 
+                        onClick={handleSaveTemplate} 
+                        disabled={!newTemplateName.trim() || isSavingTemplate}
+                      >
+                        {isSavingTemplate ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        Save Template
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
