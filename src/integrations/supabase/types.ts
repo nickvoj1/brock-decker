@@ -76,6 +76,8 @@ export type Database = {
       }
       candidate_profiles: {
         Row: {
+          apollo_contacts_count: number | null
+          bullhorn_status: string | null
           candidate_id: string
           created_at: string
           current_title: string | null
@@ -83,6 +85,7 @@ export type Database = {
           email: string | null
           id: string
           location: string | null
+          match_score: number | null
           name: string
           phone: string | null
           profile_name: string
@@ -92,6 +95,8 @@ export type Database = {
           work_history: Json | null
         }
         Insert: {
+          apollo_contacts_count?: number | null
+          bullhorn_status?: string | null
           candidate_id: string
           created_at?: string
           current_title?: string | null
@@ -99,6 +104,7 @@ export type Database = {
           email?: string | null
           id?: string
           location?: string | null
+          match_score?: number | null
           name: string
           phone?: string | null
           profile_name?: string
@@ -108,6 +114,8 @@ export type Database = {
           work_history?: Json | null
         }
         Update: {
+          apollo_contacts_count?: number | null
+          bullhorn_status?: string | null
           candidate_id?: string
           created_at?: string
           current_title?: string | null
@@ -115,6 +123,7 @@ export type Database = {
           email?: string | null
           id?: string
           location?: string | null
+          match_score?: number | null
           name?: string
           phone?: string | null
           profile_name?: string
@@ -348,7 +357,20 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      team_dashboard_stats: {
+        Row: {
+          avg_score: number | null
+          bullhorn_error: number | null
+          bullhorn_pending: number | null
+          bullhorn_uploaded: number | null
+          cvs_today: number | null
+          cvs_week: number | null
+          profile_name: string | null
+          total_apollo_contacts: number | null
+          total_cvs: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_role: {
