@@ -154,3 +154,20 @@ export interface AdminActivityData {
 export async function getAdminActivity(profileName: string) {
   return callDataApi<AdminActivityData>("admin-get-all-activity", profileName);
 }
+
+// === Team Dashboard ===
+export interface TeamMemberStats {
+  profile_name: string;
+  total_cvs: number;
+  cvs_today: number;
+  cvs_week: number;
+  avg_score: number;
+  total_apollo_contacts: number;
+  bullhorn_uploaded: number;
+  bullhorn_pending: number;
+  bullhorn_error: number;
+}
+
+export async function getTeamDashboardStats(profileName: string) {
+  return callDataApi<TeamMemberStats[]>("get-team-dashboard-stats", profileName);
+}
