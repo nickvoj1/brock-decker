@@ -425,12 +425,18 @@ export function BullhornSettingsCard() {
 
         {(bullhornStatusData?.connected || isExpired) && restUrl && (
           <div className={`rounded-lg border p-3 text-sm ${isExpired ? 'bg-destructive/10 border-destructive/30' : 'bg-muted/50'}`}>
-            <div className="flex items-center justify-between">
-              <div className={`flex items-center gap-2 ${isExpired ? 'text-destructive' : 'text-success'}`}>
-                {isExpired ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                <span className="font-medium">{isExpired ? 'OAuth Expired' : 'OAuth Connected'}</span>
-              </div>
-              {isExpired && (
+            <div className={`flex items-center gap-2 ${isExpired ? 'text-destructive' : 'text-success'}`}>
+              {isExpired ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+              <span className="font-medium">{isExpired ? 'OAuth Expired' : 'OAuth Connected'}</span>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              REST URL: {restUrl}
+              {expiresAt && (
+                <> • {isExpired ? 'Expired' : 'Expires'}: {new Date(expiresAt).toLocaleString()}</>
+              )}
+            </div>
+            {isExpired && (
+              <div className="mt-3 flex items-end justify-between">
                 <Button
                   variant="outline"
                   size="sm"
@@ -444,17 +450,9 @@ export function BullhornSettingsCard() {
                   )}
                   Refresh Token
                 </Button>
-              )}
-            </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              REST URL: {restUrl}
-              {expiresAt && (
-                <> • {isExpired ? 'Expired' : 'Expires'}: {new Date(expiresAt).toLocaleString()}</>
-              )}
-            </div>
-            {isExpired && (
-              <div className="mt-2 text-xs text-destructive">
-                Click "Refresh Token" to automatically reconnect, or use "Reconnect" for manual OAuth.
+                <span className="text-xs text-destructive">
+                  Or use "Reconnect" for manual OAuth
+                </span>
               </div>
             )}
           </div>
