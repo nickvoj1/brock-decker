@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, Shield } from "lucide-react";
+import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, Shield, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
-import { getApiSettings, saveApiSetting, getBullhornStatus } from "@/lib/dataApi";
+import { getApiSettings, saveApiSetting, getBullhornStatus, refreshBullhornTokens } from "@/lib/dataApi";
 
 interface DistListTestResult {
   test: string;
@@ -54,6 +54,7 @@ export function BullhornSettingsCard() {
   const [testingDistList, setTestingDistList] = useState(false);
   const [distListResults, setDistListResults] = useState<DistListTestResponse | null>(null);
   const [showDistListModal, setShowDistListModal] = useState(false);
+  const [refreshingToken, setRefreshingToken] = useState(false);
 
   // Check for OAuth callback results
   useEffect(() => {
@@ -224,15 +225,42 @@ export function BullhornSettingsCard() {
         error: error.message,
       });
       setShowDistListModal(true);
+    }
+  };
+
+  const handleRefreshToken = async () => {
+    if (!profileName) return;
+    setRefreshingToken(true);
+    try {
+      const response = await refreshBullhornTokens(profileName);
+      if (response.success) {
+        toast({
+          title: "Token Refreshed!",
+          description: "Bullhorn connection has been restored.",
+        });
+        queryClient.invalidateQueries({ queryKey: ['bullhorn-status'] });
+      } else {
+        toast({
+          title: "Refresh Failed",
+          description: response.error || "Could not refresh token. Try reconnecting manually.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Refresh Error",
+        description: error.message,
+        variant: "destructive",
+      });
     } finally {
-      setTestingDistList(false);
+      setRefreshingToken(false);
     }
   };
 
   const isBullhornConfigured = settings?.find((s: any) => s.setting_key === 'bullhorn_client_id')?.is_configured;
   const restUrl = bullhornStatusData?.restUrl;
   const expiresAt = bullhornStatusData?.expiresAt;
-  const isExpired = expiresAt ? new Date(expiresAt) < new Date() : false;
+  const isExpired = bullhornStatusData?.expired || (expiresAt ? new Date(expiresAt) < new Date() : false);
   const isConnected = bullhornStatusData?.connected && !isExpired;
 
   if (!profileName) {
@@ -392,11 +420,28 @@ export function BullhornSettingsCard() {
           </Button>
         </div>
 
-        {bullhornStatusData?.connected && restUrl && (
+        {(bullhornStatusData?.connected || isExpired) && restUrl && (
           <div className={`rounded-lg border p-3 text-sm ${isExpired ? 'bg-destructive/10 border-destructive/30' : 'bg-muted/50'}`}>
-            <div className={`flex items-center gap-2 ${isExpired ? 'text-destructive' : 'text-success'}`}>
-              {isExpired ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-              <span className="font-medium">{isExpired ? 'OAuth Expired' : 'OAuth Connected'}</span>
+            <div className="flex items-center justify-between">
+              <div className={`flex items-center gap-2 ${isExpired ? 'text-destructive' : 'text-success'}`}>
+                {isExpired ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                <span className="font-medium">{isExpired ? 'OAuth Expired' : 'OAuth Connected'}</span>
+              </div>
+              {isExpired && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefreshToken}
+                  disabled={refreshingToken}
+                >
+                  {refreshingToken ? (
+                    <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-3 w-3" />
+                  )}
+                  Refresh Token
+                </Button>
+              )}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
               REST URL: {restUrl}
@@ -406,7 +451,7 @@ export function BullhornSettingsCard() {
             </div>
             {isExpired && (
               <div className="mt-2 text-xs text-destructive">
-                Token has expired. Click "Reconnect" to re-authenticate with Bullhorn.
+                Click "Refresh Token" to automatically reconnect, or use "Reconnect" for manual OAuth.
               </div>
             )}
           </div>
