@@ -32,12 +32,12 @@ export function AppSidebar() {
       className="border-r border-sidebar-border bg-sidebar"
       collapsible="icon"
     >
-      <SidebarHeader className="p-5 border-b border-sidebar-border">
+      <SidebarHeader className="p-6 border-b border-sidebar-border">
         <div className="flex items-center justify-center">
           <img 
             src={brockDeckerLogo} 
             alt="Brock Decker" 
-            className={`transition-all duration-200 ${collapsed ? 'h-10 w-10 object-contain object-left' : 'h-14 w-auto'}`}
+            className={`transition-all duration-200 ${collapsed ? 'h-12 w-12 object-contain object-left' : 'h-20 w-auto'}`}
           />
         </div>
       </SidebarHeader>
