@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
+import TeamDashboard from "./pages/TeamDashboard";
 import UploadRun from "./pages/UploadRun";
 import RunsHistory from "./pages/RunsHistory";
 import PreviousCVs from "./pages/PreviousCVs";
@@ -23,6 +24,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<UploadRun />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/team-dashboard" element={<TeamDashboard />} />
           <Route path="/previous-cvs" element={<PreviousCVs />} />
           <Route path="/generate-mail" element={<GenerateMail />} />
           <Route path="/history" element={<RunsHistory />} />

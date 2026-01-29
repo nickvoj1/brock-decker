@@ -970,6 +970,100 @@ Deno.serve(async (req) => {
       );
     }
 
+    // === TEAM DASHBOARD STATS ===
+    if (action === "get-team-dashboard-stats") {
+      // Get aggregated stats for all team members from candidate_profiles
+      const { data: profiles, error: profilesError } = await supabase
+        .from("candidate_profiles")
+        .select("profile_name, created_at, apollo_contacts_count, bullhorn_status, match_score");
+
+      if (profilesError) throw profilesError;
+
+      // Aggregate by profile_name
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - 7);
+
+      const statsMap: Record<string, {
+        profile_name: string;
+        total_cvs: number;
+        cvs_today: number;
+        cvs_week: number;
+        avg_score: number;
+        total_apollo_contacts: number;
+        bullhorn_uploaded: number;
+        bullhorn_pending: number;
+        bullhorn_error: number;
+        scores: number[];
+      }> = {};
+
+      (profiles || []).forEach((p: any) => {
+        const pn = p.profile_name || "Unknown";
+        if (!statsMap[pn]) {
+          statsMap[pn] = {
+            profile_name: pn,
+            total_cvs: 0,
+            cvs_today: 0,
+            cvs_week: 0,
+            avg_score: 0,
+            total_apollo_contacts: 0,
+            bullhorn_uploaded: 0,
+            bullhorn_pending: 0,
+            bullhorn_error: 0,
+            scores: [],
+          };
+        }
+
+        const createdAt = new Date(p.created_at);
+        statsMap[pn].total_cvs++;
+        
+        if (createdAt >= todayStart) {
+          statsMap[pn].cvs_today++;
+        }
+        if (createdAt >= weekStart) {
+          statsMap[pn].cvs_week++;
+        }
+
+        statsMap[pn].total_apollo_contacts += p.apollo_contacts_count || 0;
+        
+        if (p.match_score) {
+          statsMap[pn].scores.push(Number(p.match_score));
+        }
+
+        switch (p.bullhorn_status) {
+          case 'uploaded':
+            statsMap[pn].bullhorn_uploaded++;
+            break;
+          case 'error':
+            statsMap[pn].bullhorn_error++;
+            break;
+          default:
+            statsMap[pn].bullhorn_pending++;
+        }
+      });
+
+      // Calculate averages
+      const result = Object.values(statsMap).map(s => ({
+        profile_name: s.profile_name,
+        total_cvs: s.total_cvs,
+        cvs_today: s.cvs_today,
+        cvs_week: s.cvs_week,
+        avg_score: s.scores.length > 0 
+          ? Math.round(s.scores.reduce((a, b) => a + b, 0) / s.scores.length)
+          : 0,
+        total_apollo_contacts: s.total_apollo_contacts,
+        bullhorn_uploaded: s.bullhorn_uploaded,
+        bullhorn_pending: s.bullhorn_pending,
+        bullhorn_error: s.bullhorn_error,
+      }));
+
+      return new Response(
+        JSON.stringify({ success: true, data: result }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: "Invalid action" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
