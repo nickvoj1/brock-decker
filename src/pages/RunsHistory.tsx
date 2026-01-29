@@ -37,6 +37,7 @@ import {
   generateBullhornSkillsString,
   normalizePreferencesData,
 } from "@/lib/bullhornSkills";
+import { getEnrichmentRuns } from "@/lib/dataApi";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
 
@@ -99,19 +100,20 @@ export default function RunsHistory() {
         return [];
       }
       
-      let query = supabase
-        .from('enrichment_runs')
-        .select('*')
-        .eq('uploaded_by', profileName)
-        .order('created_at', { ascending: false });
+      const response = await getEnrichmentRuns(profileName);
+      if (!response.success) throw new Error(response.error);
       
+      let data = (response.data || []) as EnrichmentRun[];
+      
+      // Apply status filter client-side
       if (statusFilter !== 'all') {
-        query = query.eq('status', statusFilter as RunStatus);
+        data = data.filter(r => r.status === statusFilter);
       }
       
-      const { data, error } = await query;
-      if (error) throw error;
-      return data as EnrichmentRun[];
+      // Sort by created_at desc
+      data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      return data;
     },
     enabled: !!profileName, // Only run query if profile is selected
   });

@@ -5,9 +5,9 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
+import { getCandidateProfiles, deleteCandidateProfile } from "@/lib/dataApi";
 
 interface SavedProfile {
   id: string;
@@ -39,15 +39,11 @@ export default function PreviousCVs() {
     
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("candidate_profiles")
-        .select("*")
-        .eq("profile_name", profileName)
-        .order("created_at", { ascending: false });
+      const response = await getCandidateProfiles(profileName);
 
-      if (error) throw error;
+      if (!response.success) throw new Error(response.error);
 
-      const transformedData: SavedProfile[] = (data || []).map((p) => ({
+      const transformedData: SavedProfile[] = (response.data || []).map((p: any) => ({
         id: p.id,
         profile_name: p.profile_name,
         candidate_id: p.candidate_id,
@@ -87,13 +83,12 @@ export default function PreviousCVs() {
   }, [profileName]);
 
   const handleDelete = async (profileId: string) => {
+    if (!profileName) return;
+    
     try {
-      const { error } = await supabase
-        .from("candidate_profiles")
-        .delete()
-        .eq("id", profileId);
+      const response = await deleteCandidateProfile(profileName, profileId);
 
-      if (error) throw error;
+      if (!response.success) throw new Error(response.error);
       setProfiles((prev) => prev.filter((p) => p.id !== profileId));
       toast({
         title: "Profile deleted",
