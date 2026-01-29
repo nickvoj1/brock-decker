@@ -230,9 +230,10 @@ export function BullhornSettingsCard() {
   };
 
   const isBullhornConfigured = settings?.find((s: any) => s.setting_key === 'bullhorn_client_id')?.is_configured;
-  const isConnected = bullhornStatusData?.connected;
   const restUrl = bullhornStatusData?.restUrl;
   const expiresAt = bullhornStatusData?.expiresAt;
+  const isExpired = expiresAt ? new Date(expiresAt) < new Date() : false;
+  const isConnected = bullhornStatusData?.connected && !isExpired;
 
   if (!profileName) {
     return (
@@ -391,18 +392,23 @@ export function BullhornSettingsCard() {
           </Button>
         </div>
 
-        {isConnected && restUrl && (
-          <div className="rounded-lg border bg-muted/50 p-3 text-sm">
-            <div className="flex items-center gap-2 text-success">
-              <CheckCircle2 className="h-4 w-4" />
-              <span className="font-medium">OAuth Connected</span>
+        {bullhornStatusData?.connected && restUrl && (
+          <div className={`rounded-lg border p-3 text-sm ${isExpired ? 'bg-destructive/10 border-destructive/30' : 'bg-muted/50'}`}>
+            <div className={`flex items-center gap-2 ${isExpired ? 'text-destructive' : 'text-success'}`}>
+              {isExpired ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+              <span className="font-medium">{isExpired ? 'OAuth Expired' : 'OAuth Connected'}</span>
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
               REST URL: {restUrl}
               {expiresAt && (
-                <> • Expires: {new Date(expiresAt).toLocaleString()}</>
+                <> • {isExpired ? 'Expired' : 'Expires'}: {new Date(expiresAt).toLocaleString()}</>
               )}
             </div>
+            {isExpired && (
+              <div className="mt-2 text-xs text-destructive">
+                Token has expired. Click "Reconnect" to re-authenticate with Bullhorn.
+              </div>
+            )}
           </div>
         )}
       </CardContent>
