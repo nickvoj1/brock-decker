@@ -428,11 +428,65 @@ const LOCATION_SKILLS: Record<string, string[]> = {
   'croatia': ['CROATIA', 'CEE'],
 }
 
+// Buy Side companies (PE, VC, Hedge Funds, Asset Managers, Credit Funds)
+const BUY_SIDE_COMPANY_PATTERNS = [
+  'blackstone', 'kkr', 'carlyle', 'apollo global', 'tpg', 'warburg pincus',
+  'advent international', 'bain capital', 'permira', 'cvc capital', 'apax',
+  'bc partners', 'eqt', 'cinven', 'pai partners', 'bridgepoint', 'ardian',
+  'partners group', 'general atlantic', 'silver lake', 'thoma bravo', 'vista equity',
+  'hellman', 'providence equity', 'onex', 'hg capital', 'montagu', 'ik partners',
+  'triton', 'nordic capital', 'equistone', 'charterhouse', 'advent',
+  // Credit funds
+  'ares', 'blue owl', 'owl rock', 'golub capital', 'antares capital', 'hps investment',
+  'sixth street', 'oak hill', 'goldentree', 'oaktree', 'cerberus', 'pgim', 'pimco',
+  // Asset management
+  'blackrock', 'vanguard', 'fidelity', 'wellington', 't. rowe', 'invesco',
+  'franklin templeton', 'nuveen', 'gam', 'schroders', 'jupiter', 'abrdn', 'man group',
+  // Hedge funds
+  'citadel', 'millennium', 'point72', 'bridgewater', 'two sigma', 'de shaw', 'd.e. shaw',
+  'renaissance', 'elliott', 'baupost', 'brevan howard', 'capula', 'qube',
+  // VC
+  'sequoia', 'andreessen', 'a16z', 'benchmark', 'accel', 'kleiner', 'greylock',
+  'lightspeed', 'general catalyst', 'index ventures', 'insight partners', 'balderton', 'atomico',
+  // Sovereign wealth
+  'qatar investment', 'qia', 'adia', 'gic', 'temasek', 'cppib', 'cdpq', 'calpers',
+]
+
+// Sell Side companies (Investment Banks, M&A Advisory)
+const SELL_SIDE_COMPANY_PATTERNS = [
+  'goldman sachs', 'morgan stanley', 'j.p. morgan', 'jp morgan', 'jpmorgan',
+  'bank of america', 'bofa securities', 'citigroup', 'citibank', 'barclays',
+  'deutsche bank', 'ubs', 'credit suisse', 'hsbc',
+  'lazard', 'evercore', 'moelis', 'centerview', 'perella weinberg', 'rothschild',
+  'greenhill', 'pjt partners', 'guggenheim', 'jefferies', 'nomura', 'macquarie',
+]
+
+// Detect if company is buy-side or sell-side
+function detectCompanySide(companyName: string): 'buy' | 'sell' | null {
+  const lower = companyName.toLowerCase()
+  for (const pattern of BUY_SIDE_COMPANY_PATTERNS) {
+    if (lower.includes(pattern)) return 'buy'
+  }
+  for (const pattern of SELL_SIDE_COMPANY_PATTERNS) {
+    if (lower.includes(pattern)) return 'sell'
+  }
+  return null
+}
+
+// Skills that conflict - cannot appear together
+const BUY_SIDE_ONLY_SKILLS = ['BUY SIDE', 'PE', 'CORP VC', 'VC', 'ALT INVESTMENT', 'ASS MAN']
+const SELL_SIDE_ONLY_SKILLS = ['SELL SIDE', 'CORPORATE BANKING', 'TIER 1']
+// CORP M&A can appear on both sides (PE does M&A, IB advises on M&A)
+
 function generateSkillsString(
   contact: ApolloContact,
   searchPreferences?: SearchPreference
 ): string {
   const skills = new Set<string>()
+
+  // FIRST: Detect company side to enforce skill consistency
+  const companySide = detectCompanySide(contact.company || '')
+  console.log(`[Skills] Contact ${contact.name} @ ${contact.company} -> side: ${companySide || 'unknown'}`)
 
   // 1. PRIMARY: Match from contact's COMPANY (most specific to this contact)
   const companyLower = contact.company?.toLowerCase() || ''
@@ -562,7 +616,20 @@ function generateSkillsString(
     }
   }
 
-  // 7. Ensure minimum skill count (at least 4 skills required)
+  // 7. CONFLICT RESOLUTION: Remove conflicting skills based on company side
+  if (companySide === 'buy') {
+    // Remove sell-side skills
+    SELL_SIDE_ONLY_SKILLS.forEach(s => skills.delete(s))
+    // Ensure buy-side marker is present
+    skills.add('BUY SIDE')
+  } else if (companySide === 'sell') {
+    // Remove buy-side skills
+    BUY_SIDE_ONLY_SKILLS.forEach(s => skills.delete(s))
+    // Ensure sell-side marker is present
+    skills.add('SELL SIDE')
+  }
+
+  // 8. Ensure minimum skill count (at least 4 skills required)
   if (skills.size < 4) {
     // Add generic business skill
     skills.add('BUSINESS')
@@ -571,19 +638,32 @@ function generateSkillsString(
       skills.add('SENIOR')
     } else if (titleLower.includes('associate') || titleLower.includes('analyst')) {
       skills.add('JUNIOR')
+    } else {
+      skills.add('MID-LEVEL')
     }
     // Add functional area if not enough
     if (skills.size < 4 && (titleLower.includes('hr') || titleLower.includes('talent') || titleLower.includes('recruit'))) {
       skills.add('C&B')
       skills.add('TALENT')
     }
+    // Still under 4? Add location-based fallback
+    if (skills.size < 4 && locationLower) {
+      if (locationLower.includes('london') || locationLower.includes('uk')) skills.add('LONDON')
+      else if (locationLower.includes('new york') || locationLower.includes('usa')) skills.add('AMERICAS')
+      else if (locationLower.includes('europe')) skills.add('EMEA')
+      else skills.add('GLOBAL')
+    }
   }
 
   // Hard guarantee: never return empty Skills
   if (skills.size === 0) {
     skills.add('BUSINESS')
-    skills.add('AMERICAS')
+    skills.add('GLOBAL')
+    skills.add('SENIOR')
+    skills.add('FINANCE')
   }
+
+  console.log(`[Skills] Final skills for ${contact.name}: ${Array.from(skills).join(' ; ')} (count: ${skills.size})`)
 
   // Return semicolon-separated unique skills (Bullhorn requires semicolons for Skills Count to work)
   return Array.from(skills).join(' ; ')

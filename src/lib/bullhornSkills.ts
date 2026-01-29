@@ -268,11 +268,57 @@ const ROLE_SKILLS: Record<string, string[]> = {
   cloud: ["CLOUD", "AWS", "AZURE"],
 };
 
+// Buy Side companies (PE, VC, Hedge Funds, Asset Managers, Credit Funds)
+const BUY_SIDE_COMPANY_PATTERNS = [
+  'blackstone', 'kkr', 'carlyle', 'apollo global', 'tpg', 'warburg pincus',
+  'advent international', 'bain capital', 'permira', 'cvc capital', 'apax',
+  'bc partners', 'eqt', 'cinven', 'pai partners', 'bridgepoint', 'ardian',
+  'partners group', 'general atlantic', 'silver lake', 'thoma bravo', 'vista equity',
+  'hellman', 'providence equity', 'onex', 'hg capital', 'montagu', 'ik partners',
+  'triton', 'nordic capital', 'equistone', 'charterhouse', 'advent',
+  'ares', 'blue owl', 'owl rock', 'golub capital', 'antares capital', 'hps investment',
+  'sixth street', 'oak hill', 'goldentree', 'oaktree', 'cerberus', 'pgim', 'pimco',
+  'blackrock', 'vanguard', 'fidelity', 'wellington', 't. rowe', 'invesco',
+  'franklin templeton', 'nuveen', 'gam', 'schroders', 'jupiter', 'abrdn', 'man group',
+  'citadel', 'millennium', 'point72', 'bridgewater', 'two sigma', 'de shaw', 'd.e. shaw',
+  'renaissance', 'elliott', 'baupost', 'brevan howard', 'capula', 'qube',
+  'sequoia', 'andreessen', 'a16z', 'benchmark', 'accel', 'kleiner', 'greylock',
+  'lightspeed', 'general catalyst', 'index ventures', 'insight partners', 'balderton', 'atomico',
+  'qatar investment', 'qia', 'adia', 'gic', 'temasek', 'cppib', 'cdpq', 'calpers',
+];
+
+// Sell Side companies (Investment Banks, M&A Advisory)
+const SELL_SIDE_COMPANY_PATTERNS = [
+  'goldman sachs', 'morgan stanley', 'j.p. morgan', 'jp morgan', 'jpmorgan',
+  'bank of america', 'bofa securities', 'citigroup', 'citibank', 'barclays',
+  'deutsche bank', 'ubs', 'credit suisse', 'hsbc',
+  'lazard', 'evercore', 'moelis', 'centerview', 'perella weinberg', 'rothschild',
+  'greenhill', 'pjt partners', 'guggenheim', 'jefferies', 'nomura', 'macquarie',
+];
+
+// Skills that conflict - cannot appear together
+const BUY_SIDE_ONLY_SKILLS = ['BUY SIDE', 'PE', 'CORP VC', 'VC', 'ALT INVESTMENT', 'ASS MAN'];
+const SELL_SIDE_ONLY_SKILLS = ['SELL SIDE', 'CORPORATE BANKING', 'TIER 1'];
+
+function detectCompanySide(companyName: string): 'buy' | 'sell' | null {
+  const lower = companyName.toLowerCase();
+  for (const pattern of BUY_SIDE_COMPANY_PATTERNS) {
+    if (lower.includes(pattern)) return 'buy';
+  }
+  for (const pattern of SELL_SIDE_COMPANY_PATTERNS) {
+    if (lower.includes(pattern)) return 'sell';
+  }
+  return null;
+}
+
 export function generateBullhornSkillsString(
   contact: BullhornSkillsContact,
   preferences?: SearchPreference
 ): string {
   const skills = new Set<string>();
+  
+  // Detect company side for conflict resolution
+  const companySide = detectCompanySide(contact.company || '');
 
   // 1) Direct industry mapping
   if (preferences?.industry) {
@@ -367,9 +413,38 @@ export function generateBullhornSkillsString(
     }
   }
 
-  // Hard guarantee: never return empty Skills (Bullhorn import/export should never get blank)
+  // 9) CONFLICT RESOLUTION: Remove conflicting skills based on company side
+  if (companySide === 'buy') {
+    SELL_SIDE_ONLY_SKILLS.forEach(s => skills.delete(s));
+    skills.add('BUY SIDE');
+  } else if (companySide === 'sell') {
+    BUY_SIDE_ONLY_SKILLS.forEach(s => skills.delete(s));
+    skills.add('SELL SIDE');
+  }
+
+  // 10) Ensure minimum skill count (at least 4 skills)
+  if (skills.size < 4) {
+    skills.add("BUSINESS");
+    if (titleLower.includes("senior") || titleLower.includes("head") || titleLower.includes("director")) {
+      skills.add("SENIOR");
+    } else if (titleLower.includes("associate") || titleLower.includes("analyst")) {
+      skills.add("JUNIOR");
+    } else {
+      skills.add("MID-LEVEL");
+    }
+    if (skills.size < 4 && locationLower) {
+      if (locationLower.includes("london") || locationLower.includes("uk")) skills.add("LONDON");
+      else if (locationLower.includes("new york") || locationLower.includes("usa")) skills.add("AMERICAS");
+      else skills.add("GLOBAL");
+    }
+  }
+
+  // Hard guarantee: never return empty Skills
   if (skills.size === 0) {
     skills.add("BUSINESS");
+    skills.add("GLOBAL");
+    skills.add("SENIOR");
+    skills.add("FINANCE");
   }
 
   return Array.from(skills).join(" ; ");
