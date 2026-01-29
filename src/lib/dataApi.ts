@@ -71,11 +71,24 @@ export async function getPitchTemplates(profileName: string) {
 }
 
 export async function savePitchTemplate(profileName: string, template: Record<string, unknown>) {
-  return callDataApi("save-pitch-template", profileName, { template });
+  return callDataApi<any>("save-pitch-template", profileName, { template });
 }
 
 export async function deletePitchTemplate(profileName: string, templateId: string) {
   return callDataApi("delete-pitch-template", profileName, { templateId });
+}
+
+export async function setDefaultTemplate(profileName: string, templateId: string) {
+  return callDataApi("set-default-template", profileName, { templateId });
+}
+
+// === Pitch History ===
+export async function getPitchHistory(profileName: string) {
+  return callDataApi<any[]>("get-pitch-history", profileName);
+}
+
+export async function savePitch(profileName: string, pitch: Record<string, unknown>) {
+  return callDataApi("save-pitch", profileName, { pitch });
 }
 
 // === Generated Pitches ===

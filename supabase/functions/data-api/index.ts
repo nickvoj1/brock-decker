@@ -757,6 +757,146 @@ Deno.serve(async (req) => {
       );
     }
 
+    // === PITCH TEMPLATES ===
+    if (action === "get-pitch-templates") {
+      const { data: templates, error } = await supabase
+        .from("pitch_templates")
+        .select("*")
+        .eq("profile_name", profileName)
+        .order("is_default", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true, data: templates }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "save-pitch-template") {
+      const { template } = data;
+      if (!template) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Template data required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      const { data: newTemplate, error } = await supabase
+        .from("pitch_templates")
+        .insert({
+          profile_name: profileName,
+          name: template.name,
+          subject_template: template.subject_template || null,
+          body_template: template.body_template,
+          is_default: template.is_default || false,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true, data: newTemplate }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "delete-pitch-template") {
+      const { templateId } = data;
+      if (!templateId) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Template ID required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      const { error } = await supabase
+        .from("pitch_templates")
+        .delete()
+        .eq("id", templateId)
+        .eq("profile_name", profileName);
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "set-default-template") {
+      const { templateId } = data;
+      if (!templateId) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Template ID required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      // Unset all defaults for this profile
+      await supabase
+        .from("pitch_templates")
+        .update({ is_default: false })
+        .eq("profile_name", profileName);
+
+      // Set the new default
+      const { error } = await supabase
+        .from("pitch_templates")
+        .update({ is_default: true })
+        .eq("id", templateId)
+        .eq("profile_name", profileName);
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // === GENERATED PITCHES (History) ===
+    if (action === "get-pitch-history") {
+      const { data: pitches, error } = await supabase
+        .from("generated_pitches")
+        .select("*")
+        .eq("profile_name", profileName)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true, data: pitches }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "save-pitch") {
+      const { pitch } = data;
+      if (!pitch) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Pitch data required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      const { error } = await supabase
+        .from("generated_pitches")
+        .insert({
+          profile_name: profileName,
+          template_id: pitch.template_id || null,
+          candidate_name: pitch.candidate_name,
+          candidate_title: pitch.candidate_title || null,
+          subject: pitch.subject || null,
+          body: pitch.body,
+          industries: pitch.industries || [],
+          locations: pitch.locations || [],
+        });
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: "Invalid action" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }

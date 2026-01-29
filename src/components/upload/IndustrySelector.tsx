@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Check, ChevronsUpDown, X, Building2 } from "lucide-react";
+import { Check, ChevronsUpDown, X, Building2, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -155,6 +155,8 @@ interface IndustrySelectorProps {
   onSelectionChange: (industries: string[]) => void;
   selectedSectors?: string[];
   onSectorsChange?: (sectors: string[]) => void;
+  excludedIndustries?: string[];
+  onExcludedChange?: (excluded: string[]) => void;
 }
 
 export function IndustrySelector({
@@ -162,9 +164,12 @@ export function IndustrySelector({
   onSelectionChange,
   selectedSectors = [],
   onSectorsChange,
+  excludedIndustries = [],
+  onExcludedChange,
 }: IndustrySelectorProps) {
   const [open, setOpen] = useState(false);
   const [sectorOpen, setSectorOpen] = useState(false);
+  const [excludeOpen, setExcludeOpen] = useState(false);
 
   // Persist to localStorage
   useEffect(() => {
@@ -270,6 +275,39 @@ export function IndustrySelector({
 
   const clearAll = () => {
     onSelectionChange([]);
+  };
+
+  // Exclusion helpers
+  const isIndustryExcluded = (industry: Industry) => {
+    return excludedIndustries.includes(industry.value) || excludedIndustries.includes(industry.label);
+  };
+
+  const toggleExcludedIndustry = (value: string) => {
+    if (!onExcludedChange) return;
+    const industry = ALL_INDUSTRIES.find((i) => i.value === value);
+    if (!industry) return;
+
+    if (isIndustryExcluded(industry)) {
+      onExcludedChange(excludedIndustries.filter((i) => i !== industry.value && i !== industry.label));
+    } else {
+      onExcludedChange([...excludedIndustries, industry.label]);
+    }
+  };
+
+  const removeExcludedIndustry = (value: string) => {
+    if (!onExcludedChange) return;
+    const industry = ALL_INDUSTRIES.find((i) => i.value === value || i.label === value);
+    if (!industry) {
+      onExcludedChange(excludedIndustries.filter((i) => i !== value));
+      return;
+    }
+    onExcludedChange(excludedIndustries.filter((i) => i !== industry.value && i !== industry.label));
+  };
+
+  const clearAllExcluded = () => {
+    if (onExcludedChange) {
+      onExcludedChange([]);
+    }
   };
 
   return (
@@ -487,6 +525,108 @@ export function IndustrySelector({
 
           <p className="text-xs text-muted-foreground">
             Narrow results by broad industry sector
+          </p>
+        </div>
+      )}
+
+      {/* Industry Exclusion */}
+      {onExcludedChange && (
+        <div className="mt-4 pt-4 border-t border-border space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-foreground flex items-center gap-2">
+              <Ban className="h-4 w-4 text-destructive" />
+              Exclude Industries
+              <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+            </label>
+            {excludedIndustries.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearAllExcluded}
+                className="h-auto py-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
+          <Popover open={excludeOpen} onOpenChange={setExcludeOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={excludeOpen}
+                className="w-full justify-between h-auto min-h-10 px-3 py-2 border-destructive/30 hover:border-destructive/50"
+              >
+                <span className={excludedIndustries.length === 0 ? "text-muted-foreground" : "text-destructive"}>
+                  {excludedIndustries.length === 0
+                    ? "Select industries to exclude from search..."
+                    : `${excludedIndustries.length} industr${excludedIndustries.length === 1 ? 'y' : 'ies'} excluded`}
+                </span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[450px] p-0 bg-popover" align="start" sideOffset={4}>
+              <Command>
+                <CommandInput placeholder="Search industries to exclude..." />
+                <CommandList>
+                  <ScrollArea className="h-[350px]">
+                    <CommandEmpty>No industry found.</CommandEmpty>
+                    {INDUSTRY_CATEGORIES.map((category, catIndex) => (
+                      <div key={category.name}>
+                        {catIndex > 0 && <CommandSeparator />}
+                        <CommandGroup heading={category.name}>
+                          {category.industries.map((industry) => (
+                            <CommandItem
+                              key={industry.value}
+                              value={industry.label}
+                              onSelect={() => toggleExcludedIndustry(industry.value)}
+                              className="cursor-pointer"
+                            >
+                              <div className={cn(
+                                "mr-2 h-4 w-4 border rounded flex items-center justify-center",
+                                isIndustryExcluded(industry)
+                                  ? "bg-destructive border-destructive text-destructive-foreground"
+                                  : "border-muted-foreground/30"
+                              )}>
+                                {isIndustryExcluded(industry) && (
+                                  <X className="h-3 w-3" />
+                                )}
+                              </div>
+                              {industry.label}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </div>
+                    ))}
+                  </ScrollArea>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          {excludedIndustries.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-2">
+              {excludedIndustries.map((value) => (
+                <Badge
+                  key={value}
+                  variant="destructive"
+                  className="gap-1 pr-1 text-xs"
+                >
+                  {getLabel(value)}
+                  <button
+                    onClick={() => removeExcludedIndustry(value)}
+                    className="ml-1 rounded-full p-0.5 hover:bg-destructive-foreground/20 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            These industries will be excluded from search results
           </p>
         </div>
       )}
