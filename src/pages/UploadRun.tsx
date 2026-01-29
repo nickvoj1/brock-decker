@@ -20,6 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCVAnalysis } from "@/hooks/useCVAnalysis";
 import { useProfileName } from "@/hooks/useProfileName";
+import { createEnrichmentRun, updateEnrichmentRun } from "@/lib/dataApi";
 import type { Json } from "@/integrations/supabase/types";
 
 interface WorkExperience {
@@ -326,23 +327,22 @@ export default function UploadRun() {
     setIsRunning(true);
     
     try {
-      // Create a new run record with single candidate
-      const { data: run, error: runError } = await supabase
-        .from('enrichment_runs')
-        .insert([{
-          search_counter: maxContacts,
-          candidates_count: 1,
-          preferences_count: selectedIndustries.length,
-          status: 'running' as const,
-          bullhorn_enabled: false,
-          candidates_data: JSON.parse(JSON.stringify([candidateData])) as Json,
-          preferences_data: JSON.parse(JSON.stringify(preferencesData)) as Json,
-          uploaded_by: profileName.trim() || null, // Track who created this run
-        }])
-        .select()
-        .single();
+      // Create a new run record via data-api (service role, bypasses RLS)
+      const runResult = await createEnrichmentRun(profileName.trim(), {
+        search_counter: maxContacts,
+        candidates_count: 1,
+        preferences_count: selectedIndustries.length,
+        status: 'running' as const,
+        bullhorn_enabled: false,
+        candidates_data: JSON.parse(JSON.stringify([candidateData])),
+        preferences_data: JSON.parse(JSON.stringify(preferencesData)),
+      });
 
-      if (runError) throw runError;
+      if (!runResult.success || !runResult.data) {
+        throw new Error(runResult.error || 'Failed to create run');
+      }
+      
+      const run = runResult.data;
 
       toast({
         title: "Searching for contacts",
@@ -355,10 +355,10 @@ export default function UploadRun() {
       });
 
       if (enrichError) {
-        await supabase
-          .from('enrichment_runs')
-          .update({ status: 'failed', error_message: enrichError.message })
-          .eq('id', run.id);
+        await updateEnrichmentRun(profileName.trim(), run.id, { 
+          status: 'failed', 
+          error_message: enrichError.message 
+        });
         throw enrichError;
       }
 
