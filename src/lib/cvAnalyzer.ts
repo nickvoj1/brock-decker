@@ -610,8 +610,26 @@ export function analyzeIndustries(candidate: ParsedCandidate): IndustrySuggestio
   const matchedCompanies: string[] = [];
   const reasoning: string[] = [];
   
-  // Analyze work history
+  // Collect previous employer names for exclusion (normalized)
   const workHistory = candidate.work_history || [];
+  const previousEmployers = new Set<string>(
+    workHistory.map(w => w.company.toLowerCase().trim())
+  );
+  
+  // Also create variations of company names to catch partial matches
+  const employerVariations = new Set<string>();
+  previousEmployers.forEach(employer => {
+    employerVariations.add(employer);
+    // Add variations without common suffixes
+    const withoutSuffixes = employer
+      .replace(/\s*(ltd|llp|inc|corp|plc|limited|gmbh|s\.a\.|sa|ag)\.?$/i, '')
+      .trim();
+    if (withoutSuffixes) employerVariations.add(withoutSuffixes);
+    // Add first word for simple company names
+    const firstWord = employer.split(/\s+/)[0];
+    if (firstWord && firstWord.length > 3) employerVariations.add(firstWord);
+  });
+  
   const companies = workHistory.map(w => w.company);
   
   // Weight recent experience more heavily
@@ -671,8 +689,25 @@ export function analyzeIndustries(candidate: ParsedCandidate): IndustrySuggestio
   }
   
   // Sort by score and take top industries
+  // CRITICAL: Filter out industries that match previous employer names
   const sortedIndustries = Array.from(industryScores.entries())
     .sort((a, b) => b[1] - a[1])
+    .filter(([ind]) => {
+      // Check if the industry name matches any previous employer
+      const indLower = ind.toLowerCase();
+      for (const employer of employerVariations) {
+        // Exact match or employer name is contained in industry
+        if (indLower === employer || indLower.includes(employer) || employer.includes(indLower)) {
+          // Only filter if it's a very close match (company name = industry)
+          // Don't filter generic industries like "Private Equity (PE)"
+          if (employer.length > 5 && (indLower === employer || employer.includes(indLower))) {
+            reasoning.push(`Excluded "${ind}" (previous employer)`);
+            return false;
+          }
+        }
+      }
+      return true;
+    })
     .slice(0, 10)
     .map(([ind]) => ind);
   
@@ -682,8 +717,17 @@ export function analyzeIndustries(candidate: ParsedCandidate): IndustrySuggestio
   if (maxScore >= 10) confidence = "high";
   else if (maxScore >= 5) confidence = "medium";
   
-  // Infer sectors
-  const sectors = inferSectorsFromIndustries(sortedIndustries);
+  // Infer sectors - also exclude previous employers from sectors
+  const allSectors = inferSectorsFromIndustries(sortedIndustries);
+  const sectors = allSectors.filter(sector => {
+    const sectorLower = sector.toLowerCase();
+    for (const employer of employerVariations) {
+      if (sectorLower === employer || sectorLower.includes(employer)) {
+        return false;
+      }
+    }
+    return true;
+  });
   
   return {
     industries: sortedIndustries,
