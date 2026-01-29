@@ -28,16 +28,13 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
 
   return (
-    <Sidebar 
-      className="border-r border-sidebar-border bg-sidebar"
-      collapsible="icon"
-    >
-      <SidebarHeader className="px-3 py-4 border-b border-sidebar-border">
+    <Sidebar className="border-r border-sidebar-border bg-sidebar" collapsible="icon">
+      <SidebarHeader className="px-6 py-8 border-b border-sidebar-border">
         <div className="flex items-center justify-start">
-          <img 
-            src={brockDeckerLogo} 
-            alt="Brock Decker" 
-            className={`transition-all duration-200 ${collapsed ? 'h-10 w-10 object-contain' : 'h-16 w-auto'}`}
+          <img
+            src={brockDeckerLogo}
+            alt="Brock Decker"
+            className={`transition-all duration-200 ${collapsed ? "h-10 w-10 object-contain" : "h-16 w-auto"}`}
           />
         </div>
       </SidebarHeader>
@@ -50,11 +47,7 @@ export function AppSidebar() {
                 const isActive = location.pathname === item.url;
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive}
-                      tooltip={item.title}
-                    >
+                    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
                       <NavLink
                         to={item.url}
                         className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200 ${
