@@ -15,20 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-
-interface ApiSetting {
-  id: string;
-  setting_key: string;
-  setting_value: string;
-  is_configured: boolean;
-}
-
-interface BullhornToken {
-  id: string;
-  rest_url: string;
-  created_at: string;
-  expires_at: string | null;
-}
+import { useProfileName } from "@/hooks/useProfileName";
+import { getApiSettings, saveApiSetting, getBullhornStatus } from "@/lib/dataApi";
 
 interface DistListTestResult {
   test: string;
@@ -49,6 +37,7 @@ interface DistListTestResponse {
 export function BullhornSettingsCard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const profileName = useProfileName();
   const [searchParams, setSearchParams] = useSearchParams();
   
   const [bullhornClientId, setBullhornClientId] = useState("");
@@ -76,7 +65,7 @@ export function BullhornSettingsCard() {
         title: "Bullhorn Connected!",
         description: "Successfully authenticated with Bullhorn.",
       });
-      queryClient.invalidateQueries({ queryKey: ['bullhorn-tokens'] });
+      queryClient.invalidateQueries({ queryKey: ['bullhorn-status'] });
       setSearchParams({});
     } else if (error) {
       toast({
@@ -89,60 +78,35 @@ export function BullhornSettingsCard() {
   }, [searchParams, toast, queryClient, setSearchParams]);
 
   const { data: settings, isLoading } = useQuery({
-    queryKey: ['api-settings'],
+    queryKey: ['api-settings', profileName],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('api_settings')
-        .select('*');
-      if (error) throw error;
-      return data as ApiSetting[];
+      if (!profileName) return [];
+      const response = await getApiSettings(profileName);
+      if (!response.success) throw new Error(response.error);
+      return response.data || [];
     },
+    enabled: !!profileName,
   });
 
-  const { data: bullhornTokens } = useQuery({
-    queryKey: ['bullhorn-tokens'],
+  const { data: bullhornStatusData } = useQuery({
+    queryKey: ['bullhorn-status', profileName],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('bullhorn_tokens')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(1);
-      if (error) throw error;
-      return data as BullhornToken[];
+      if (!profileName) return null;
+      const response = await getBullhornStatus(profileName);
+      if (!response.success) return null;
+      return response.data;
     },
+    enabled: !!profileName,
   });
 
-  useEffect(() => {
-    if (settings) {
-      settings.forEach((s) => {
-        switch (s.setting_key) {
-          case 'bullhorn_client_id':
-            setBullhornClientId(s.setting_value);
-            break;
-          case 'bullhorn_client_secret':
-            setBullhornClientSecret(s.setting_value);
-            break;
-          case 'bullhorn_username':
-            setBullhornUsername(s.setting_value);
-            break;
-          case 'bullhorn_password':
-            setBullhornPassword(s.setting_value);
-            break;
-        }
-      });
-    }
-  }, [settings]);
+  // Note: We don't load setting values from the API for security
+  // Users enter new values each time they want to update
 
   const saveMutation = useMutation({
     mutationFn: async ({ key, value }: { key: string; value: string }) => {
-      const { error } = await supabase
-        .from('api_settings')
-        .update({ 
-          setting_value: value, 
-          is_configured: value.length > 0 
-        })
-        .eq('setting_key', key);
-      if (error) throw error;
+      if (!profileName) throw new Error("No profile selected");
+      const response = await saveApiSetting(profileName, key, value);
+      if (!response.success) throw new Error(response.error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-settings'] });
@@ -161,10 +125,15 @@ export function BullhornSettingsCard() {
   });
 
   const handleSaveBullhorn = () => {
-    saveMutation.mutate({ key: 'bullhorn_client_id', value: bullhornClientId });
-    saveMutation.mutate({ key: 'bullhorn_client_secret', value: bullhornClientSecret });
-    saveMutation.mutate({ key: 'bullhorn_username', value: bullhornUsername });
-    saveMutation.mutate({ key: 'bullhorn_password', value: bullhornPassword });
+    if (bullhornClientId) saveMutation.mutate({ key: 'bullhorn_client_id', value: bullhornClientId });
+    if (bullhornClientSecret) saveMutation.mutate({ key: 'bullhorn_client_secret', value: bullhornClientSecret });
+    if (bullhornUsername) saveMutation.mutate({ key: 'bullhorn_username', value: bullhornUsername });
+    if (bullhornPassword) saveMutation.mutate({ key: 'bullhorn_password', value: bullhornPassword });
+    // Clear fields after saving for security
+    setBullhornClientId("");
+    setBullhornClientSecret("");
+    setBullhornUsername("");
+    setBullhornPassword("");
   };
 
   const handleConnectBullhorn = async () => {
@@ -260,9 +229,28 @@ export function BullhornSettingsCard() {
     }
   };
 
-  const isBullhornConfigured = settings?.find(s => s.setting_key === 'bullhorn_client_id')?.is_configured;
-  const isConnected = bullhornTokens && bullhornTokens.length > 0;
-  const tokenInfo = bullhornTokens?.[0];
+  const isBullhornConfigured = settings?.find((s: any) => s.setting_key === 'bullhorn_client_id')?.is_configured;
+  const isConnected = bullhornStatusData?.connected;
+  const restUrl = bullhornStatusData?.restUrl;
+  const expiresAt = bullhornStatusData?.expiresAt;
+
+  if (!profileName) {
+    return (
+      <Card className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Settings2 className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">Bullhorn</CardTitle>
+              <CardDescription>Select a profile to configure Bullhorn</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <Card className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
@@ -284,9 +272,9 @@ export function BullhornSettingsCard() {
                 Configured
               </span>
             )}
-            {isConnected && (
+          {isConnected && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                Connected to {tokenInfo?.rest_url?.split('//')[1]?.split('.')[0] || 'Bullhorn'}
+                Connected to {restUrl?.split('//')[1]?.split('.')[0] || 'Bullhorn'}
               </span>
             )}
           </div>
@@ -300,7 +288,7 @@ export function BullhornSettingsCard() {
               id="bhClientId"
               value={bullhornClientId}
               onChange={(e) => setBullhornClientId(e.target.value)}
-              placeholder="OAuth Client ID"
+              placeholder={isBullhornConfigured ? "••••••••••••••••" : "OAuth Client ID"}
             />
           </div>
           <div className="space-y-2">
@@ -403,16 +391,16 @@ export function BullhornSettingsCard() {
           </Button>
         </div>
 
-        {isConnected && tokenInfo && (
+        {isConnected && restUrl && (
           <div className="rounded-lg border bg-muted/50 p-3 text-sm">
             <div className="flex items-center gap-2 text-success">
               <CheckCircle2 className="h-4 w-4" />
               <span className="font-medium">OAuth Connected</span>
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
-              REST URL: {tokenInfo.rest_url}
-              {tokenInfo.expires_at && (
-                <> • Expires: {new Date(tokenInfo.expires_at).toLocaleString()}</>
+              REST URL: {restUrl}
+              {expiresAt && (
+                <> • Expires: {new Date(expiresAt).toLocaleString()}</>
               )}
             </div>
           </div>

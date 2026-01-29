@@ -7,53 +7,45 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-
-interface ApiSetting {
-  id: string;
-  setting_key: string;
-  setting_value: string;
-  is_configured: boolean;
-}
+import { useProfileName } from "@/hooks/useProfileName";
+import { getApiSettings, saveApiSetting } from "@/lib/dataApi";
 
 export function ApolloSettingsCard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const profileName = useProfileName();
   
   const [apolloKey, setApolloKey] = useState("");
   const [showApollo, setShowApollo] = useState(false);
   const [testingApollo, setTestingApollo] = useState(false);
   const [apolloStatus, setApolloStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  const { data: settings } = useQuery({
-    queryKey: ['api-settings'],
+  const { data: settings, isLoading } = useQuery({
+    queryKey: ['api-settings', profileName],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('api_settings')
-        .select('*');
-      if (error) throw error;
-      return data as ApiSetting[];
+      if (!profileName) return [];
+      const response = await getApiSettings(profileName);
+      if (!response.success) throw new Error(response.error);
+      return response.data || [];
     },
+    enabled: !!profileName,
   });
 
   useEffect(() => {
     if (settings) {
-      const apolloSetting = settings.find(s => s.setting_key === 'apollo_api_key');
+      const apolloSetting = settings.find((s: any) => s.setting_key === 'apollo_api_key');
       if (apolloSetting) {
-        setApolloKey(apolloSetting.setting_value);
+        // Note: setting_value is not returned by getApiSettings for security
+        // We only get is_configured status
       }
     }
   }, [settings]);
 
   const saveMutation = useMutation({
     mutationFn: async ({ key, value }: { key: string; value: string }) => {
-      const { error } = await supabase
-        .from('api_settings')
-        .update({ 
-          setting_value: value, 
-          is_configured: value.length > 0 
-        })
-        .eq('setting_key', key);
-      if (error) throw error;
+      if (!profileName) throw new Error("No profile selected");
+      const response = await saveApiSetting(profileName, key, value);
+      if (!response.success) throw new Error(response.error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-settings'] });
@@ -73,6 +65,7 @@ export function ApolloSettingsCard() {
 
   const handleSaveApollo = () => {
     saveMutation.mutate({ key: 'apollo_api_key', value: apolloKey });
+    setApolloKey(""); // Clear the field after saving for security
   };
 
   const testApolloConnection = async () => {
@@ -93,7 +86,25 @@ export function ApolloSettingsCard() {
     }
   };
 
-  const isApolloConfigured = settings?.find(s => s.setting_key === 'apollo_api_key')?.is_configured;
+  const isApolloConfigured = settings?.find((s: any) => s.setting_key === 'apollo_api_key')?.is_configured;
+
+  if (!profileName) {
+    return (
+      <Card className="animate-slide-up">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Key className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">Apollo.io</CardTitle>
+              <CardDescription>Select a profile to configure API keys</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <Card className="animate-slide-up">
@@ -126,7 +137,7 @@ export function ApolloSettingsCard() {
                 type={showApollo ? "text" : "password"}
                 value={apolloKey}
                 onChange={(e) => setApolloKey(e.target.value)}
-                placeholder="Enter your Apollo.io API key"
+                placeholder={isApolloConfigured ? "••••••••••••••••" : "Enter your Apollo.io API key"}
               />
               <button
                 type="button"
@@ -142,7 +153,7 @@ export function ApolloSettingsCard() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={handleSaveApollo} disabled={saveMutation.isPending}>
+          <Button onClick={handleSaveApollo} disabled={saveMutation.isPending || !apolloKey}>
             Save
           </Button>
           <Button
