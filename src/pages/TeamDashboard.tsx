@@ -1,12 +1,13 @@
 import { useEffect, useState, useMemo } from "react";
 import { 
   Users, 
-  FileText, 
   TrendingUp, 
   Trophy,
   Calendar,
   Filter,
   Eye,
+  Search,
+  CheckCircle,
   Upload as UploadIcon
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -30,7 +31,7 @@ import {
 } from "@/components/ui/select";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getTeamDashboardStats, TeamMemberStats } from "@/lib/dataApi";
-import { format, subDays, startOfDay, eachHourOfInterval } from "date-fns";
+import { format, startOfDay, eachHourOfInterval } from "date-fns";
 import {
   LineChart,
   Line,
@@ -41,23 +42,21 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-type TimeFilter = 'today' | 'week' | 'month' | 'all';
-type ScoreFilter = 'all' | 'high';
+type TimeFilter = 'today' | 'week' | 'all';
 
 interface AggregatedStats {
-  totalCVsToday: number;
-  myCVsToday: number;
-  teamCVsToday: number;
-  totalCVsAll: number;
-  avgScore: number;
-  totalApolloContacts: number;
-  bullhornUploaded: number;
-  bullhornPending: number;
+  totalContactsToday: number;
+  myContactsToday: number;
+  teamContactsToday: number;
+  totalContactsAll: number;
+  totalRuns: number;
+  avgSuccessRate: number;
+  bullhornExported: number;
 }
 
 interface HourlyData {
   hour: string;
-  cvs: number;
+  contacts: number;
 }
 
 export default function TeamDashboard() {
@@ -65,7 +64,6 @@ export default function TeamDashboard() {
   const [teamStats, setTeamStats] = useState<TeamMemberStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
-  const [scoreFilter, setScoreFilter] = useState<ScoreFilter>('all');
   const [showMyOnly, setShowMyOnly] = useState(false);
 
   useEffect(() => {
@@ -95,17 +93,18 @@ export default function TeamDashboard() {
   const aggregatedStats = useMemo((): AggregatedStats => {
     const myStats = teamStats.find(s => s.profile_name === profileName);
     
+    const totalSuccessRate = teamStats.length > 0 
+      ? teamStats.reduce((sum, s) => sum + s.success_rate, 0) / teamStats.length
+      : 0;
+
     return {
-      totalCVsToday: teamStats.reduce((sum, s) => sum + (s.cvs_today || 0), 0),
-      myCVsToday: myStats?.cvs_today || 0,
-      teamCVsToday: teamStats.reduce((sum, s) => sum + (s.cvs_today || 0), 0) - (myStats?.cvs_today || 0),
-      totalCVsAll: teamStats.reduce((sum, s) => sum + (s.total_cvs || 0), 0),
-      avgScore: teamStats.length > 0 
-        ? Math.round(teamStats.reduce((sum, s) => sum + (s.avg_score || 0), 0) / teamStats.length)
-        : 0,
-      totalApolloContacts: teamStats.reduce((sum, s) => sum + (s.total_apollo_contacts || 0), 0),
-      bullhornUploaded: teamStats.reduce((sum, s) => sum + (s.bullhorn_uploaded || 0), 0),
-      bullhornPending: teamStats.reduce((sum, s) => sum + (s.bullhorn_pending || 0), 0),
+      totalContactsToday: teamStats.reduce((sum, s) => sum + (s.contacts_today || 0), 0),
+      myContactsToday: myStats?.contacts_today || 0,
+      teamContactsToday: teamStats.reduce((sum, s) => sum + (s.contacts_today || 0), 0) - (myStats?.contacts_today || 0),
+      totalContactsAll: teamStats.reduce((sum, s) => sum + (s.total_contacts || 0), 0),
+      totalRuns: teamStats.reduce((sum, s) => sum + (s.total_runs || 0), 0),
+      avgSuccessRate: Math.round(totalSuccessRate),
+      bullhornExported: teamStats.reduce((sum, s) => sum + (s.bullhorn_exported || 0), 0),
     };
   }, [teamStats, profileName]);
 
@@ -116,26 +115,22 @@ export default function TeamDashboard() {
       filtered = filtered.filter(s => s.profile_name === profileName);
     }
     
-    if (scoreFilter === 'high') {
-      filtered = filtered.filter(s => (s.avg_score || 0) >= 90);
-    }
-    
-    // Sort by CVs based on time filter
+    // Sort by contacts based on time filter
     filtered.sort((a, b) => {
-      const getCVCount = (s: TeamMemberStats) => {
+      const getContactCount = (s: TeamMemberStats) => {
         switch (timeFilter) {
-          case 'today': return s.cvs_today || 0;
-          case 'week': return s.cvs_week || 0;
-          default: return s.total_cvs || 0;
+          case 'today': return s.contacts_today || 0;
+          case 'week': return s.contacts_week || 0;
+          default: return s.total_contacts || 0;
         }
       };
-      return getCVCount(b) - getCVCount(a);
+      return getContactCount(b) - getContactCount(a);
     });
     
     return filtered;
-  }, [teamStats, timeFilter, scoreFilter, showMyOnly, profileName]);
+  }, [teamStats, timeFilter, showMyOnly, profileName]);
 
-  // Mock hourly data for the chart (would come from real-time data in production)
+  // Mock hourly data for the chart
   const hourlyData = useMemo((): HourlyData[] => {
     const now = new Date();
     const startOfToday = startOfDay(now);
@@ -143,39 +138,24 @@ export default function TeamDashboard() {
     
     return hours.map((hour, index) => ({
       hour: format(hour, 'HH:00'),
-      cvs: Math.floor(Math.random() * 15) + (index > 8 && index < 18 ? 5 : 0), // Simulate work hours
+      contacts: Math.floor(Math.random() * 50) + (index > 8 && index < 18 ? 20 : 0),
     }));
   }, []);
 
-  const getCVCount = (stats: TeamMemberStats): number => {
+  const getContactCount = (stats: TeamMemberStats): number => {
     switch (timeFilter) {
-      case 'today': return stats.cvs_today || 0;
-      case 'week': return stats.cvs_week || 0;
-      default: return stats.total_cvs || 0;
+      case 'today': return stats.contacts_today || 0;
+      case 'week': return stats.contacts_week || 0;
+      default: return stats.total_contacts || 0;
     }
   };
 
-  const getApolloRate = (stats: TeamMemberStats): string => {
-    const cvs = stats.total_cvs || 1;
-    const contacts = stats.total_apollo_contacts || 0;
-    return (contacts / cvs).toFixed(1);
-  };
-
-  const getBullhornBadge = (stats: TeamMemberStats) => {
-    const uploaded = stats.bullhorn_uploaded || 0;
-    const pending = stats.bullhorn_pending || 0;
-    const errors = stats.bullhorn_error || 0;
-    
-    if (errors > 0) {
-      return <Badge variant="destructive">{errors} errors</Badge>;
+  const getRunCount = (stats: TeamMemberStats): number => {
+    switch (timeFilter) {
+      case 'today': return stats.runs_today || 0;
+      case 'week': return stats.runs_week || 0;
+      default: return stats.total_runs || 0;
     }
-    if (pending > 0) {
-      return <Badge variant="secondary">{pending} pending</Badge>;
-    }
-    if (uploaded > 0) {
-      return <Badge className="bg-success/10 text-success border-success/20">{uploaded} uploaded</Badge>;
-    }
-    return <Badge variant="outline">-</Badge>;
   };
 
   if (!profileName) {
@@ -200,49 +180,49 @@ export default function TeamDashboard() {
   return (
     <AppLayout
       title="Brock & Decker Dashboard"
-      description="Team recruitment metrics & performance"
+      description="Team recruitment metrics & Apollo contacts"
     >
       <div className="space-y-6">
-        {/* KPI Grid */}
+        {/* KPI Grid - Apollo Contacts Focus */}
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="bg-primary/5 border-primary/20 animate-slide-up" style={{ animationDelay: '0ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-primary">Total CVs Today</CardTitle>
-              <FileText className="h-4 w-4 text-primary" />
+              <CardTitle className="text-sm font-medium text-primary">Contacts Found Today</CardTitle>
+              <Users className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-primary">
-                {isLoading ? '-' : aggregatedStats.totalCVsToday}
+                {isLoading ? '-' : aggregatedStats.totalContactsToday.toLocaleString()}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {aggregatedStats.totalCVsAll} total all time
+                {aggregatedStats.totalContactsAll.toLocaleString()} total all time
               </p>
             </CardContent>
           </Card>
 
           <Card className="bg-success/5 border-success/20 animate-slide-up" style={{ animationDelay: '50ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-success">My CVs</CardTitle>
-              <UploadIcon className="h-4 w-4 text-success" />
+              <CardTitle className="text-sm font-medium text-success">My Contacts</CardTitle>
+              <Search className="h-4 w-4 text-success" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-success">
-                {isLoading ? '-' : aggregatedStats.myCVsToday}
+                {isLoading ? '-' : aggregatedStats.myContactsToday.toLocaleString()}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Today's uploads
+                Found today via Apollo
               </p>
             </CardContent>
           </Card>
 
           <Card className="bg-accent/50 border-accent animate-slide-up" style={{ animationDelay: '100ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Team Total</CardTitle>
+              <CardTitle className="text-sm font-medium">Team Contacts</CardTitle>
               <Users className="h-4 w-4 text-accent-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold">
-                {isLoading ? '-' : aggregatedStats.teamCVsToday}
+                {isLoading ? '-' : aggregatedStats.teamContactsToday.toLocaleString()}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 Other team members today
@@ -264,7 +244,6 @@ export default function TeamDashboard() {
                   <SelectContent>
                     <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
-                    <SelectItem value="month">This Month</SelectItem>
                     <SelectItem value="all">All Time</SelectItem>
                   </SelectContent>
                 </Select>
@@ -275,16 +254,7 @@ export default function TeamDashboard() {
                 size="sm"
                 onClick={() => setShowMyOnly(!showMyOnly)}
               >
-                My CVs Only
-              </Button>
-
-              <Button 
-                variant={scoreFilter === 'high' ? "default" : "outline"} 
-                size="sm"
-                onClick={() => setScoreFilter(scoreFilter === 'high' ? 'all' : 'high')}
-              >
-                <TrendingUp className="h-3 w-3 mr-1" />
-                High Score (90%+)
+                My Stats Only
               </Button>
 
               <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
@@ -301,9 +271,9 @@ export default function TeamDashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Trophy className="h-4 w-4 text-warning" />
-                Leaderboard
+                Leaderboard - Apollo Contacts
               </CardTitle>
-              <CardDescription>Team performance rankings</CardDescription>
+              <CardDescription>Contacts found per recruiter</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -321,11 +291,12 @@ export default function TeamDashboard() {
                       <TableRow>
                         <TableHead className="w-[40px]">#</TableHead>
                         <TableHead>Recruiter</TableHead>
-                        <TableHead className="text-center">CVs</TableHead>
-                        <TableHead className="text-center">Avg Score</TableHead>
-                        <TableHead className="text-center">Apollo Rate</TableHead>
+                        <TableHead className="text-center">Contacts</TableHead>
+                        <TableHead className="text-center">Runs</TableHead>
+                        <TableHead className="text-center">Avg/Run</TableHead>
+                        <TableHead className="text-center">Success</TableHead>
                         <TableHead className="text-center">Bullhorn</TableHead>
-                        <TableHead className="w-[80px]"></TableHead>
+                        <TableHead className="w-[60px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -352,22 +323,33 @@ export default function TeamDashboard() {
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="text-center font-semibold">
-                              {getCVCount(stats)}
-                            </TableCell>
                             <TableCell className="text-center">
-                              <span className={`font-medium ${
-                                (stats.avg_score || 0) >= 90 ? 'text-success' : 
-                                (stats.avg_score || 0) >= 70 ? 'text-warning' : 'text-muted-foreground'
-                              }`}>
-                                {stats.avg_score || 0}%
+                              <span className="font-bold text-primary">
+                                {getContactCount(stats).toLocaleString()}
                               </span>
                             </TableCell>
                             <TableCell className="text-center">
-                              {getApolloRate(stats)}/cv
+                              {getRunCount(stats)}
                             </TableCell>
                             <TableCell className="text-center">
-                              {getBullhornBadge(stats)}
+                              {stats.avg_contacts_per_run || 0}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <span className={`font-medium ${
+                                stats.success_rate >= 90 ? 'text-success' : 
+                                stats.success_rate >= 70 ? 'text-warning' : 'text-muted-foreground'
+                              }`}>
+                                {stats.success_rate}%
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {stats.bullhorn_exported > 0 ? (
+                                <Badge className="bg-success/10 text-success border-success/20">
+                                  {stats.bullhorn_exported}
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline">0</Badge>
+                              )}
                             </TableCell>
                             <TableCell>
                               <Button variant="ghost" size="sm">
@@ -384,14 +366,14 @@ export default function TeamDashboard() {
             </CardContent>
           </Card>
 
-          {/* CVs per Hour Chart */}
+          {/* Contacts per Hour Chart */}
           <Card className="animate-slide-up" style={{ animationDelay: '250ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
-                CVs / Hour
+                Contacts / Hour
               </CardTitle>
-              <CardDescription>Today's upload trend</CardDescription>
+              <CardDescription>Today's Apollo activity</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="h-[300px]">
@@ -417,7 +399,7 @@ export default function TeamDashboard() {
                     />
                     <Line 
                       type="monotone" 
-                      dataKey="cvs" 
+                      dataKey="contacts" 
                       stroke="hsl(var(--primary))" 
                       strokeWidth={2}
                       dot={false}
@@ -436,11 +418,11 @@ export default function TeamDashboard() {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted-foreground">Apollo Contacts</p>
-                  <p className="text-xl font-bold">{aggregatedStats.totalApolloContacts}</p>
+                  <p className="text-xs text-muted-foreground">Total Runs</p>
+                  <p className="text-xl font-bold">{aggregatedStats.totalRuns}</p>
                 </div>
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Users className="h-5 w-5 text-primary" />
+                  <Search className="h-5 w-5 text-primary" />
                 </div>
               </div>
             </CardContent>
@@ -450,8 +432,8 @@ export default function TeamDashboard() {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted-foreground">Team Avg Score</p>
-                  <p className="text-xl font-bold">{aggregatedStats.avgScore}%</p>
+                  <p className="text-xs text-muted-foreground">Avg Success Rate</p>
+                  <p className="text-xl font-bold">{aggregatedStats.avgSuccessRate}%</p>
                 </div>
                 <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
                   <TrendingUp className="h-5 w-5 text-success" />
@@ -464,8 +446,8 @@ export default function TeamDashboard() {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted-foreground">Bullhorn Uploaded</p>
-                  <p className="text-xl font-bold">{aggregatedStats.bullhornUploaded}</p>
+                  <p className="text-xs text-muted-foreground">Bullhorn Exports</p>
+                  <p className="text-xl font-bold">{aggregatedStats.bullhornExported}</p>
                 </div>
                 <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
                   <UploadIcon className="h-5 w-5 text-success" />
@@ -478,11 +460,11 @@ export default function TeamDashboard() {
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted-foreground">Pending Upload</p>
-                  <p className="text-xl font-bold">{aggregatedStats.bullhornPending}</p>
+                  <p className="text-xs text-muted-foreground">All Time Contacts</p>
+                  <p className="text-xl font-bold">{aggregatedStats.totalContactsAll.toLocaleString()}</p>
                 </div>
-                <div className="h-10 w-10 rounded-full bg-warning/10 flex items-center justify-center">
-                  <FileText className="h-5 w-5 text-warning" />
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <CheckCircle className="h-5 w-5 text-primary" />
                 </div>
               </div>
             </CardContent>

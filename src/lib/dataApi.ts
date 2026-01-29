@@ -158,14 +158,15 @@ export async function getAdminActivity(profileName: string) {
 // === Team Dashboard ===
 export interface TeamMemberStats {
   profile_name: string;
-  total_cvs: number;
-  cvs_today: number;
-  cvs_week: number;
-  avg_score: number;
-  total_apollo_contacts: number;
-  bullhorn_uploaded: number;
-  bullhorn_pending: number;
-  bullhorn_error: number;
+  total_runs: number;
+  runs_today: number;
+  runs_week: number;
+  total_contacts: number;
+  contacts_today: number;
+  contacts_week: number;
+  success_rate: number;
+  avg_contacts_per_run: number;
+  bullhorn_exported: number;
 }
 
 export async function getTeamDashboardStats(profileName: string) {
