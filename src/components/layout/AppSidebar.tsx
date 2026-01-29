@@ -34,7 +34,7 @@ export function AppSidebar() {
           <img
             src={brockDeckerLogo}
             alt="Brock Decker"
-            className={`transition-all duration-200 ${collapsed ? "h-10 w-10 object-contain" : "h-32 w-auto"}`}
+            className={`transition-all duration-200 ${collapsed ? "h-10 w-10 object-contain" : "h-24 w-auto"}`}
           />
         </div>
       </SidebarHeader>
