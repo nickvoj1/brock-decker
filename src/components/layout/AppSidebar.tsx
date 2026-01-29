@@ -29,7 +29,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r border-sidebar-border bg-sidebar" collapsible="icon">
-      <SidebarHeader className="px-3 py-4 border-b border-sidebar-border">
+      <SidebarHeader className="px-1 py-1 border-b border-sidebar-border">
         <div className="flex items-center justify-start">
           <img
             src={brockDeckerLogo}
