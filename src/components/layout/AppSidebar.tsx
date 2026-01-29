@@ -1,4 +1,4 @@
-import { Upload, History, Settings, Zap, Users, LayoutDashboard, Mail } from "lucide-react";
+import { Upload, History, Settings, Users, LayoutDashboard, Mail } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Sidebar,
@@ -11,6 +11,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import brockDeckerLogo from "@/assets/brock-decker-logo.png";
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -32,16 +33,12 @@ export function AppSidebar() {
       collapsible="icon"
     >
       <SidebarHeader className="p-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Zap className="h-5 w-5" />
-          </div>
-          {!collapsed && (
-            <div className="flex flex-col animate-fade-in">
-              <span className="font-semibold text-sidebar-foreground">Enrich Flow</span>
-              <span className="text-xs text-muted-foreground">Recruitment Tools</span>
-            </div>
-          )}
+        <div className="flex items-center justify-center">
+          <img 
+            src={brockDeckerLogo} 
+            alt="Brock Decker" 
+            className={`transition-all duration-200 ${collapsed ? 'h-8 w-8 object-contain object-left' : 'h-10 w-auto'}`}
+          />
         </div>
       </SidebarHeader>
 
