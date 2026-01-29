@@ -48,7 +48,9 @@ async function refreshBullhornTokens(supabase: any, refreshToken: string) {
   const tokenData = await tokenResponse.json();
 
   if (!tokenData.access_token) {
-    throw new Error("Failed to refresh Bullhorn token");
+    console.error("Bullhorn token refresh failed:", JSON.stringify(tokenData));
+    // If refresh failed, the session is likely expired - user needs to re-authenticate
+    throw new Error("Bullhorn session expired. Please reconnect to Bullhorn from Settings.");
   }
 
   // Get new REST token
