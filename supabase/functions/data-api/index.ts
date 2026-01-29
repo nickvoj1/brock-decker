@@ -972,14 +972,14 @@ Deno.serve(async (req) => {
 
     // === TEAM DASHBOARD STATS ===
     if (action === "get-team-dashboard-stats") {
-      // Get aggregated stats for all team members from candidate_profiles
-      const { data: profiles, error: profilesError } = await supabase
-        .from("candidate_profiles")
-        .select("profile_name, created_at, apollo_contacts_count, bullhorn_status, match_score");
+      // Get stats from enrichment_runs (Apollo contacts found)
+      const { data: runs, error: runsError } = await supabase
+        .from("enrichment_runs")
+        .select("uploaded_by, created_at, enriched_data, status, bullhorn_exported_at");
 
-      if (profilesError) throw profilesError;
+      if (runsError) throw runsError;
 
-      // Aggregate by profile_name
+      // Aggregate by uploaded_by (profile_name)
       const now = new Date();
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const weekStart = new Date(todayStart);
@@ -987,75 +987,74 @@ Deno.serve(async (req) => {
 
       const statsMap: Record<string, {
         profile_name: string;
-        total_cvs: number;
-        cvs_today: number;
-        cvs_week: number;
-        avg_score: number;
-        total_apollo_contacts: number;
-        bullhorn_uploaded: number;
-        bullhorn_pending: number;
-        bullhorn_error: number;
-        scores: number[];
+        total_runs: number;
+        runs_today: number;
+        runs_week: number;
+        total_contacts: number;
+        contacts_today: number;
+        contacts_week: number;
+        successful_runs: number;
+        bullhorn_exported: number;
       }> = {};
 
-      (profiles || []).forEach((p: any) => {
-        const pn = p.profile_name || "Unknown";
+      (runs || []).forEach((r: any) => {
+        const pn = r.uploaded_by || "Unknown";
         if (!statsMap[pn]) {
           statsMap[pn] = {
             profile_name: pn,
-            total_cvs: 0,
-            cvs_today: 0,
-            cvs_week: 0,
-            avg_score: 0,
-            total_apollo_contacts: 0,
-            bullhorn_uploaded: 0,
-            bullhorn_pending: 0,
-            bullhorn_error: 0,
-            scores: [],
+            total_runs: 0,
+            runs_today: 0,
+            runs_week: 0,
+            total_contacts: 0,
+            contacts_today: 0,
+            contacts_week: 0,
+            successful_runs: 0,
+            bullhorn_exported: 0,
           };
         }
 
-        const createdAt = new Date(p.created_at);
-        statsMap[pn].total_cvs++;
-        
-        if (createdAt >= todayStart) {
-          statsMap[pn].cvs_today++;
+        const createdAt = new Date(r.created_at);
+        const contacts = Array.isArray(r.enriched_data) ? r.enriched_data.length : 0;
+        const isToday = createdAt >= todayStart;
+        const isThisWeek = createdAt >= weekStart;
+
+        statsMap[pn].total_runs++;
+        statsMap[pn].total_contacts += contacts;
+
+        if (isToday) {
+          statsMap[pn].runs_today++;
+          statsMap[pn].contacts_today += contacts;
         }
-        if (createdAt >= weekStart) {
-          statsMap[pn].cvs_week++;
+        if (isThisWeek) {
+          statsMap[pn].runs_week++;
+          statsMap[pn].contacts_week += contacts;
         }
 
-        statsMap[pn].total_apollo_contacts += p.apollo_contacts_count || 0;
-        
-        if (p.match_score) {
-          statsMap[pn].scores.push(Number(p.match_score));
+        if (r.status === 'success' || r.status === 'partial') {
+          statsMap[pn].successful_runs++;
         }
 
-        switch (p.bullhorn_status) {
-          case 'uploaded':
-            statsMap[pn].bullhorn_uploaded++;
-            break;
-          case 'error':
-            statsMap[pn].bullhorn_error++;
-            break;
-          default:
-            statsMap[pn].bullhorn_pending++;
+        if (r.bullhorn_exported_at) {
+          statsMap[pn].bullhorn_exported++;
         }
       });
 
-      // Calculate averages
+      // Calculate success rates and format result
       const result = Object.values(statsMap).map(s => ({
         profile_name: s.profile_name,
-        total_cvs: s.total_cvs,
-        cvs_today: s.cvs_today,
-        cvs_week: s.cvs_week,
-        avg_score: s.scores.length > 0 
-          ? Math.round(s.scores.reduce((a, b) => a + b, 0) / s.scores.length)
+        total_runs: s.total_runs,
+        runs_today: s.runs_today,
+        runs_week: s.runs_week,
+        total_contacts: s.total_contacts,
+        contacts_today: s.contacts_today,
+        contacts_week: s.contacts_week,
+        success_rate: s.total_runs > 0 
+          ? Math.round((s.successful_runs / s.total_runs) * 100)
           : 0,
-        total_apollo_contacts: s.total_apollo_contacts,
-        bullhorn_uploaded: s.bullhorn_uploaded,
-        bullhorn_pending: s.bullhorn_pending,
-        bullhorn_error: s.bullhorn_error,
+        avg_contacts_per_run: s.total_runs > 0
+          ? Math.round(s.total_contacts / s.total_runs)
+          : 0,
+        bullhorn_exported: s.bullhorn_exported,
       }));
 
       return new Response(
