@@ -278,6 +278,7 @@ export type Database = {
           pin_hash: string
           profile_name: string
           reset_requested_at: string | null
+          salt: string | null
           updated_at: string
         }
         Insert: {
@@ -286,6 +287,7 @@ export type Database = {
           pin_hash: string
           profile_name: string
           reset_requested_at?: string | null
+          salt?: string | null
           updated_at?: string
         }
         Update: {
@@ -294,6 +296,7 @@ export type Database = {
           pin_hash?: string
           profile_name?: string
           reset_requested_at?: string | null
+          salt?: string | null
           updated_at?: string
         }
         Relationships: []

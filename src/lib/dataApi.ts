@@ -1,0 +1,106 @@
+import { supabase } from "@/integrations/supabase/client";
+
+// Secure data API that proxies all database operations through edge functions
+// This ensures RLS policies are enforced via service role
+
+export interface DataApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+async function callDataApi<T>(action: string, profileName: string, data?: Record<string, unknown>): Promise<DataApiResponse<T>> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("data-api", {
+      body: {
+        action,
+        profileName,
+        data,
+      },
+    });
+
+    if (error) {
+      console.error("Data API error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response as DataApiResponse<T>;
+  } catch (err) {
+    console.error("Data API call failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// === Candidate Profiles ===
+export async function getCandidateProfiles(profileName: string) {
+  return callDataApi<any[]>("get-candidate-profiles", profileName);
+}
+
+export async function saveCandidateProfile(profileName: string, candidateData: Record<string, unknown>) {
+  return callDataApi("save-candidate-profile", profileName, { candidateData });
+}
+
+export async function deleteCandidateProfile(profileName: string, candidateId: string) {
+  return callDataApi("delete-candidate-profile", profileName, { candidateId });
+}
+
+// === Enrichment Runs ===
+export async function getEnrichmentRuns(profileName: string) {
+  return callDataApi<any[]>("get-enrichment-runs", profileName);
+}
+
+export async function getEnrichmentRun(profileName: string, runId: string) {
+  return callDataApi<any>("get-enrichment-run", profileName, { runId });
+}
+
+export async function createEnrichmentRun(profileName: string, runData: Record<string, unknown>) {
+  return callDataApi<any>("create-enrichment-run", profileName, { runData });
+}
+
+export async function updateEnrichmentRun(profileName: string, runId: string, updates: Record<string, unknown>) {
+  return callDataApi("update-enrichment-run", profileName, { runId, updates });
+}
+
+export async function deleteEnrichmentRun(profileName: string, runId: string) {
+  return callDataApi("delete-enrichment-run", profileName, { runId });
+}
+
+// === Pitch Templates ===
+export async function getPitchTemplates(profileName: string) {
+  return callDataApi<any[]>("get-pitch-templates", profileName);
+}
+
+export async function savePitchTemplate(profileName: string, template: Record<string, unknown>) {
+  return callDataApi("save-pitch-template", profileName, { template });
+}
+
+export async function deletePitchTemplate(profileName: string, templateId: string) {
+  return callDataApi("delete-pitch-template", profileName, { templateId });
+}
+
+// === Generated Pitches ===
+export async function getGeneratedPitches(profileName: string) {
+  return callDataApi<any[]>("get-generated-pitches", profileName);
+}
+
+export async function saveGeneratedPitch(profileName: string, pitch: Record<string, unknown>) {
+  return callDataApi("save-generated-pitch", profileName, { pitch });
+}
+
+// === API Settings ===
+export async function getApiSettings(profileName: string) {
+  return callDataApi<{ setting_key: string; is_configured: boolean }[]>("get-api-settings", profileName);
+}
+
+export async function saveApiSetting(profileName: string, settingKey: string, settingValue: string) {
+  return callDataApi("save-api-setting", profileName, { settingKey, settingValue });
+}
+
+// === Bullhorn Status ===
+export async function getBullhornStatus(profileName: string) {
+  return callDataApi<{ connected: boolean; restUrl?: string; expiresAt?: string }>("get-bullhorn-status", profileName);
+}
+
+export async function clearBullhornTokens(profileName: string) {
+  return callDataApi("clear-bullhorn-tokens", profileName);
+}

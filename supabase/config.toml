@@ -20,3 +20,18 @@ verify_jwt = false
 
 [functions.bullhorn-initiate-oauth]
 verify_jwt = false
+
+[functions.data-api]
+verify_jwt = false
+
+[functions.verify-profile-pin]
+verify_jwt = false
+
+[functions.generate-pitch]
+verify_jwt = false
+
+[functions.check-bullhorn-overlap]
+verify_jwt = false
+
+[functions.test-bullhorn-distlist]
+verify_jwt = false
