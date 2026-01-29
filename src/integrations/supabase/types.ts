@@ -191,6 +191,86 @@ export type Database = {
         }
         Relationships: []
       }
+      generated_pitches: {
+        Row: {
+          body: string
+          candidate_name: string
+          candidate_title: string | null
+          created_at: string
+          id: string
+          industries: string[] | null
+          locations: string[] | null
+          profile_name: string
+          subject: string | null
+          template_id: string | null
+        }
+        Insert: {
+          body: string
+          candidate_name: string
+          candidate_title?: string | null
+          created_at?: string
+          id?: string
+          industries?: string[] | null
+          locations?: string[] | null
+          profile_name: string
+          subject?: string | null
+          template_id?: string | null
+        }
+        Update: {
+          body?: string
+          candidate_name?: string
+          candidate_title?: string | null
+          created_at?: string
+          id?: string
+          industries?: string[] | null
+          locations?: string[] | null
+          profile_name?: string
+          subject?: string | null
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generated_pitches_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "pitch_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pitch_templates: {
+        Row: {
+          body_template: string
+          created_at: string
+          id: string
+          is_default: boolean
+          name: string
+          profile_name: string
+          subject_template: string | null
+          updated_at: string
+        }
+        Insert: {
+          body_template: string
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          name: string
+          profile_name: string
+          subject_template?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body_template?: string
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          name?: string
+          profile_name?: string
+          subject_template?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profile_pins: {
         Row: {
           created_at: string
