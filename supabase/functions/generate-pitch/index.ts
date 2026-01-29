@@ -26,18 +26,28 @@ serve(async (req) => {
   }
 
   try {
-    const { candidate, preferredPitch, subject, industries, sectors, locations } = await req.json();
+    const { candidate, preferredPitch, subject, industries, sectors, locations, isGeneral } = await req.json();
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Build candidate context
-    const candidateContext = buildCandidateContext(candidate);
+    // Build context based on mode
+    const candidateContext = isGeneral ? null : buildCandidateContext(candidate);
     const targetContext = buildTargetContext(industries, sectors, locations);
 
-    const systemPrompt = `You are an expert recruitment pitch writer. Your task is to generate a personalized pitch email for a candidate based on their CV and the recruiter's preferred pitch style.
+    const systemPrompt = isGeneral 
+      ? `You are an expert recruitment pitch writer. Your task is to refine and enhance a general pitch email template for the recruiter.
+
+IMPORTANT RULES:
+1. Maintain the same tone, style, and structure as the provided template
+2. Keep placeholder language for candidate-specific details (e.g., "[Candidate Name]", "[specific experience]")
+3. Optimize the pitch for the target industries and locations
+4. Keep the pitch concise and professional
+5. If a subject line template is provided, refine it; otherwise create an appropriate subject template
+6. Focus on what makes candidates valuable for the target industries/locations`
+      : `You are an expert recruitment pitch writer. Your task is to generate a personalized pitch email for a candidate based on their CV and the recruiter's preferred pitch style.
 
 IMPORTANT RULES:
 1. Maintain the same tone, style, and structure as the provided template
@@ -47,7 +57,27 @@ IMPORTANT RULES:
 5. If a subject line template is provided, generate a similar one; otherwise create an appropriate subject
 6. Focus on the candidate's strengths and how they align with the target industries/locations`;
 
-    const userPrompt = `Generate a personalized pitch email for this candidate:
+    const userPrompt = isGeneral 
+      ? `Refine this general pitch template for the target context:
+
+TARGET CONTEXT:
+${targetContext}
+
+RECRUITER'S PITCH TEMPLATE:
+${preferredPitch}
+
+${subject ? `SUBJECT LINE TEMPLATE: ${subject}` : "Please also generate an appropriate subject line template."}
+
+Please generate:
+1. A subject line template (refine if provided, or create a compelling one with placeholders like [Candidate Name])
+2. The full pitch email body (maintain the style and structure, optimize for target industries/locations, keep placeholders for candidate-specific details)
+
+Format your response as:
+SUBJECT: [your subject line]
+
+BODY:
+[your email body]`
+      : `Generate a personalized pitch email for this candidate:
 
 CANDIDATE PROFILE:
 ${candidateContext}
