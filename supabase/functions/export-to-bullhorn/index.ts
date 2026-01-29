@@ -50,16 +50,19 @@ function normalizePreferences(raw: unknown): SearchPreference | undefined {
 // These MUST match the skill names in the Bullhorn Skill table for association to work
 
 // Company name to skill mapping - specific firms get specific skills
+// IMPORTANT: Use exact match patterns to avoid false positives
+// E.g., "bain capital" should NOT match just "bain" to avoid confusion with Bain & Company
 const COMPANY_SKILLS: Record<string, string[]> = {
-  // Investment Banks
+  // Investment Banks (exact company names)
   'goldman sachs': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'morgan stanley': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'j.p. morgan': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'jp morgan': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'jpmorgan': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'bank of america': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
-  'bofa': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
-  'citi': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'bofa securities': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'citigroup': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
+  'citibank': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'barclays': ['CORPORATE BANKING', 'CAPITAL MARKETS', 'TIER 1'],
   'deutsche bank': ['CORPORATE BANKING', 'DACH', 'TIER 1'],
   'ubs': ['CORPORATE BANKING', 'DACH', 'TIER 1'],
@@ -77,77 +80,99 @@ const COMPANY_SKILLS: Record<string, string[]> = {
   'jefferies': ['CORPORATE BANKING', 'CAPITAL MARKETS'],
   'nomura': ['CORPORATE BANKING', 'ASIA'],
   'macquarie': ['CORPORATE BANKING', 'AUSTRALIA'],
-  // Private Equity
-  'blackstone': ['BUY SIDE', 'CORP M&A', 'TIER 1'],
-  'kkr': ['BUY SIDE', 'CORP M&A', 'TIER 1'],
-  'carlyle': ['BUY SIDE', 'CORP M&A', 'TIER 1'],
-  'apollo': ['BUY SIDE', 'CREDIT', 'TIER 1'],
-  'tpg': ['BUY SIDE', 'CORP M&A'],
-  'warburg pincus': ['BUY SIDE', 'CORP M&A'],
-  'advent': ['BUY SIDE', 'CORP M&A'],
-  'bain capital': ['BUY SIDE', 'CORP M&A'],
-  'permira': ['BUY SIDE', 'CORP M&A'],
-  'cvc': ['BUY SIDE', 'CORP M&A'],
-  'apax': ['BUY SIDE', 'CORP M&A'],
-  'bc partners': ['BUY SIDE', 'CORP M&A'],
-  'eqt': ['BUY SIDE', 'CORP M&A', 'COPENHAGEN'],
-  'cinven': ['BUY SIDE', 'CORP M&A'],
-  'pai partners': ['BUY SIDE', 'CORP M&A', 'PARIS'],
-  'bridgepoint': ['BUY SIDE', 'CORP M&A'],
-  'ardian': ['BUY SIDE', 'CORP M&A', 'PARIS'],
-  'partners group': ['BUY SIDE', 'DACH'],
-  'general atlantic': ['BUY SIDE', 'CORP VC'],
-  'silver lake': ['BUY SIDE', 'DATA'],
-  'thoma bravo': ['BUY SIDE', 'DATA'],
-  'vista equity': ['BUY SIDE', 'DATA'],
-  'hellman & friedman': ['BUY SIDE', 'CORP M&A'],
-  'providence': ['BUY SIDE', 'CORP M&A'],
-  'onex': ['BUY SIDE', 'CREDIT'],
-  // Credit / Debt
+  
+  // Private Equity - MUST USE FULL NAMES to avoid matching consulting
+  'blackstone': ['BUY SIDE', 'PE', 'CORP M&A', 'TIER 1'],
+  'kkr': ['BUY SIDE', 'PE', 'CORP M&A', 'TIER 1'],
+  'carlyle': ['BUY SIDE', 'PE', 'CORP M&A', 'TIER 1'],
+  'apollo global': ['BUY SIDE', 'PE', 'CREDIT', 'TIER 1'],
+  'tpg capital': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'tpg': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'warburg pincus': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'advent international': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'bain capital': ['BUY SIDE', 'PE', 'CORP M&A'],  // Full name to avoid matching Bain & Company
+  'permira': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'cvc capital': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'apax partners': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'bc partners': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'eqt partners': ['BUY SIDE', 'PE', 'CORP M&A', 'COPENHAGEN'],
+  'eqt': ['BUY SIDE', 'PE', 'CORP M&A', 'COPENHAGEN'],
+  'cinven': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'pai partners': ['BUY SIDE', 'PE', 'CORP M&A', 'PARIS'],
+  'bridgepoint': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'ardian': ['BUY SIDE', 'PE', 'CORP M&A', 'PARIS'],
+  'partners group': ['BUY SIDE', 'PE', 'DACH'],
+  'general atlantic': ['BUY SIDE', 'PE', 'CORP VC'],
+  'silver lake': ['BUY SIDE', 'PE', 'DATA'],
+  'thoma bravo': ['BUY SIDE', 'PE', 'DATA'],
+  'vista equity': ['BUY SIDE', 'PE', 'DATA'],
+  'hellman & friedman': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'providence equity': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'onex': ['BUY SIDE', 'PE', 'CREDIT'],
+  'hg capital': ['BUY SIDE', 'PE', 'DATA'],
+  'montagu': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'ik partners': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'triton': ['BUY SIDE', 'PE', 'COPENHAGEN'],
+  'nordic capital': ['BUY SIDE', 'PE', 'COPENHAGEN'],
+  'equistone': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'charterhouse': ['BUY SIDE', 'PE', 'CORP M&A'],
+  'advent': ['BUY SIDE', 'PE', 'CORP M&A'],
+  
+  // Credit / Debt Funds
+  'ares management': ['CREDIT', 'Debt', 'BUY SIDE'],
   'ares': ['CREDIT', 'Debt', 'BUY SIDE'],
   'blue owl': ['CREDIT', 'Debt'],
   'owl rock': ['CREDIT', 'Debt'],
-  'golub': ['CREDIT', 'Debt'],
-  'antares': ['CREDIT', 'Debt'],
-  'hps': ['CREDIT', 'Debt'],
+  'golub capital': ['CREDIT', 'Debt'],
+  'antares capital': ['CREDIT', 'Debt'],
+  'hps investment': ['CREDIT', 'Debt'],
   'sixth street': ['CREDIT', 'Debt'],
   'oak hill': ['CREDIT', 'Debt'],
   'goldentree': ['CREDIT', 'Debt'],
   'oaktree': ['CREDIT', 'DISTRESSED', 'Debt'],
   'cerberus': ['CREDIT', 'DISTRESSED'],
   'pgim': ['CREDIT', 'ASS MAN'],
-  'prudential': ['CREDIT', 'ASSURANCE'],
   'pimco': ['BOND', 'Debt', 'ASS MAN'],
+  
+  // Asset Management
   'blackrock': ['ASS MAN', 'BUY SIDE'],
   'vanguard': ['ASS MAN'],
-  'fidelity': ['ASS MAN'],
-  'wellington': ['ASS MAN'],
+  'fidelity investments': ['ASS MAN'],
+  'wellington management': ['ASS MAN'],
   't. rowe price': ['ASS MAN'],
   'invesco': ['ASS MAN'],
   'franklin templeton': ['ASS MAN'],
   'nuveen': ['ASS MAN', 'CREDIT'],
-  'octagon': ['CREDIT', 'Debt'],
-  'eagle point': ['CREDIT', 'Debt'],
-  'comvest': ['CREDIT', 'Debt'],
-  'alignment credit': ['CREDIT', 'Debt'],
-  'willow tree': ['CREDIT', 'Debt'],
+  'gam investments': ['ASS MAN', 'ALT INVESTMENT'],
+  'schroders': ['ASS MAN'],
+  'jupiter': ['ASS MAN'],
+  'abrdn': ['ASS MAN'],
+  'man group': ['ASS MAN', 'ALT INVESTMENT'],
+  
   // Hedge Funds
   'citadel': ['ALT INVESTMENT', 'BUY SIDE'],
   'millennium': ['ALT INVESTMENT', 'BUY SIDE'],
   'point72': ['ALT INVESTMENT', 'BUY SIDE'],
   'bridgewater': ['ALT INVESTMENT', 'BUY SIDE'],
   'two sigma': ['ALT INVESTMENT', 'DATA'],
+  'd.e. shaw': ['ALT INVESTMENT', 'DATA'],
   'de shaw': ['ALT INVESTMENT', 'DATA'],
   'renaissance': ['ALT INVESTMENT', 'DATA'],
-  'elliott': ['ALT INVESTMENT', 'DISTRESSED'],
+  'elliott management': ['ALT INVESTMENT', 'DISTRESSED'],
   'baupost': ['ALT INVESTMENT', 'BUY SIDE'],
-  // Consulting
+  'brevan howard': ['ALT INVESTMENT', 'BUY SIDE'],
+  'capula': ['ALT INVESTMENT', 'BUY SIDE'],
+  'qube research': ['ALT INVESTMENT', 'DATA'],
+  
+  // Consulting - Use FULL NAMES to avoid overlap with PE
   'mckinsey': ['CONSULT', 'CORP STRATEGY'],
-  'bain': ['CONSULT', 'CORP STRATEGY'],
-  'boston consulting': ['CONSULT', 'CORP STRATEGY'],
+  'mckinsey & company': ['CONSULT', 'CORP STRATEGY'],
+  'bain & company': ['CONSULT', 'CORP STRATEGY'],  // Full name - NOT "bain" alone
+  'boston consulting group': ['CONSULT', 'CORP STRATEGY'],
   'bcg': ['CONSULT', 'CORP STRATEGY'],
   'deloitte': ['CONSULT', 'AUDIT'],
   'pwc': ['CONSULT', 'AUDIT'],
+  'pricewaterhousecoopers': ['CONSULT', 'AUDIT'],
   'kpmg': ['CONSULT', 'AUDIT'],
   'ey': ['CONSULT', 'AUDIT'],
   'ernst & young': ['CONSULT', 'AUDIT'],
@@ -156,32 +181,46 @@ const COMPANY_SKILLS: Record<string, string[]> = {
   'roland berger': ['CONSULT', 'DACH'],
   'alvarez & marsal': ['CONSULT', 'BANKRUPCY'],
   'fti consulting': ['CONSULT', 'BANKRUPCY'],
+  'linklaters': ['LEGAL'],
+  'clifford chance': ['LEGAL'],
+  'freshfields': ['LEGAL'],
+  'allen & overy': ['LEGAL'],
+  'kirkland & ellis': ['LEGAL', 'PE'],
+  'simpson thacher': ['LEGAL', 'PE'],
+  
   // Real Estate
-  'brookfield': ['AREC', 'CONSTRUCTION'],
-  'blackstone real estate': ['AREC', 'BUY SIDE'],
+  'brookfield': ['AREC', 'CONSTRUCTION', 'BUY SIDE'],
+  'blackstone real estate': ['AREC', 'BUY SIDE', 'PE'],
   'starwood': ['AREC', 'BUY SIDE'],
-  'colony': ['AREC'],
-  'cushman': ['AREC', 'CONSULT'],
-  'cbre': ['AREC', 'CONSULT'],
-  'jll': ['AREC', 'CONSULT'],
+  'cushman': ['AREC'],
+  'cbre': ['AREC'],
+  'jll': ['AREC'],
   'hines': ['AREC'],
+  
   // VC
-  'sequoia': ['CORP VC', 'DATA'],
-  'andreessen': ['CORP VC', 'DATA'],
-  'a16z': ['CORP VC', 'DATA'],
-  'benchmark': ['CORP VC'],
-  'accel': ['CORP VC'],
-  'kleiner': ['CORP VC'],
-  'greylock': ['CORP VC'],
-  'lightspeed': ['CORP VC'],
-  'general catalyst': ['CORP VC'],
-  'index ventures': ['CORP VC'],
-  'insight partners': ['CORP VC', 'BUY SIDE'],
-  // Banks / Credit Unions
-  'federal reserve': ['BANK', 'CENTRAL BANK'],
-  'fed': ['BANK', 'CENTRAL BANK'],
-  'credit union': ['BANK', 'RETAIL BANKING'],
-  'teachers federal': ['BANK', 'RETAIL BANKING'],
+  'sequoia': ['CORP VC', 'VC', 'DATA'],
+  'andreessen horowitz': ['CORP VC', 'VC', 'DATA'],
+  'a16z': ['CORP VC', 'VC', 'DATA'],
+  'benchmark': ['CORP VC', 'VC'],
+  'accel': ['CORP VC', 'VC'],
+  'kleiner perkins': ['CORP VC', 'VC'],
+  'greylock': ['CORP VC', 'VC'],
+  'lightspeed': ['CORP VC', 'VC'],
+  'general catalyst': ['CORP VC', 'VC'],
+  'index ventures': ['CORP VC', 'VC'],
+  'insight partners': ['CORP VC', 'VC', 'BUY SIDE'],
+  'balderton': ['CORP VC', 'VC'],
+  'atomico': ['CORP VC', 'VC'],
+  
+  // Sovereign Wealth / Large Investors
+  'qatar investment authority': ['BUY SIDE', 'SOVEREIGN'],
+  'qia': ['BUY SIDE', 'SOVEREIGN'],
+  'adia': ['BUY SIDE', 'SOVEREIGN', 'ABU DHABI'],
+  'gic': ['BUY SIDE', 'SOVEREIGN', 'SINGAPORE'],
+  'temasek': ['BUY SIDE', 'SOVEREIGN', 'SINGAPORE'],
+  'cppib': ['BUY SIDE', 'SOVEREIGN', 'CANADA'],
+  'cdpq': ['BUY SIDE', 'SOVEREIGN', 'CANADA'],
+  'calpers': ['BUY SIDE', 'ASS MAN'],
 }
 
 // Title-specific skill mapping - more granular
@@ -428,52 +467,98 @@ function generateSkillsString(
   }
 
   // 5. SECONDARY: Add industry context from search preferences (shared across run)
-  // Only add 1-2 skills from preferences to avoid overwhelming contact-specific data
+  // Add relevant skills based on search intent - these are CRITICAL for matching
   if (searchPreferences?.industry) {
     const lowerIndustry = searchPreferences.industry.toLowerCase()
-    // Map common industries
-    if (lowerIndustry.includes('credit') || lowerIndustry.includes('debt')) {
+    
+    // Check for abbreviations and full names
+    // PE / Private Equity
+    if (lowerIndustry === 'pe' || lowerIndustry.includes('private equity') || lowerIndustry.includes('buyout')) {
+      skills.add('BUY SIDE')
+      skills.add('PE')
+      skills.add('CORP M&A')
+    }
+    // VC / Venture Capital
+    if (lowerIndustry === 'vc' || lowerIndustry.includes('venture capital') || lowerIndustry.includes('venture')) {
+      skills.add('CORP VC')
+      skills.add('VC')
+    }
+    // Credit / Debt / Private Credit
+    if (lowerIndustry.includes('credit') || lowerIndustry.includes('debt') || lowerIndustry.includes('lending')) {
       skills.add('CREDIT')
       skills.add('Debt')
     }
-    if (lowerIndustry.includes('private equity') || lowerIndustry.includes('pe')) {
-      skills.add('BUY SIDE')
-    }
-    if (lowerIndustry.includes('venture') || lowerIndustry.includes('vc')) {
-      skills.add('CORP VC')
-    }
+    // Hedge Fund
     if (lowerIndustry.includes('hedge')) {
       skills.add('ALT INVESTMENT')
+      skills.add('BUY SIDE')
     }
-    if (lowerIndustry.includes('real estate')) {
+    // Real Estate
+    if (lowerIndustry.includes('real estate') || lowerIndustry.includes('property')) {
       skills.add('AREC')
     }
-    if (lowerIndustry.includes('investment bank')) {
+    // Investment Banking / IB
+    if (lowerIndustry === 'ib' || lowerIndustry.includes('investment bank') || lowerIndustry.includes('ibd')) {
       skills.add('CORPORATE BANKING')
+      skills.add('CAPITAL MARKETS')
     }
-    if (lowerIndustry.includes('asset management')) {
+    // Asset Management
+    if (lowerIndustry.includes('asset management') || lowerIndustry.includes('fund management')) {
       skills.add('ASS MAN')
     }
-    if (lowerIndustry.includes('distressed')) {
+    // Distressed / Special Situations
+    if (lowerIndustry.includes('distressed') || lowerIndustry.includes('special situations')) {
       skills.add('DISTRESSED')
       skills.add('BANKRUPCY')
     }
-    if (lowerIndustry.includes('capital markets') || lowerIndustry.includes('dcm')) {
+    // Capital Markets / DCM / ECM
+    if (lowerIndustry.includes('capital markets') || lowerIndustry === 'dcm' || lowerIndustry === 'ecm') {
       skills.add('CAPITAL MARKETS')
-      skills.add('DCM')
+      if (lowerIndustry === 'dcm' || lowerIndustry.includes('debt capital')) {
+        skills.add('DCM')
+        skills.add('Debt')
+      }
+    }
+    // M&A
+    if (lowerIndustry === 'm&a' || lowerIndustry.includes('mergers') || lowerIndustry.includes('acquisitions')) {
+      skills.add('CORP M&A')
+    }
+    // Infrastructure
+    if (lowerIndustry.includes('infrastructure') || lowerIndustry.includes('infra')) {
+      skills.add('CONSTRUCTION')
+      skills.add('CAPITAL GOODS')
+    }
+    // Consulting - only add if explicitly consulting, NOT for PE firms
+    if (lowerIndustry.includes('consulting') || lowerIndustry.includes('advisory')) {
+      skills.add('CONSULT')
     }
   }
 
-  // 6. Add industries array if present (limit to first 2 to avoid duplication)
+  // 6. Add industries array if present
   if (searchPreferences?.industries && searchPreferences.industries.length > 0) {
-    const firstTwo = searchPreferences.industries.slice(0, 2)
-    for (const industry of firstTwo) {
+    for (const industry of searchPreferences.industries) {
       const lower = industry.toLowerCase()
-      if (lower.includes('credit')) skills.add('CREDIT')
-      if (lower.includes('private equity')) skills.add('BUY SIDE')
-      if (lower.includes('venture')) skills.add('CORP VC')
+      // Same abbreviation handling
+      if (lower === 'pe' || lower.includes('private equity')) {
+        skills.add('BUY SIDE')
+        skills.add('PE')
+      }
+      if (lower === 'vc' || lower.includes('venture')) {
+        skills.add('CORP VC')
+        skills.add('VC')
+      }
+      if (lower.includes('credit') || lower.includes('private debt')) {
+        skills.add('CREDIT')
+        skills.add('Debt')
+      }
       if (lower.includes('distressed')) skills.add('DISTRESSED')
-      if (lower.includes('debt') || lower.includes('dcm')) skills.add('Debt')
+      if (lower === 'dcm' || lower.includes('debt capital')) {
+        skills.add('DCM')
+        skills.add('Debt')
+      }
+      if (lower.includes('hedge')) skills.add('ALT INVESTMENT')
+      if (lower.includes('real estate')) skills.add('AREC')
+      if (lower === 'm&a' || lower.includes('mergers')) skills.add('CORP M&A')
     }
   }
 
@@ -488,7 +573,7 @@ function generateSkillsString(
       skills.add('JUNIOR')
     }
     // Add functional area if not enough
-    if (skills.size < 4 && titleLower.includes('hr') || titleLower.includes('talent') || titleLower.includes('recruit')) {
+    if (skills.size < 4 && (titleLower.includes('hr') || titleLower.includes('talent') || titleLower.includes('recruit'))) {
       skills.add('C&B')
       skills.add('TALENT')
     }
