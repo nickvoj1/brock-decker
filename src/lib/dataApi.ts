@@ -98,7 +98,11 @@ export async function saveApiSetting(profileName: string, settingKey: string, se
 
 // === Bullhorn Status ===
 export async function getBullhornStatus(profileName: string) {
-  return callDataApi<{ connected: boolean; restUrl?: string; expiresAt?: string }>("get-bullhorn-status", profileName);
+  return callDataApi<{ connected: boolean; expired?: boolean; hasRefreshToken?: boolean; restUrl?: string; expiresAt?: string }>("get-bullhorn-status", profileName);
+}
+
+export async function refreshBullhornTokens(profileName: string) {
+  return callDataApi<{ connected: boolean; restUrl?: string; expiresAt?: string }>("refresh-bullhorn-tokens", profileName);
 }
 
 export async function clearBullhornTokens(profileName: string) {
