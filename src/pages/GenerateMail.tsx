@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Mail, Loader2, Sparkles, Copy, Check, FileText, Save, Trash2, History, Plus, BookTemplate } from "lucide-react";
+import { Mail, Loader2, Sparkles, Copy, Check, FileText, Save, Trash2, History, BookTemplate, User, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
@@ -101,6 +101,9 @@ export default function GenerateMail() {
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+  
+  // Pitch mode: 'personalized' (requires CV) or 'general' (no CV needed)
+  const [pitchMode, setPitchMode] = useState<"personalized" | "general">("personalized");
   
   // Generation states
   const [isGenerating, setIsGenerating] = useState(false);
@@ -367,10 +370,11 @@ export default function GenerateMail() {
     });
   };
 
-  const canGenerate = profileName && cvData && preferredPitch.trim() && selectedIndustries.length > 0 && selectedLocations.length > 0 && !isGenerating;
+  const canGenerate = profileName && preferredPitch.trim() && selectedIndustries.length > 0 && selectedLocations.length > 0 && !isGenerating && (pitchMode === "general" || cvData);
 
   const handleGenerate = async () => {
-    if (!cvData || !preferredPitch.trim() || !profileName) return;
+    if (!preferredPitch.trim() || !profileName) return;
+    if (pitchMode === "personalized" && !cvData) return;
     
     setIsGenerating(true);
     setGeneratedPitch("");
@@ -379,12 +383,13 @@ export default function GenerateMail() {
     try {
       const { data, error } = await supabase.functions.invoke('generate-pitch', {
         body: {
-          candidate: cvData,
+          candidate: pitchMode === "personalized" ? cvData : null,
           preferredPitch: preferredPitch.trim(),
           subject: subject.trim(),
           industries: selectedIndustries,
           sectors: selectedSectors,
           locations: selectedLocations,
+          isGeneral: pitchMode === "general",
         }
       });
 
@@ -402,8 +407,8 @@ export default function GenerateMail() {
         .insert({
           profile_name: profileName,
           template_id: selectedTemplateId,
-          candidate_name: cvData.name,
-          candidate_title: cvData.current_title || null,
+          candidate_name: pitchMode === "general" ? "General Pitch" : cvData!.name,
+          candidate_title: pitchMode === "general" ? null : (cvData?.current_title || null),
           subject: subjectLine || null,
           body: pitch,
           industries: selectedIndustries,
@@ -661,6 +666,39 @@ export default function GenerateMail() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Pitch Mode Toggle */}
+            <div className="space-y-2">
+              <Label>Pitch Type</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={pitchMode === "personalized" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setPitchMode("personalized")}
+                  className="flex-1"
+                >
+                  <User className="h-4 w-4 mr-2" />
+                  Personalized (with CV)
+                </Button>
+                <Button
+                  type="button"
+                  variant={pitchMode === "general" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setPitchMode("general")}
+                  className="flex-1"
+                >
+                  <Users className="h-4 w-4 mr-2" />
+                  General (no CV)
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {pitchMode === "personalized" 
+                  ? "Generate a pitch tailored to a specific candidate's CV and experience."
+                  : "Generate a general pitch template without specific candidate details."
+                }
+              </p>
+            </div>
+
             {/* Pitch Template */}
             <div className="space-y-4">
               <div className="space-y-2">
@@ -677,91 +715,99 @@ export default function GenerateMail() {
                 <Label htmlFor="pitch">Your Preferred Pitch Template *</Label>
                 <Textarea
                   id="pitch"
-                  placeholder="Paste your preferred pitch email here. The AI will adapt it for the specific candidate while maintaining your style and tone..."
+                  placeholder={pitchMode === "personalized" 
+                    ? "Paste your preferred pitch email here. The AI will adapt it for the specific candidate while maintaining your style and tone..."
+                    : "Paste your preferred pitch email here. The AI will refine it for your target industries and locations..."
+                  }
                   value={preferredPitch}
                   onChange={(e) => setPreferredPitch(e.target.value)}
                   className="min-h-[150px]"
                 />
                 <p className="text-xs text-muted-foreground">
-                  The AI will analyze your pitch style and generate a similar one tailored to the candidate's background.
+                  {pitchMode === "personalized"
+                    ? "The AI will analyze your pitch style and generate a similar one tailored to the candidate's background."
+                    : "The AI will refine your pitch template for the selected industries and locations."
+                  }
                 </p>
               </div>
             </div>
 
-            {/* CV Selection */}
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="space-y-3">
-                {loadedFromHistory && cvData ? (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Selected Candidate</label>
-                    <div className="rounded-lg border-2 border-success bg-success/5 p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success">
-                            <FileText className="h-5 w-5" />
+            {/* CV Selection - only for personalized mode */}
+            {pitchMode === "personalized" && (
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="space-y-3">
+                  {loadedFromHistory && cvData ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Selected Candidate</label>
+                      <div className="rounded-lg border-2 border-success bg-success/5 p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success">
+                              <FileText className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-foreground">{cvData.name}</p>
+                              <p className="text-sm text-muted-foreground">{cvData.current_title}</p>
+                              {cvData.location && (
+                                <p className="text-xs text-muted-foreground">{cvData.location}</p>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-medium text-foreground">{cvData.name}</p>
-                            <p className="text-sm text-muted-foreground">{cvData.current_title}</p>
-                            {cvData.location && (
-                              <p className="text-xs text-muted-foreground">{cvData.location}</p>
-                            )}
-                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCvClear}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            Change
+                          </Button>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleCvClear}
-                          className="text-muted-foreground hover:text-foreground"
-                        >
-                          Change
-                        </Button>
                       </div>
                     </div>
+                  ) : (
+                    <>
+                      <CVUploadZone 
+                        onFileSelect={handleCvFileSelect}
+                        onClear={handleCvClear}
+                        file={cvFile}
+                        parsedData={cvData}
+                        error={cvError}
+                        isProcessing={isParsingCV}
+                      />
+                    </>
+                  )}
+                  
+                  {!loadedFromHistory && (
+                    <SavedProfilesSelector onSelectProfile={handleSelectSavedProfile} />
+                  )}
+                </div>
+
+                {/* CV Preview */}
+                {cvData && (
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                    <h4 className="font-medium text-foreground">Candidate Summary</h4>
+                    <div className="space-y-2 text-sm">
+                      <p><span className="text-muted-foreground">Name:</span> {cvData.name}</p>
+                      <p><span className="text-muted-foreground">Title:</span> {cvData.current_title}</p>
+                      {cvData.location && <p><span className="text-muted-foreground">Location:</span> {cvData.location}</p>}
+                      {cvData.skills?.length > 0 && (
+                        <p><span className="text-muted-foreground">Key Skills:</span> {cvData.skills.slice(0, 5).join(", ")}</p>
+                      )}
+                      {cvData.work_history?.length > 0 && (
+                        <div>
+                          <span className="text-muted-foreground">Recent Experience:</span>
+                          <ul className="mt-1 space-y-1 pl-4">
+                            {cvData.work_history.slice(0, 2).map((job, i) => (
+                              <li key={i} className="text-xs">{job.title} at {job.company}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  <>
-                    <CVUploadZone 
-                      onFileSelect={handleCvFileSelect}
-                      onClear={handleCvClear}
-                      file={cvFile}
-                      parsedData={cvData}
-                      error={cvError}
-                      isProcessing={isParsingCV}
-                    />
-                  </>
-                )}
-                
-                {!loadedFromHistory && (
-                  <SavedProfilesSelector onSelectProfile={handleSelectSavedProfile} />
                 )}
               </div>
-
-              {/* CV Preview */}
-              {cvData && (
-                <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-                  <h4 className="font-medium text-foreground">Candidate Summary</h4>
-                  <div className="space-y-2 text-sm">
-                    <p><span className="text-muted-foreground">Name:</span> {cvData.name}</p>
-                    <p><span className="text-muted-foreground">Title:</span> {cvData.current_title}</p>
-                    {cvData.location && <p><span className="text-muted-foreground">Location:</span> {cvData.location}</p>}
-                    {cvData.skills?.length > 0 && (
-                      <p><span className="text-muted-foreground">Key Skills:</span> {cvData.skills.slice(0, 5).join(", ")}</p>
-                    )}
-                    {cvData.work_history?.length > 0 && (
-                      <div>
-                        <span className="text-muted-foreground">Recent Experience:</span>
-                        <ul className="mt-1 space-y-1 pl-4">
-                          {cvData.work_history.slice(0, 2).map((job, i) => (
-                            <li key={i} className="text-xs">{job.title} at {job.company}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
           </CardContent>
         </Card>
 
