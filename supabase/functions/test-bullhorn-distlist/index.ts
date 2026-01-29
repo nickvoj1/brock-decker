@@ -47,12 +47,11 @@ async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | 
 }
 
 async function refreshBullhornTokens(supabase: any, refreshToken: string): Promise<BullhornTokens | null> {
-  if (!refreshToken) return null
-  
+  // Get all credentials from api_settings
   const { data: settings } = await supabase
     .from('api_settings')
     .select('setting_key, setting_value')
-    .in('setting_key', ['bullhorn_client_id', 'bullhorn_client_secret'])
+    .in('setting_key', ['bullhorn_client_id', 'bullhorn_client_secret', 'bullhorn_username', 'bullhorn_password'])
 
   const creds: Record<string, string> = {}
   settings?.forEach((s: any) => {
@@ -60,57 +59,116 @@ async function refreshBullhornTokens(supabase: any, refreshToken: string): Promi
   })
 
   if (!creds.bullhorn_client_id || !creds.bullhorn_client_secret) {
+    console.error('Bullhorn credentials not configured for refresh')
     return null
   }
 
-  const tokenUrl = 'https://auth.bullhornstaffing.com/oauth/token'
-  const tokenParams = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: creds.bullhorn_client_id,
-    client_secret: creds.bullhorn_client_secret,
-  })
+  let tokenData: any = null
 
-  const tokenResponse = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: tokenParams.toString(),
-  })
+  // First try refresh token
+  if (refreshToken) {
+    console.log('Attempting refresh token flow...')
+    const tokenUrl = 'https://auth.bullhornstaffing.com/oauth/token'
+    const tokenParams = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: creds.bullhorn_client_id,
+      client_secret: creds.bullhorn_client_secret,
+    })
 
-  if (!tokenResponse.ok) {
+    const tokenResponse = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenParams.toString(),
+    })
+
+    if (tokenResponse.ok) {
+      tokenData = await tokenResponse.json()
+      if (!tokenData.access_token) {
+        console.log('Refresh token failed, will try password grant...')
+        tokenData = null
+      }
+    } else {
+      console.log('Refresh token failed, will try password grant...')
+    }
+  }
+
+  // If refresh failed, try password grant as fallback
+  if (!tokenData?.access_token && creds.bullhorn_username && creds.bullhorn_password) {
+    console.log('Attempting password grant flow for automatic reconnection...')
+    
+    // Step 1: Get authorization code using password grant
+    const authUrl = `https://auth.bullhornstaffing.com/oauth/authorize?client_id=${creds.bullhorn_client_id}&response_type=code&username=${encodeURIComponent(creds.bullhorn_username)}&password=${encodeURIComponent(creds.bullhorn_password)}&action=Login`
+    const authResponse = await fetch(authUrl, { redirect: 'manual' })
+    
+    // Extract code from redirect location
+    const location = authResponse.headers.get('location')
+    const codeMatch = location?.match(/code=([^&]+)/)
+    
+    if (codeMatch) {
+      const code = codeMatch[1]
+      
+      // Step 2: Exchange code for tokens
+      const tokenUrl = 'https://auth.bullhornstaffing.com/oauth/token'
+      const tokenParams = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: creds.bullhorn_client_id,
+        client_secret: creds.bullhorn_client_secret,
+      })
+      
+      const tokenResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: tokenParams.toString(),
+      })
+      
+      if (tokenResponse.ok) {
+        tokenData = await tokenResponse.json()
+        if (tokenData.access_token) {
+          console.log('Password grant successful, obtained new tokens')
+        }
+      }
+    }
+  }
+
+  if (!tokenData?.access_token) {
+    console.error('All Bullhorn authentication methods failed')
     return null
   }
 
-  const tokenData = await tokenResponse.json()
-  const accessToken = tokenData.access_token
-  const newRefreshToken = tokenData.refresh_token
-  const expiresIn = tokenData.expires_in
-
-  const loginUrl = `https://rest.bullhornstaffing.com/rest-services/login?version=*&access_token=${accessToken}`
+  // Get REST session
+  const loginUrl = `https://rest.bullhornstaffing.com/rest-services/login?version=*&access_token=${tokenData.access_token}`
   const loginResponse = await fetch(loginUrl, { method: 'GET' })
 
   if (!loginResponse.ok) {
+    const errorText = await loginResponse.text()
+    console.error('REST login failed after refresh:', errorText)
     return null
   }
 
   const loginData = await loginResponse.json()
   const restUrl = loginData.restUrl
   const bhRestToken = loginData.BhRestToken
+  const accessToken = tokenData.access_token
+  const newRefreshToken = tokenData.refresh_token
 
-  const expiresAt = expiresIn 
-    ? new Date(Date.now() + expiresIn * 1000).toISOString()
+  const expiresAt = tokenData.expires_in 
+    ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
     : null
 
+  // Delete old tokens and insert new one
   await supabase.from('bullhorn_tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000')
   
   await supabase.from('bullhorn_tokens').insert({
     access_token: accessToken,
-    refresh_token: newRefreshToken,
+    refresh_token: newRefreshToken || refreshToken,
     rest_url: restUrl,
     bh_rest_token: bhRestToken,
     expires_at: expiresAt,
   })
 
+  console.log('Bullhorn tokens refreshed successfully')
   return { accessToken, restUrl, bhRestToken }
 }
 

@@ -29,27 +29,64 @@ async function getStoredBullhornTokens(supabase: any) {
 }
 
 async function refreshBullhornTokens(supabase: any, refreshToken: string) {
-  // Get client credentials from api_settings
+  // Get all credentials from api_settings
   const { data: settings } = await supabase
     .from("api_settings")
     .select("setting_key, setting_value")
-    .in("setting_key", ["bullhorn_client_id", "bullhorn_client_secret"]);
+    .in("setting_key", ["bullhorn_client_id", "bullhorn_client_secret", "bullhorn_username", "bullhorn_password"]);
 
   const clientId = settings?.find((s: any) => s.setting_key === "bullhorn_client_id")?.setting_value;
   const clientSecret = settings?.find((s: any) => s.setting_key === "bullhorn_client_secret")?.setting_value;
+  const username = settings?.find((s: any) => s.setting_key === "bullhorn_username")?.setting_value;
+  const password = settings?.find((s: any) => s.setting_key === "bullhorn_password")?.setting_value;
 
   if (!clientId || !clientSecret) {
     throw new Error("Bullhorn client credentials not configured");
   }
 
-  // Exchange refresh token for new access token
-  const tokenUrl = `https://auth.bullhornstaffing.com/oauth/token?grant_type=refresh_token&refresh_token=${refreshToken}&client_id=${clientId}&client_secret=${clientSecret}`;
-  const tokenResponse = await fetch(tokenUrl, { method: "POST" });
-  const tokenData = await tokenResponse.json();
+  let tokenData: any = null;
 
-  if (!tokenData.access_token) {
-    console.error("Bullhorn token refresh failed:", JSON.stringify(tokenData));
-    // If refresh failed, the session is likely expired - user needs to re-authenticate
+  // First try refresh token
+  if (refreshToken) {
+    console.log("Attempting refresh token flow...");
+    const tokenUrl = `https://auth.bullhornstaffing.com/oauth/token?grant_type=refresh_token&refresh_token=${refreshToken}&client_id=${clientId}&client_secret=${clientSecret}`;
+    const tokenResponse = await fetch(tokenUrl, { method: "POST" });
+    tokenData = await tokenResponse.json();
+    
+    if (!tokenData.access_token) {
+      console.log("Refresh token failed, will try password grant...");
+      tokenData = null;
+    }
+  }
+
+  // If refresh failed, try password grant as fallback
+  if (!tokenData?.access_token && username && password) {
+    console.log("Attempting password grant flow for automatic reconnection...");
+    
+    // Step 1: Get authorization code using password grant
+    const authUrl = `https://auth.bullhornstaffing.com/oauth/authorize?client_id=${clientId}&response_type=code&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=Login`;
+    const authResponse = await fetch(authUrl, { redirect: "manual" });
+    
+    // Extract code from redirect location
+    const location = authResponse.headers.get("location");
+    const codeMatch = location?.match(/code=([^&]+)/);
+    
+    if (codeMatch) {
+      const code = codeMatch[1];
+      
+      // Step 2: Exchange code for tokens
+      const tokenUrl = `https://auth.bullhornstaffing.com/oauth/token?grant_type=authorization_code&code=${code}&client_id=${clientId}&client_secret=${clientSecret}`;
+      const tokenResponse = await fetch(tokenUrl, { method: "POST" });
+      tokenData = await tokenResponse.json();
+      
+      if (tokenData.access_token) {
+        console.log("Password grant successful, obtained new tokens");
+      }
+    }
+  }
+
+  if (!tokenData?.access_token) {
+    console.error("All Bullhorn authentication methods failed");
     throw new Error("Bullhorn session expired. Please reconnect to Bullhorn from Settings.");
   }
 
@@ -64,17 +101,18 @@ async function refreshBullhornTokens(supabase: any, refreshToken: string) {
 
   // Store new tokens
   const expiresAt = new Date(Date.now() + (tokenData.expires_in || 600) * 1000).toISOString();
-  await supabase
-    .from("bullhorn_tokens")
-    .update({
-      access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token || refreshToken,
-      bh_rest_token: loginData.BhRestToken,
-      rest_url: loginData.restUrl,
-      expires_at: expiresAt,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("refresh_token", refreshToken);
+  
+  // Delete old tokens and insert new one
+  await supabase.from("bullhorn_tokens").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("bullhorn_tokens").insert({
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || refreshToken,
+    bh_rest_token: loginData.BhRestToken,
+    rest_url: loginData.restUrl,
+    expires_at: expiresAt,
+  });
+
+  console.log("Bullhorn tokens refreshed and stored successfully");
 
   return {
     bh_rest_token: loginData.BhRestToken,
