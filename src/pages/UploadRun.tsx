@@ -19,6 +19,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useRoleSuggestions } from "@/hooks/useRoleSuggestions";
 import { useIndustrySuggestions } from "@/hooks/useIndustrySuggestions";
+import { useProfileName } from "@/hooks/useProfileName";
 import type { Json } from "@/integrations/supabase/types";
 
 interface WorkExperience {
@@ -50,16 +51,13 @@ interface ParsedCandidate {
 export type { ParsedCandidate, WorkExperience, Education };
 
 const ROLES_STORAGE_KEY = 'apollo-search-selected-roles';
-const PROFILE_NAME_KEY = 'apollo-search-profile-name';
 
 export default function UploadRun() {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  // User profile name for identifying uploads
-  const [profileName, setProfileName] = useState<string>(() => {
-    return localStorage.getItem(PROFILE_NAME_KEY) || '';
-  });
+  // Use the shared profile name hook - this ensures sync with header profile selector
+  const profileName = useProfileName();
   
   // Quick search mode (no CV)
   const [isQuickSearch, setIsQuickSearch] = useState(false);
@@ -138,10 +136,7 @@ export default function UploadRun() {
     }
   }, []);
 
-  // Save profile name to localStorage
-  useEffect(() => {
-    localStorage.setItem(PROFILE_NAME_KEY, profileName);
-  }, [profileName]);
+  // Profile name now managed by useProfileName hook - no need to save here
 
   // Save selected roles to localStorage whenever they change
   useEffect(() => {
@@ -292,8 +287,9 @@ export default function UploadRun() {
 
   const isSearchNameUnique = quickSearchName.trim() && !existingSearchNames.includes(quickSearchName.trim());
   
-  const canRunCvMode = cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning && !isParsingCV;
-  const canRunQuickMode = isQuickSearch && isSearchNameUnique && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning;
+  // Require profile to be selected to run searches
+  const canRunCvMode = profileName && cvData && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning && !isParsingCV;
+  const canRunQuickMode = profileName && isQuickSearch && isSearchNameUnique && selectedIndustries.length > 0 && selectedLocations.length > 0 && selectedRoles.length > 0 && !isRunning;
   const canRun = isQuickSearch ? canRunQuickMode : canRunCvMode;
 
   // Convert selected industries to preferences data format for backend
@@ -701,9 +697,11 @@ export default function UploadRun() {
               <div>
                 <CardTitle className="text-lg">Step 5: Find Contacts</CardTitle>
                 <CardDescription>
-                  {canRun 
-                    ? `Ready to find up to ${maxContacts} contacts for ${cvData?.name} in ${selectedLocations.length} location(s)`
-                    : "Complete all steps above to start searching"
+                  {!profileName 
+                    ? "Please sign in from the header to run searches"
+                    : canRun 
+                      ? `Ready to find up to ${maxContacts} contacts for ${isQuickSearch ? quickSearchName : cvData?.name} in ${selectedLocations.length} location(s)`
+                      : "Complete all steps above to start searching"
                   }
                 </CardDescription>
               </div>
