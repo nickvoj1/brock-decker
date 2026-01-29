@@ -1417,35 +1417,40 @@ async function createDistributionList(
   const listId = listData.changedEntityId
   console.log(`DistributionList created with ID: ${listId}`)
 
-  // Step 2: Add contacts as DistributionListMembers
-  console.log(`Adding ${contactIds.length} contacts as DistributionListMembers...`)
+  // Step 2: Add contacts using the to-many association endpoint
+  // DistributionList has a 'members' to-many field (associatedEntity: Person)
+  // Bullhorn uses: PUT /entity/DistributionList/{listId}/members/{personId1,personId2,...}
+  console.log(`Adding ${contactIds.length} contacts to distribution list via 'members' field...`)
+  
+  // Batch the contact IDs to avoid URL length limits (max ~50 at a time)
+  const BATCH_SIZE = 50
   let successCount = 0
   
-  for (const contactId of contactIds) {
+  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
+    const batch = contactIds.slice(i, i + BATCH_SIZE)
+    const batchIds = batch.join(',')
+    
     try {
-      // Create DistributionListMember entry - this links contacts to the Distribution List
-      const memberUrl = `${restUrl}entity/DistributionListMember?BhRestToken=${bhRestToken}`
-      const memberResponse = await bullhornFetch(memberUrl, {
+      // Use the 'members' to-many association endpoint (Person entities)
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
+      const assocResponse = await bullhornFetch(assocUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          distributionList: { id: listId },
-          person: { id: contactId },
-        }),
       })
       
-      if (memberResponse.ok) {
-        successCount++
-        console.log(`Added DistributionListMember for contact ${contactId}`)
+      if (assocResponse.ok) {
+        successCount += batch.length
+        console.log(`Added batch of ${batch.length} contacts to distribution list (${successCount}/${contactIds.length} total)`)
+        await assocResponse.text() // consume response
       } else {
-        const errorText = await memberResponse.text()
-        console.error(`Failed to add DistributionListMember for contact ${contactId}: ${errorText}`)
+        const errorText = await assocResponse.text()
+        console.error(`Failed to add batch of contacts to distribution list via 'members': ${errorText}`)
       }
     } catch (err: any) {
-      console.error(`Error adding contact ${contactId}: ${err.message}`)
+      console.error(`Error adding batch of contacts: ${err.message}`)
     }
     
-    // Small delay to avoid rate limiting
+    // Small delay between batches
     await sleep(100)
   }
   

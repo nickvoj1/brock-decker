@@ -179,19 +179,30 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Test 2: GET /meta/DistributionList to check if entity is available
-    console.log('Test 2: Checking DistributionList meta...')
+    // Test 2: GET /meta/DistributionList to check if entity is available and get fields
+    console.log('Test 2: Checking DistributionList meta with all fields...')
     try {
-      const metaUrl = `${tokens.restUrl}meta/DistributionList?BhRestToken=${encodeURIComponent(tokens.bhRestToken)}`
+      const metaUrl = `${tokens.restUrl}meta/DistributionList?BhRestToken=${encodeURIComponent(tokens.bhRestToken)}&fields=*`
       const metaRes = await fetch(metaUrl)
       const metaText = await metaRes.text()
       
       if (metaRes.ok) {
+        const metaData = JSON.parse(metaText)
+        // Extract to-many fields (these are the ones we can use for associations)
+        const fields = metaData?.fields || []
+        const toManyFields = fields
+          .filter((f: any) => f.type === 'TO_MANY')
+          .map((f: any) => ({ name: f.name, label: f.label, associatedEntity: f.associatedEntity?.entity }))
+        
         results.push({
           test: 'DistributionList Meta',
           success: true,
-          details: 'DistributionList entity is accessible',
-          rawResponse: JSON.parse(metaText),
+          details: `DistributionList entity is accessible. To-Many fields: ${toManyFields.map((f: any) => f.name).join(', ') || 'none'}`,
+          rawResponse: { 
+            entity: metaData.entity,
+            label: metaData.label,
+            toManyFields
+          },
         })
         accessLevel = 'QUERY_ONLY' // At least meta works
       } else {
