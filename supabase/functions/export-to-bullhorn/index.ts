@@ -1602,18 +1602,15 @@ Deno.serve(async (req) => {
       throw new Error('Failed to create any contacts in Bullhorn')
     }
 
-    // TEMPORARILY DISABLED: Distribution List creation - waiting for Bullhorn to enable access
-    // TODO: Re-enable when Bullhorn grants Distribution Lists API access
-    // console.log(`Creating distribution list: ${listName}`)
-    // const listId = await createDistributionList(
-    //   tokens.restUrl,
-    //   tokens.bhRestToken,
-    //   listName,
-    //   contactIds
-    // )
-    // console.log(`Distribution list created with ID: ${listId}`)
-    const listId = null // Placeholder until Distribution Lists are enabled
-    console.log(`Contacts exported to Bullhorn (Distribution List creation disabled pending API access)`)
+    // Create Distribution List with exported contacts
+    console.log(`Creating distribution list: ${listName}`)
+    const listId = await createDistributionList(
+      tokens.restUrl,
+      tokens.bhRestToken,
+      listName,
+      contactIds
+    )
+    console.log(`Distribution list created with ID: ${listId}`)
 
     await supabase
       .from('enrichment_runs')
