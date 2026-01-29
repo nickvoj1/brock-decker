@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Play, Loader2, FileText, Settings2, Users } from "lucide-react";
+import { Play, Loader2, FileText, Settings2, Users, MapPin } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
 import { IndustrySuggestions } from "@/components/upload/IndustrySuggestions";
 import { LocationSelector } from "@/components/upload/LocationSelector";
+import { LocationSuggestions } from "@/components/upload/LocationSuggestions";
 import { RoleSelector } from "@/components/upload/RoleSelector";
 import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
 import { SearchDebugPanel } from "@/components/upload/SearchDebugPanel";
@@ -17,8 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useRoleSuggestions } from "@/hooks/useRoleSuggestions";
-import { useIndustrySuggestions } from "@/hooks/useIndustrySuggestions";
+import { useCVAnalysis } from "@/hooks/useCVAnalysis";
 import { useProfileName } from "@/hooks/useProfileName";
 import type { Json } from "@/integrations/supabase/types";
 
@@ -95,11 +95,8 @@ export default function UploadRun() {
   const [previewContacts, setPreviewContacts] = useState<Contact[]>([]);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
-  // Role suggestions based on CV and industries
-  const roleSuggestions = useRoleSuggestions(cvData, selectedIndustries);
-  
-  // Industry suggestions based on CV
-  const industrySuggestions = useIndustrySuggestions(cvData);
+  // Comprehensive CV analysis for industries, locations, and roles
+  const cvAnalysis = useCVAnalysis(cvData);
 
   // Fetch existing search names for uniqueness validation
   useEffect(() => {
@@ -528,14 +525,14 @@ export default function UploadRun() {
                   selectedSectors={selectedSectors}
                   onSectorsChange={setSelectedSectors}
                 />
-                {cvData && (industrySuggestions.industries.length > 0 || industrySuggestions.sectors.length > 0) && (
+                {cvData && cvAnalysis && (cvAnalysis.industries.industries.length > 0 || cvAnalysis.industries.sectors.length > 0) && (
                   <IndustrySuggestions
-                    industrySuggestions={industrySuggestions.industries}
-                    sectorSuggestions={industrySuggestions.sectors}
+                    industrySuggestions={cvAnalysis.industries.industries}
+                    sectorSuggestions={cvAnalysis.industries.sectors}
                     selectedIndustries={selectedIndustries}
                     selectedSectors={selectedSectors}
-                    confidence={industrySuggestions.confidence}
-                    matchedCompanies={industrySuggestions.matchedCompanies}
+                    confidence={cvAnalysis.industries.confidence}
+                    matchedCompanies={cvAnalysis.industries.matchedCompanies}
                     onAddIndustry={(industry) => {
                       if (!selectedIndustries.includes(industry)) {
                         setSelectedIndustries([...selectedIndustries, industry]);
@@ -548,7 +545,7 @@ export default function UploadRun() {
                     }}
                     onAddAllIndustries={() => {
                       const newIndustries = [...selectedIndustries];
-                      industrySuggestions.industries.forEach((i) => {
+                      cvAnalysis.industries.industries.forEach((i) => {
                         if (!newIndustries.includes(i)) {
                           newIndustries.push(i);
                         }
@@ -557,7 +554,7 @@ export default function UploadRun() {
                     }}
                     onAddAllSectors={() => {
                       const newSectors = [...selectedSectors];
-                      industrySuggestions.sectors.forEach((s) => {
+                      cvAnalysis.industries.sectors.forEach((s) => {
                         if (!newSectors.includes(s)) {
                           newSectors.push(s);
                         }
@@ -576,7 +573,7 @@ export default function UploadRun() {
           <CardHeader>
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Settings2 className="h-4 w-4" />
+                <MapPin className="h-4 w-4" />
               </div>
               <div>
                 <CardTitle className="text-lg">Step 2: Select Locations</CardTitle>
@@ -584,11 +581,34 @@ export default function UploadRun() {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <LocationSelector
               selectedLocations={selectedLocations}
               onSelectionChange={setSelectedLocations}
             />
+            {cvData && cvAnalysis && cvAnalysis.locations.locations.length > 0 && (
+              <LocationSuggestions
+                locationSuggestions={cvAnalysis.locations.locations}
+                countrySuggestions={cvAnalysis.locations.countries}
+                selectedLocations={selectedLocations}
+                confidence={cvAnalysis.locations.confidence}
+                reasoning={cvAnalysis.locations.reasoning}
+                onAddLocation={(location) => {
+                  if (!selectedLocations.includes(location)) {
+                    setSelectedLocations([...selectedLocations, location]);
+                  }
+                }}
+                onAddAllLocations={() => {
+                  const newLocations = [...selectedLocations];
+                  [...cvAnalysis.locations.countries, ...cvAnalysis.locations.locations].forEach((loc) => {
+                    if (!newLocations.includes(loc)) {
+                      newLocations.push(loc);
+                    }
+                  });
+                  setSelectedLocations(newLocations);
+                }}
+              />
+            )}
           </CardContent>
         </Card>
 
@@ -610,10 +630,12 @@ export default function UploadRun() {
               selectedRoles={selectedRoles}
               onRolesChange={setSelectedRoles}
             />
-            {cvData && roleSuggestions.length > 0 && (
+            {cvData && cvAnalysis && cvAnalysis.roles.roles.length > 0 && (
               <RoleSuggestions
-                suggestions={roleSuggestions}
+                suggestions={cvAnalysis.roles.roles}
                 selectedRoles={selectedRoles}
+                confidence={cvAnalysis.roles.confidence}
+                reasoning={cvAnalysis.roles.reasoning}
                 onAddRole={(role) => {
                   if (!selectedRoles.includes(role)) {
                     setSelectedRoles([...selectedRoles, role]);
@@ -621,7 +643,7 @@ export default function UploadRun() {
                 }}
                 onAddAll={() => {
                   const newRoles = [...selectedRoles];
-                  roleSuggestions.forEach((role) => {
+                  cvAnalysis.roles.roles.forEach((role) => {
                     if (!newRoles.includes(role)) {
                       newRoles.push(role);
                     }
