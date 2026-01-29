@@ -77,6 +77,9 @@ export default function UploadRun() {
   // Industry sectors (optional, broad categories) - always start empty
   const [selectedSectors, setSelectedSectors] = useState<string[]>([]);
   
+  // Excluded industries (for this search only)
+  const [excludedIndustries, setExcludedIndustries] = useState<string[]>([]);
+  
   // Location selection
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   
@@ -295,6 +298,7 @@ export default function UploadRun() {
       industry,
       companies: '',
       exclusions: '',
+      excludedIndustries: excludedIndustries, // Pass excluded industries to backend
       locations: selectedLocations,
       targetRoles: selectedRoles,
       sectors: selectedSectors, // Include selected sectors for Apollo filtering
@@ -524,6 +528,8 @@ export default function UploadRun() {
                   onSelectionChange={setSelectedIndustries}
                   selectedSectors={selectedSectors}
                   onSectorsChange={setSelectedSectors}
+                  excludedIndustries={excludedIndustries}
+                  onExcludedChange={setExcludedIndustries}
                 />
                 {cvData && cvAnalysis && (cvAnalysis.industries.industries.length > 0 || cvAnalysis.industries.sectors.length > 0) && (
                   <IndustrySuggestions

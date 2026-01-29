@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
+import { getPitchTemplates, savePitchTemplate, deletePitchTemplate, setDefaultTemplate, getPitchHistory, savePitch } from "@/lib/dataApi";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { format } from "date-fns";
@@ -127,18 +128,14 @@ export default function GenerateMail() {
     
     setIsLoadingTemplates(true);
     try {
-      const { data, error } = await supabase
-        .from('pitch_templates')
-        .select('*')
-        .eq('profile_name', profileName)
-        .order('is_default', { ascending: false })
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setTemplates(data || []);
+      const response = await getPitchTemplates(profileName);
+      if (!response.success) throw new Error(response.error);
+      
+      const data = response.data || [];
+      setTemplates(data);
       
       // Auto-select default template
-      const defaultTemplate = data?.find(t => t.is_default);
+      const defaultTemplate = data.find((t: PitchTemplate) => t.is_default);
       if (defaultTemplate && !selectedTemplateId) {
         setSelectedTemplateId(defaultTemplate.id);
         setPreferredPitch(defaultTemplate.body_template);
@@ -156,15 +153,10 @@ export default function GenerateMail() {
     
     setIsLoadingHistory(true);
     try {
-      const { data, error } = await supabase
-        .from('generated_pitches')
-        .select('*')
-        .eq('profile_name', profileName)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-      setPitchHistory(data || []);
+      const response = await getPitchHistory(profileName);
+      if (!response.success) throw new Error(response.error);
+      
+      setPitchHistory(response.data || []);
     } catch (error: any) {
       console.error('Error loading pitch history:', error);
     } finally {
@@ -192,20 +184,16 @@ export default function GenerateMail() {
     try {
       const isFirst = templates.length === 0;
       
-      const { data, error } = await supabase
-        .from('pitch_templates')
-        .insert({
-          profile_name: profileName,
-          name: newTemplateName.trim(),
-          subject_template: subject.trim() || null,
-          body_template: preferredPitch.trim(),
-          is_default: isFirst,
-        })
-        .select()
-        .single();
+      const response = await savePitchTemplate(profileName, {
+        name: newTemplateName.trim(),
+        subject_template: subject.trim() || null,
+        body_template: preferredPitch.trim(),
+        is_default: isFirst,
+      });
 
-      if (error) throw error;
+      if (!response.success) throw new Error(response.error);
       
+      const data = response.data;
       setTemplates(prev => [data, ...prev]);
       setSelectedTemplateId(data.id);
       setNewTemplateName("");
@@ -228,13 +216,10 @@ export default function GenerateMail() {
   };
 
   const handleDeleteTemplate = async (templateId: string) => {
+    if (!profileName) return;
     try {
-      const { error } = await supabase
-        .from('pitch_templates')
-        .delete()
-        .eq('id', templateId);
-
-      if (error) throw error;
+      const response = await deletePitchTemplate(profileName, templateId);
+      if (!response.success) throw new Error(response.error);
       
       setTemplates(prev => prev.filter(t => t.id !== templateId));
       if (selectedTemplateId === templateId) {
@@ -255,20 +240,10 @@ export default function GenerateMail() {
   };
 
   const handleSetDefaultTemplate = async (templateId: string) => {
+    if (!profileName) return;
     try {
-      // First, unset all defaults
-      await supabase
-        .from('pitch_templates')
-        .update({ is_default: false })
-        .eq('profile_name', profileName);
-
-      // Then set the new default
-      const { error } = await supabase
-        .from('pitch_templates')
-        .update({ is_default: true })
-        .eq('id', templateId);
-
-      if (error) throw error;
+      const response = await setDefaultTemplate(profileName, templateId);
+      if (!response.success) throw new Error(response.error);
       
       setTemplates(prev => prev.map(t => ({
         ...t,
@@ -401,19 +376,16 @@ export default function GenerateMail() {
       setGeneratedPitch(pitch);
       setGeneratedSubject(subjectLine);
       
-      // Save to history
-      await supabase
-        .from('generated_pitches')
-        .insert({
-          profile_name: profileName,
-          template_id: selectedTemplateId,
-          candidate_name: pitchMode === "general" ? "General Pitch" : cvData!.name,
-          candidate_title: pitchMode === "general" ? null : (cvData?.current_title || null),
-          subject: subjectLine || null,
-          body: pitch,
-          industries: selectedIndustries,
-          locations: selectedLocations,
-        });
+      // Save to history via dataApi
+      await savePitch(profileName, {
+        template_id: selectedTemplateId,
+        candidate_name: pitchMode === "general" ? "General Pitch" : cvData!.name,
+        candidate_title: pitchMode === "general" ? null : (cvData?.current_title || null),
+        subject: subjectLine || null,
+        body: pitch,
+        industries: selectedIndustries,
+        locations: selectedLocations,
+      });
       
       // Refresh history
       loadPitchHistory();
