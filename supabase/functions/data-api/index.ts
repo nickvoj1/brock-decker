@@ -129,10 +129,11 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Delete by primary key 'id' (not candidate_id) and ensure profile ownership
       const { error } = await supabase
         .from("candidate_profiles")
         .delete()
-        .eq("candidate_id", candidateId)
+        .eq("id", candidateId)
         .eq("profile_name", profileName);
 
       if (error) throw error;
