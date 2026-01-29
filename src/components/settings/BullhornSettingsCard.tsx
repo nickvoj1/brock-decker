@@ -89,7 +89,7 @@ export function BullhornSettingsCard() {
     enabled: !!profileName,
   });
 
-  const { data: bullhornStatusData } = useQuery({
+  const { data: bullhornStatusData, refetch: refetchBullhornStatus } = useQuery({
     queryKey: ['bullhorn-status', profileName],
     queryFn: async () => {
       if (!profileName) return null;
@@ -98,6 +98,9 @@ export function BullhornSettingsCard() {
       return response.data;
     },
     enabled: !!profileName,
+    // Refetch more frequently to catch auto-refreshes
+    refetchInterval: 30000, // Check every 30 seconds
+    staleTime: 10000, // Consider data stale after 10 seconds
   });
 
   // Note: We don't load setting values from the API for security
