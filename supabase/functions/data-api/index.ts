@@ -897,6 +897,78 @@ Deno.serve(async (req) => {
       );
     }
 
+    // === ADMIN PANEL (Admin only) ===
+    if (action === "admin-get-all-activity") {
+      // Verify admin access - only Nikita Vojevoda can access
+      if (profileName !== "Nikita Vojevoda") {
+        return new Response(
+          JSON.stringify({ success: false, error: "Access denied. Admin only." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+
+      // Get all enrichment runs from all users
+      const { data: runs, error: runsError } = await supabase
+        .from("enrichment_runs")
+        .select("id, uploaded_by, status, candidates_count, processed_count, created_at, updated_at, preferences_data")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (runsError) throw runsError;
+
+      // Get all generated pitches from all users
+      const { data: pitches, error: pitchesError } = await supabase
+        .from("generated_pitches")
+        .select("id, profile_name, candidate_name, candidate_title, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (pitchesError) throw pitchesError;
+
+      // Get all candidate profiles from all users
+      const { data: candidates, error: candidatesError } = await supabase
+        .from("candidate_profiles")
+        .select("id, profile_name, name, current_title, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (candidatesError) throw candidatesError;
+
+      // Calculate stats per user
+      const userStats: Record<string, { runs: number; pitches: number; candidates: number }> = {};
+      
+      runs?.forEach((r: any) => {
+        const user = r.uploaded_by || "Unknown";
+        if (!userStats[user]) userStats[user] = { runs: 0, pitches: 0, candidates: 0 };
+        userStats[user].runs++;
+      });
+
+      pitches?.forEach((p: any) => {
+        const user = p.profile_name || "Unknown";
+        if (!userStats[user]) userStats[user] = { runs: 0, pitches: 0, candidates: 0 };
+        userStats[user].pitches++;
+      });
+
+      candidates?.forEach((c: any) => {
+        const user = c.profile_name || "Unknown";
+        if (!userStats[user]) userStats[user] = { runs: 0, pitches: 0, candidates: 0 };
+        userStats[user].candidates++;
+      });
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          data: { 
+            runs: runs || [], 
+            pitches: pitches || [], 
+            candidates: candidates || [],
+            userStats 
+          } 
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: "Invalid action" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
