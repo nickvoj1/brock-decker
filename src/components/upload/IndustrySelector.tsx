@@ -54,6 +54,7 @@ const INDUSTRY_CATEGORIES: IndustryCategory[] = [
     industries: [
       { value: "private-equity", label: "Private Equity (PE)" },
       { value: "venture-capital", label: "Venture Capital (VC)" },
+      { value: "secondaries", label: "Secondaries" },
       { value: "hedge-fund", label: "Hedge Fund" },
       { value: "asset-management", label: "Asset Management" },
       { value: "wealth-management", label: "Wealth Management" },
