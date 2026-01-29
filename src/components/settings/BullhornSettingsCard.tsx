@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, Shield, RefreshCw } from "lucide-react";
@@ -55,6 +55,10 @@ export function BullhornSettingsCard() {
   const [distListResults, setDistListResults] = useState<DistListTestResponse | null>(null);
   const [showDistListModal, setShowDistListModal] = useState(false);
   const [refreshingToken, setRefreshingToken] = useState(false);
+
+  // Auto-refresh guards (avoid infinite loops)
+  const lastAutoRefreshExpiresAtRef = useRef<string | null>(null);
+  const lastAutoRefreshAtMsRef = useRef<number>(0);
 
   // Check for OAuth callback results
   useEffect(() => {
@@ -266,6 +270,25 @@ export function BullhornSettingsCard() {
   const isExpired = bullhornStatusData?.expired || (expiresAt ? new Date(expiresAt) < new Date() : false);
   const isConnected = bullhornStatusData?.connected && !isExpired;
 
+  // Automatically refresh tokens when they expire (no button press)
+  useEffect(() => {
+    if (!profileName) return;
+    if (!isExpired) return;
+    if (refreshingToken) return;
+
+    // Throttle: at most once per 30s
+    const now = Date.now();
+    if (now - lastAutoRefreshAtMsRef.current < 30_000) return;
+
+    // Only attempt once per specific expiresAt value
+    if ((expiresAt ?? null) === lastAutoRefreshExpiresAtRef.current) return;
+
+    lastAutoRefreshAtMsRef.current = now;
+    lastAutoRefreshExpiresAtRef.current = expiresAt ?? null;
+    void handleRefreshToken();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileName, isExpired, expiresAt, refreshingToken]);
+
   if (!profileName) {
     return (
       <Card className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
@@ -437,19 +460,14 @@ export function BullhornSettingsCard() {
             </div>
             {isExpired && (
               <div className="mt-3 flex items-end justify-between">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRefreshToken}
-                  disabled={refreshingToken}
-                >
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {refreshingToken ? (
-                    <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                    <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
-                    <RefreshCw className="mr-2 h-3 w-3" />
+                    <RefreshCw className="h-3 w-3" />
                   )}
-                  Refresh Token
-                </Button>
+                  <span>{refreshingToken ? 'Auto-reconnecting…' : 'Will auto-reconnect when possible.'}</span>
+                </div>
                 <span className="text-xs text-destructive">
                   Or use "Reconnect" for manual OAuth
                 </span>
