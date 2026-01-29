@@ -100,8 +100,8 @@ Deno.serve(async (req) => {
 
     const candidateData = (run.candidates_data as CandidateData[])?.[0]
     const preferences = run.preferences_data as Preference[]
-    const maxContacts = run.search_counter || 50 // Use search_counter as max contacts
-    const maxPerCompany = 3
+    const maxContacts = run.search_counter || 100 // Use search_counter as max contacts
+    const maxPerCompany = 4 // Allow up to 4 contacts per company for better coverage
 
     if (!candidateData) {
       throw new Error('No candidate data found')
@@ -276,8 +276,8 @@ Deno.serve(async (req) => {
           console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
         }
         
-        // Use pagination to get more results - fetch up to 3 pages per combination
-        const maxPages = 3
+        // Use pagination to get more results - fetch up to 5 pages per combination for better coverage
+        const maxPages = 5
         let currentPage = 1
         let hasMoreResults = true
         
@@ -430,29 +430,8 @@ Deno.serve(async (req) => {
                   // Get job title from enrichment
                   const jobTitle = person.title || personData.title || 'Unknown'
                   
-                  // Flexible sector matching using keywords (post-filter) - only if combo has sector
-                  if (combo.sector) {
-                    const orgIndustry = (person.organization?.industry || '').toLowerCase()
-                    const orgKeywords: string[] = (person.organization?.keywords || []).map((k: string) => k.toLowerCase())
-                    const orgName = companyName.toLowerCase()
-
-                    const sectorWords = getSectorKeywords([combo.sector])
-
-                    const sectorMatched = sectorWords.some(word =>
-                      orgIndustry.includes(word) ||
-                      orgKeywords.some(k => k.includes(word)) ||
-                      orgName.includes(word)
-                    )
-
-                    if (!sectorMatched) {
-                      console.log(
-                        `Skipping - no sector match: ${companyName} (industry: ${orgIndustry}) for: ${sectorWords
-                          .slice(0, 6)
-                          .join(', ')}...`,
-                      )
-                      continue
-                    }
-                  }
+                  // NOTE: Removed overly strict sector post-filtering to get more results
+                  // The Apollo API already filters by keywords, so this was causing too many false negatives
                   
                   // Only add if we got an email and a valid name
                   if (email && fullName && fullName !== 'Unknown') {

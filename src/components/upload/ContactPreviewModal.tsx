@@ -11,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
   TableBody,
@@ -163,14 +162,14 @@ export function ContactPreviewModal({
         </div>
 
         {/* Table */}
-        <ScrollArea className="flex-1 min-h-0 max-h-[50vh] border rounded-md">
+        <div className="flex-1 min-h-0 max-h-[50vh] border rounded-md overflow-auto">
           <Table>
-            <TableHeader className="sticky top-0 bg-background z-10">
+            <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
               <TableRow>
                 <TableHead className="w-[200px]">Name</TableHead>
                 <TableHead className="w-[200px]">Title</TableHead>
                 <TableHead className="w-[180px]">Company</TableHead>
-                <TableHead className="w-[200px]">Location</TableHead>
+                <TableHead className="w-[150px]">Location</TableHead>
                 <TableHead className="w-[220px]">Email</TableHead>
                 <TableHead className="w-[50px]"></TableHead>
               </TableRow>
@@ -193,22 +192,22 @@ export function ContactPreviewModal({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <Building2 className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-sm">{contact.company}</span>
+                        <Building2 className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <span className="text-sm truncate">{contact.company}</span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5 text-muted-foreground">
-                        <MapPin className="h-3 w-3" />
-                        <span className="text-sm truncate max-w-[180px]">
+                        <MapPin className="h-3 w-3 flex-shrink-0" />
+                        <span className="text-sm truncate max-w-[130px]">
                           {contact.location}
                         </span>
                       </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
-                        <Mail className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-sm text-primary">{contact.email}</span>
+                        <Mail className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <span className="text-sm text-primary truncate">{contact.email}</span>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -226,7 +225,7 @@ export function ContactPreviewModal({
               )}
             </TableBody>
           </Table>
-        </ScrollArea>
+        </div>
 
         {/* Stats */}
         <div className="text-sm text-muted-foreground pt-2">
