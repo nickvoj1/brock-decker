@@ -9,6 +9,23 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
+/*
+ * Fallback tokens (outside Tailwind layers)
+ * Ensures semantic colors like `bg-primary` never fall back to browser defaults (blue)
+ * even if layer injection/order is affected by tooling.
+ */
+:root {
+  --primary: 38 35% 52%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 38 35% 52%;
+}
+
+.dark {
+  --primary: 38 35% 52%;
+  --primary-foreground: 0 0% 100%;
+  --ring: 38 35% 52%;
+}
+
 @layer base {
   :root {
     /* Brock Decker Design System - Clean White with Black & Gold accents */
