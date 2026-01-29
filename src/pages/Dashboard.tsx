@@ -16,9 +16,9 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
 import { useProfileName } from "@/hooks/useProfileName";
 import { format, subDays, startOfDay } from "date-fns";
+import { getEnrichmentRuns, getCandidateProfiles } from "@/lib/dataApi";
 
 interface DashboardStats {
   totalSearches: number;
@@ -63,39 +63,32 @@ export default function Dashboard() {
   }, [profileName]);
 
   const fetchDashboardData = async () => {
+    if (!profileName) return;
+    
     setIsLoading(true);
     try {
-      // Fetch runs for this user
-      const { data: runs } = await supabase
-        .from('enrichment_runs')
-        .select('*')
-        .eq('uploaded_by', profileName)
-        .order('created_at', { ascending: false });
+      // Fetch runs for this user via data API
+      const runsResponse = await getEnrichmentRuns(profileName);
+      const allRuns = runsResponse.success ? (runsResponse.data || []) : [];
 
-      // Fetch saved CVs for this user
-      const { data: cvs } = await supabase
-        .from('candidate_profiles')
-        .select('*')
-        .eq('profile_name', profileName)
-        .order('created_at', { ascending: false });
-
-      const allRuns = runs || [];
-      const allCVs = cvs || [];
+      // Fetch saved CVs for this user via data API
+      const cvsResponse = await getCandidateProfiles(profileName);
+      const allCVs = cvsResponse.success ? (cvsResponse.data || []) : [];
 
       // Calculate stats
-      const successfulRuns = allRuns.filter(r => r.status === 'success' || r.status === 'partial');
-      const totalContacts = allRuns.reduce((sum, r) => {
+      const successfulRuns = allRuns.filter((r: any) => r.status === 'success' || r.status === 'partial');
+      const totalContacts = allRuns.reduce((sum: number, r: any) => {
         const contacts = Array.isArray(r.enriched_data) ? r.enriched_data.length : 0;
         return sum + contacts;
       }, 0);
 
       // Last 7 days searches
       const weekAgo = subDays(new Date(), 7);
-      const lastWeekSearches = allRuns.filter(r => new Date(r.created_at) >= weekAgo).length;
+      const lastWeekSearches = allRuns.filter((r: any) => new Date(r.created_at) >= weekAgo).length;
 
       // Top industries
       const industryCount: Record<string, number> = {};
-      allRuns.forEach(run => {
+      allRuns.forEach((run: any) => {
         const prefs = run.preferences_data as any[];
         if (Array.isArray(prefs)) {
           prefs.forEach(p => {
@@ -116,7 +109,7 @@ export default function Dashboard() {
         const cached = localStorage.getItem('bullhorn-overlap-cache');
         if (cached) {
           const overlapData = JSON.parse(cached);
-          allRuns.forEach(run => {
+          allRuns.forEach((run: any) => {
             if (overlapData[run.id]) {
               existingInBullhorn += overlapData[run.id].existing || 0;
             }
@@ -142,7 +135,7 @@ export default function Dashboard() {
       const activities: RecentActivity[] = [];
       
       // Add recent runs
-      allRuns.slice(0, 5).forEach(run => {
+      allRuns.slice(0, 5).forEach((run: any) => {
         const candidates = run.candidates_data as any[];
         const candidateName = candidates?.[0]?.name || 'Unknown';
         const contactsFound = Array.isArray(run.enriched_data) ? run.enriched_data.length : 0;
@@ -158,7 +151,7 @@ export default function Dashboard() {
       });
 
       // Add recent CV uploads
-      allCVs.slice(0, 5).forEach(cv => {
+      allCVs.slice(0, 5).forEach((cv: any) => {
         activities.push({
           id: cv.id,
           type: 'cv_upload',
