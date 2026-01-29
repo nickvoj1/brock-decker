@@ -9,6 +9,7 @@ import RunsHistory from "./pages/RunsHistory";
 import PreviousCVs from "./pages/PreviousCVs";
 import GenerateMail from "./pages/GenerateMail";
 import SettingsPage from "./pages/Settings";
+import AdminPanel from "./pages/AdminPanel";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -26,6 +27,7 @@ const App = () => (
           <Route path="/generate-mail" element={<GenerateMail />} />
           <Route path="/history" element={<RunsHistory />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/admin" element={<AdminPanel />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

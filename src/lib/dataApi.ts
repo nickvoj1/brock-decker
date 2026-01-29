@@ -121,3 +121,36 @@ export async function refreshBullhornTokens(profileName: string) {
 export async function clearBullhornTokens(profileName: string) {
   return callDataApi("clear-bullhorn-tokens", profileName);
 }
+
+// === Admin Panel ===
+export interface AdminActivityData {
+  runs: Array<{
+    id: string;
+    uploaded_by: string;
+    status: string;
+    candidates_count: number;
+    processed_count: number;
+    created_at: string;
+    updated_at: string;
+    preferences_data: any;
+  }>;
+  pitches: Array<{
+    id: string;
+    profile_name: string;
+    candidate_name: string;
+    candidate_title: string | null;
+    created_at: string;
+  }>;
+  candidates: Array<{
+    id: string;
+    profile_name: string;
+    name: string;
+    current_title: string | null;
+    created_at: string;
+  }>;
+  userStats: Record<string, { runs: number; pitches: number; candidates: number }>;
+}
+
+export async function getAdminActivity(profileName: string) {
+  return callDataApi<AdminActivityData>("admin-get-all-activity", profileName);
+}
