@@ -424,28 +424,167 @@ Deno.serve(async (req) => {
     if (action === "get-bullhorn-status") {
       const { data: token, error } = await supabase
         .from("bullhorn_tokens")
-        .select("rest_url, expires_at, refresh_token")
+        .select("*")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (error) throw error;
       
-      const isExpired = token?.expires_at ? new Date(token.expires_at) < new Date() : false;
+      if (!token) {
+        return new Response(
+          JSON.stringify({ success: true, data: { connected: false, expired: false } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const isExpired = token.expires_at ? new Date(token.expires_at) < new Date() : false;
       
-      // Only return connection status, not actual tokens
+      // Auto-refresh if expired
+      if (isExpired) {
+        console.log("Token expired, attempting auto-refresh...");
+        
+        const { data: settings } = await supabase
+          .from("api_settings")
+          .select("setting_key, setting_value")
+          .in("setting_key", ["bullhorn_client_id", "bullhorn_client_secret", "bullhorn_username", "bullhorn_password"]);
+
+        const creds: Record<string, string> = {};
+        settings?.forEach((s: any) => {
+          creds[s.setting_key] = s.setting_value;
+        });
+
+        if (creds.bullhorn_client_id && creds.bullhorn_client_secret) {
+          let tokenData: any = null;
+
+          // Try refresh token first
+          if (token.refresh_token) {
+            const tokenUrl = "https://auth.bullhornstaffing.com/oauth/token";
+            const tokenParams = new URLSearchParams({
+              grant_type: "refresh_token",
+              refresh_token: token.refresh_token,
+              client_id: creds.bullhorn_client_id,
+              client_secret: creds.bullhorn_client_secret,
+            });
+
+            try {
+              const tokenResponse = await fetch(tokenUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: tokenParams.toString(),
+              });
+
+              if (tokenResponse.ok) {
+                tokenData = await tokenResponse.json();
+                if (!tokenData.access_token) tokenData = null;
+              }
+            } catch (e) {
+              console.log("Refresh token failed:", e);
+            }
+          }
+
+          // Fallback to password grant
+          if (!tokenData?.access_token && creds.bullhorn_username && creds.bullhorn_password) {
+            try {
+              const authUrl = `https://auth.bullhornstaffing.com/oauth/authorize?client_id=${creds.bullhorn_client_id}&response_type=code&username=${encodeURIComponent(creds.bullhorn_username)}&password=${encodeURIComponent(creds.bullhorn_password)}&action=Login`;
+              const authResponse = await fetch(authUrl, { redirect: "manual" });
+              
+              const location = authResponse.headers.get("location");
+              const codeMatch = location?.match(/code=([^&]+)/);
+              
+              if (codeMatch) {
+                const code = codeMatch[1];
+                const tokenUrl = "https://auth.bullhornstaffing.com/oauth/token";
+                const tokenParams = new URLSearchParams({
+                  grant_type: "authorization_code",
+                  code: code,
+                  client_id: creds.bullhorn_client_id,
+                  client_secret: creds.bullhorn_client_secret,
+                });
+                
+                const tokenResponse = await fetch(tokenUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  body: tokenParams.toString(),
+                });
+                
+                if (tokenResponse.ok) {
+                  tokenData = await tokenResponse.json();
+                }
+              }
+            } catch (e) {
+              console.log("Password grant failed:", e);
+            }
+          }
+
+          // If we got new tokens, get REST session and save
+          if (tokenData?.access_token) {
+            try {
+              const loginUrl = `https://rest.bullhornstaffing.com/rest-services/login?version=*&access_token=${tokenData.access_token}`;
+              const loginResponse = await fetch(loginUrl, { method: "GET" });
+
+              if (loginResponse.ok) {
+                const loginData = await loginResponse.json();
+                const expiresAt = tokenData.expires_in 
+                  ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString()
+                  : null;
+
+                await supabase.from("bullhorn_tokens").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+                
+                await supabase.from("bullhorn_tokens").insert({
+                  access_token: tokenData.access_token,
+                  refresh_token: tokenData.refresh_token || token.refresh_token,
+                  rest_url: loginData.restUrl,
+                  bh_rest_token: loginData.BhRestToken,
+                  expires_at: expiresAt,
+                });
+
+                console.log("Auto-refresh successful");
+                return new Response(
+                  JSON.stringify({ 
+                    success: true, 
+                    data: {
+                      connected: true,
+                      expired: false,
+                      restUrl: loginData.restUrl,
+                      expiresAt: expiresAt,
+                    }
+                  }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+              }
+            } catch (e) {
+              console.log("REST login failed:", e);
+            }
+          }
+        }
+        
+        // Auto-refresh failed, return expired status
+        console.log("Auto-refresh failed, token remains expired");
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            data: {
+              connected: false,
+              expired: true,
+              hasRefreshToken: !!token.refresh_token,
+              restUrl: token.rest_url,
+              expiresAt: token.expires_at,
+            }
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      // Token is valid
       return new Response(
         JSON.stringify({ 
           success: true, 
-          data: token ? {
-            connected: !isExpired,
-            expired: isExpired,
-            hasRefreshToken: !!token.refresh_token,
+          data: {
+            connected: true,
+            expired: false,
             restUrl: token.rest_url,
             expiresAt: token.expires_at,
-          } : {
-            connected: false,
-            expired: false,
           }
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
