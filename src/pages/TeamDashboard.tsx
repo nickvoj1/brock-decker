@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProfileName } from "@/hooks/useProfileName";
-import { getTeamDashboardStats, TeamMemberStats } from "@/lib/dataApi";
+import { getTeamDashboardStats, TeamMemberStats, HourlyDataPoint } from "@/lib/dataApi";
 import { format, startOfDay, eachHourOfInterval } from "date-fns";
 import {
   LineChart,
@@ -54,14 +54,11 @@ interface AggregatedStats {
   bullhornExported: number;
 }
 
-interface HourlyData {
-  hour: string;
-  contacts: number;
-}
 
 export default function TeamDashboard() {
   const profileName = useProfileName();
   const [teamStats, setTeamStats] = useState<TeamMemberStats[]>([]);
+  const [hourlyData, setHourlyData] = useState<HourlyDataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
   const [showMyOnly, setShowMyOnly] = useState(false);
@@ -81,7 +78,8 @@ export default function TeamDashboard() {
     try {
       const response = await getTeamDashboardStats(profileName);
       if (response.success && response.data) {
-        setTeamStats(response.data);
+        setTeamStats(response.data.stats || []);
+        setHourlyData(response.data.hourlyData || []);
       }
     } catch (error) {
       console.error('Error fetching team data:', error);
@@ -130,17 +128,20 @@ export default function TeamDashboard() {
     return filtered;
   }, [teamStats, timeFilter, showMyOnly, profileName]);
 
-  // Mock hourly data for the chart
-  const hourlyData = useMemo((): HourlyData[] => {
+  // Use real hourly data from API, or fallback to empty array
+  const chartData = useMemo(() => {
+    if (hourlyData.length > 0) {
+      return hourlyData;
+    }
+    // Fallback: generate empty hourly slots if no data yet
     const now = new Date();
     const startOfToday = startOfDay(now);
     const hours = eachHourOfInterval({ start: startOfToday, end: now });
-    
-    return hours.map((hour, index) => ({
+    return hours.map((hour) => ({
       hour: format(hour, 'HH:00'),
-      contacts: Math.floor(Math.random() * 50) + (index > 8 && index < 18 ? 20 : 0),
+      contacts: 0,
     }));
-  }, []);
+  }, [hourlyData]);
 
   const getContactCount = (stats: TeamMemberStats): number => {
     switch (timeFilter) {
@@ -378,7 +379,7 @@ export default function TeamDashboard() {
             <CardContent>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={hourlyData}>
+                  <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                     <XAxis 
                       dataKey="hour" 
