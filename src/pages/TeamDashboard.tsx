@@ -8,7 +8,8 @@ import {
   Eye,
   Search,
   CheckCircle,
-  Upload as UploadIcon
+  Upload as UploadIcon,
+  X
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,6 +30,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getTeamDashboardStats, TeamMemberStats, HourlyDataPoint } from "@/lib/dataApi";
 import { format, startOfDay, eachHourOfInterval } from "date-fns";
@@ -62,6 +70,7 @@ export default function TeamDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
   const [showMyOnly, setShowMyOnly] = useState(false);
+  const [selectedRecruiter, setSelectedRecruiter] = useState<TeamMemberStats | null>(null);
 
   useEffect(() => {
     if (profileName) {
@@ -353,7 +362,12 @@ export default function TeamDashboard() {
                               )}
                             </TableCell>
                             <TableCell>
-                              <Button variant="ghost" size="sm">
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => setSelectedRecruiter(stats)}
+                                title={`View ${stats.profile_name}'s details`}
+                              >
                                 <Eye className="h-3 w-3" />
                               </Button>
                             </TableCell>
@@ -471,6 +485,95 @@ export default function TeamDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Recruiter Detail Modal */}
+        <Dialog open={!!selectedRecruiter} onOpenChange={() => setSelectedRecruiter(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                {selectedRecruiter?.profile_name}
+              </DialogTitle>
+              <DialogDescription>
+                Detailed recruitment metrics
+              </DialogDescription>
+            </DialogHeader>
+            
+            {selectedRecruiter && (
+              <div className="space-y-4">
+                {/* Contact Stats */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="text-center p-3 rounded-lg bg-primary/5 border border-primary/20">
+                    <p className="text-2xl font-bold text-primary">
+                      {selectedRecruiter.total_contacts.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Total Contacts</p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted">
+                    <p className="text-2xl font-bold">
+                      {selectedRecruiter.contacts_today}
+                    </p>
+                    <p className="text-xs text-muted-foreground">Today</p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted">
+                    <p className="text-2xl font-bold">
+                      {selectedRecruiter.contacts_week}
+                    </p>
+                    <p className="text-xs text-muted-foreground">This Week</p>
+                  </div>
+                </div>
+
+                {/* Run Stats */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Search Runs</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                      <span className="text-sm">Total Runs</span>
+                      <span className="font-semibold">{selectedRecruiter.total_runs}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                      <span className="text-sm">Today</span>
+                      <span className="font-semibold">{selectedRecruiter.runs_today}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                      <span className="text-sm">This Week</span>
+                      <span className="font-semibold">{selectedRecruiter.runs_week}</span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                      <span className="text-sm">Avg/Run</span>
+                      <span className="font-semibold">{selectedRecruiter.avg_contacts_per_run}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Performance */}
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Performance</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                      <span className="text-sm">Success Rate</span>
+                      <span className={`font-semibold ${
+                        selectedRecruiter.success_rate >= 90 ? 'text-success' : 
+                        selectedRecruiter.success_rate >= 70 ? 'text-warning' : ''
+                      }`}>
+                        {selectedRecruiter.success_rate}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                      <span className="text-sm">Bullhorn Exports</span>
+                      <Badge className={selectedRecruiter.bullhorn_exported > 0 
+                        ? "bg-success/10 text-success border-success/20" 
+                        : ""
+                      } variant={selectedRecruiter.bullhorn_exported > 0 ? "default" : "outline"}>
+                        {selectedRecruiter.bullhorn_exported}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
