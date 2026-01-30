@@ -304,7 +304,7 @@ export default function TeamDashboard() {
                         <TableHead className="text-center">Contacts</TableHead>
                         <TableHead className="text-center">Runs</TableHead>
                         <TableHead className="text-center">Avg/Run</TableHead>
-                        <TableHead className="text-center">Success</TableHead>
+                        <TableHead className="text-center" title="% of runs with 10+ contacts">Yield</TableHead>
                         <TableHead className="text-center">Bullhorn</TableHead>
                         <TableHead className="w-[60px]"></TableHead>
                       </TableRow>
@@ -551,7 +551,7 @@ export default function TeamDashboard() {
                   <h4 className="text-sm font-medium text-muted-foreground">Performance</h4>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex justify-between items-center p-2 rounded bg-muted/50">
-                      <span className="text-sm">Success Rate</span>
+                      <span className="text-sm" title="% of runs with 10+ contacts">Yield Rate</span>
                       <span className={`font-semibold ${
                         selectedRecruiter.success_rate >= 90 ? 'text-success' : 
                         selectedRecruiter.success_rate >= 70 ? 'text-warning' : ''

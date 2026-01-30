@@ -993,7 +993,7 @@ Deno.serve(async (req) => {
         total_contacts: number;
         contacts_today: number;
         contacts_week: number;
-        successful_runs: number;
+        high_yield_runs: number; // Runs with 10+ contacts
         bullhorn_exported: number;
       }> = {};
 
@@ -1008,7 +1008,7 @@ Deno.serve(async (req) => {
             total_contacts: 0,
             contacts_today: 0,
             contacts_week: 0,
-            successful_runs: 0,
+            high_yield_runs: 0,
             bullhorn_exported: 0,
           };
         }
@@ -1030,8 +1030,9 @@ Deno.serve(async (req) => {
           statsMap[pn].contacts_week += contacts;
         }
 
-        if (r.status === 'success' || r.status === 'partial') {
-          statsMap[pn].successful_runs++;
+        // Count as high yield if found 10+ contacts
+        if (contacts >= 10) {
+          statsMap[pn].high_yield_runs++;
         }
 
         if (r.bullhorn_exported_at) {
@@ -1049,7 +1050,7 @@ Deno.serve(async (req) => {
         contacts_today: s.contacts_today,
         contacts_week: s.contacts_week,
         success_rate: s.total_runs > 0 
-          ? Math.round((s.successful_runs / s.total_runs) * 100)
+          ? Math.round((s.high_yield_runs / s.total_runs) * 100)
           : 0,
         avg_contacts_per_run: s.total_runs > 0
           ? Math.round(s.total_contacts / s.total_runs)
