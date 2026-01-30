@@ -1039,8 +1039,8 @@ Deno.serve(async (req) => {
         }
       });
 
-      // Calculate success rates and format result
-      const result = Object.values(statsMap).map(s => ({
+      // Calculate success rates and format stats
+      const stats = Object.values(statsMap).map(s => ({
         profile_name: s.profile_name,
         total_runs: s.total_runs,
         runs_today: s.runs_today,
@@ -1057,8 +1057,46 @@ Deno.serve(async (req) => {
         bullhorn_exported: s.bullhorn_exported,
       }));
 
+      // Aggregate hourly data for the past 24 hours
+      const hours24Ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const hourlyMap: Record<string, number> = {};
+
+      // Initialize all 24 hours with 0
+      for (let i = 0; i < 24; i++) {
+        const hourDate = new Date(now);
+        hourDate.setHours(now.getHours() - 23 + i, 0, 0, 0);
+        const hourKey = hourDate.toISOString().slice(11, 13) + ":00";
+        hourlyMap[hourKey] = 0;
+      }
+
+      // Aggregate contacts by hour
+      (runs || []).forEach((r: any) => {
+        const createdAt = new Date(r.created_at);
+        if (createdAt >= hours24Ago) {
+          const hourKey = createdAt.toISOString().slice(11, 13) + ":00";
+          const contacts = Array.isArray(r.enriched_data) ? r.enriched_data.length : 0;
+          if (hourlyMap[hourKey] !== undefined) {
+            hourlyMap[hourKey] += contacts;
+          }
+        }
+      });
+
+      // Convert to array sorted by hour
+      const hourlyData = Object.entries(hourlyMap)
+        .map(([hour, contacts]) => ({ hour, contacts }))
+        .sort((a, b) => {
+          // Sort by hour, handling midnight wrap-around
+          const aHour = parseInt(a.hour);
+          const bHour = parseInt(b.hour);
+          const currentHour = now.getHours();
+          // Adjust hours relative to current hour for proper sorting
+          const aOffset = (aHour - currentHour + 24 + 1) % 24;
+          const bOffset = (bHour - currentHour + 24 + 1) % 24;
+          return aOffset - bOffset;
+        });
+
       return new Response(
-        JSON.stringify({ success: true, data: result }),
+        JSON.stringify({ success: true, data: { stats, hourlyData } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

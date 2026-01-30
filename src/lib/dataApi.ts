@@ -169,6 +169,16 @@ export interface TeamMemberStats {
   bullhorn_exported: number;
 }
 
+export interface HourlyDataPoint {
+  hour: string;
+  contacts: number;
+}
+
+export interface TeamDashboardData {
+  stats: TeamMemberStats[];
+  hourlyData: HourlyDataPoint[];
+}
+
 export async function getTeamDashboardStats(profileName: string) {
-  return callDataApi<TeamMemberStats[]>("get-team-dashboard-stats", profileName);
+  return callDataApi<TeamDashboardData>("get-team-dashboard-stats", profileName);
 }
