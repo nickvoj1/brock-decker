@@ -11,6 +11,7 @@ import PreviousCVs from "./pages/PreviousCVs";
 import GenerateMail from "./pages/GenerateMail";
 import SettingsPage from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
+import SignalsDashboard from "./pages/SignalsDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,6 +26,7 @@ const App = () => (
           <Route path="/" element={<UploadRun />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/team-dashboard" element={<TeamDashboard />} />
+          <Route path="/signals" element={<SignalsDashboard />} />
           <Route path="/previous-cvs" element={<PreviousCVs />} />
           <Route path="/generate-mail" element={<GenerateMail />} />
           <Route path="/history" element={<RunsHistory />} />

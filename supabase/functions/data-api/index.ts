@@ -1102,6 +1102,86 @@ Deno.serve(async (req) => {
       );
     }
 
+    // === SIGNALS ===
+    if (action === "get-signals") {
+      const { region } = data || {};
+      const cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours
+      
+      let query = supabase
+        .from("signals")
+        .select("*")
+        .eq("is_dismissed", false)
+        .gte("published_at", cutoffDate.toISOString())
+        .order("published_at", { ascending: false })
+        .limit(100);
+      
+      if (region) {
+        query = query.eq("region", region);
+      }
+      
+      const { data: signals, error } = await query;
+      if (error) throw error;
+      
+      // Get region counts
+      const { data: allSignals } = await supabase
+        .from("signals")
+        .select("region")
+        .eq("is_dismissed", false)
+        .gte("published_at", cutoffDate.toISOString());
+      
+      const regionCounts: Record<string, number> = {};
+      (allSignals || []).forEach((s: any) => {
+        regionCounts[s.region] = (regionCounts[s.region] || 0) + 1;
+      });
+      
+      return new Response(
+        JSON.stringify({ success: true, data: { signals: signals || [], regionCounts } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "dismiss-signal") {
+      const { signalId } = data || {};
+      if (!signalId) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Signal ID required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+      
+      const { error } = await supabase
+        .from("signals")
+        .update({ is_dismissed: true, dismissed_by: profileName })
+        .eq("id", signalId);
+      
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "update-signal") {
+      const { signalId, updates } = data || {};
+      if (!signalId) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Signal ID required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+      
+      const { error } = await supabase
+        .from("signals")
+        .update(updates)
+        .eq("id", signalId);
+      
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: "Invalid action" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }

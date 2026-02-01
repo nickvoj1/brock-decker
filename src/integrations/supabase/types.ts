@@ -310,6 +310,72 @@ export type Database = {
         }
         Relationships: []
       }
+      signals: {
+        Row: {
+          amount: number | null
+          bullhorn_note_added: boolean | null
+          company: string | null
+          contacts_found: number | null
+          created_at: string
+          currency: string | null
+          cv_matches: number | null
+          description: string | null
+          dismissed_by: string | null
+          id: string
+          is_dismissed: boolean | null
+          is_high_intent: boolean | null
+          published_at: string | null
+          region: string
+          signal_type: string | null
+          source: string | null
+          title: string
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          amount?: number | null
+          bullhorn_note_added?: boolean | null
+          company?: string | null
+          contacts_found?: number | null
+          created_at?: string
+          currency?: string | null
+          cv_matches?: number | null
+          description?: string | null
+          dismissed_by?: string | null
+          id?: string
+          is_dismissed?: boolean | null
+          is_high_intent?: boolean | null
+          published_at?: string | null
+          region: string
+          signal_type?: string | null
+          source?: string | null
+          title: string
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          amount?: number | null
+          bullhorn_note_added?: boolean | null
+          company?: string | null
+          contacts_found?: number | null
+          created_at?: string
+          currency?: string | null
+          cv_matches?: number | null
+          description?: string | null
+          dismissed_by?: string | null
+          id?: string
+          is_dismissed?: boolean | null
+          is_high_intent?: boolean | null
+          published_at?: string | null
+          region?: string
+          signal_type?: string | null
+          source?: string | null
+          title?: string
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
       used_contacts: {
         Row: {
           added_at: string
