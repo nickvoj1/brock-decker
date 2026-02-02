@@ -166,12 +166,12 @@ export function ContactPreviewModal({
           <Table>
             <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
               <TableRow>
+                <TableHead className="w-[50px]"></TableHead>
                 <TableHead className="w-[200px]">Name</TableHead>
                 <TableHead className="w-[200px]">Title</TableHead>
                 <TableHead className="w-[180px]">Company</TableHead>
                 <TableHead className="w-[150px]">Location</TableHead>
                 <TableHead className="w-[220px]">Email</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -186,6 +186,16 @@ export function ContactPreviewModal({
               ) : (
                 filteredContacts.map((contact) => (
                   <TableRow key={contact.email} className="group">
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveContact(contact.email)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                     <TableCell className="font-medium">{contact.name}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {contact.title}
@@ -209,16 +219,6 @@ export function ContactPreviewModal({
                         <Mail className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                         <span className="text-sm text-primary truncate">{contact.email}</span>
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                        onClick={() => handleRemoveContact(contact.email)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </TableCell>
                   </TableRow>
                 ))

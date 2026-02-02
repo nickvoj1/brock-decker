@@ -250,9 +250,40 @@ Deno.serve(async (req) => {
     console.log(`Running ${searchCombinations.length} search combinations for maximum coverage:`, 
       searchCombinations.map(c => c.label))
 
+    // Calculate equal distribution of contacts per industry
+    // Group combinations by industry and allocate quota per industry
+    const industryQuotas: Record<string, number> = {}
+    const industryContacts: Record<string, ApolloContact[]> = {}
+    
+    if (allIndustries.length > 1) {
+      const quotaPerIndustry = Math.floor(maxContacts / allIndustries.length)
+      const remainder = maxContacts % allIndustries.length
+      
+      allIndustries.forEach((industry, idx) => {
+        // Distribute remainder to first industries
+        industryQuotas[industry] = quotaPerIndustry + (idx < remainder ? 1 : 0)
+        industryContacts[industry] = []
+      })
+      
+      console.log('Contact quotas per industry:', industryQuotas)
+    }
+    
+    const useEqualDistribution = allIndustries.length > 1
+
     // Search across each combination
     for (const combo of searchCombinations) {
       if (allContacts.length >= maxContacts) break
+      
+      // For equal distribution: check if this industry's quota is already filled
+      const comboIndustry = combo.industry
+      if (useEqualDistribution && comboIndustry) {
+        const currentCount = industryContacts[comboIndustry]?.length || 0
+        const quota = industryQuotas[comboIndustry] || 0
+        if (currentCount >= quota) {
+          console.log(`Skipping ${combo.label} - industry quota reached (${currentCount}/${quota})`)
+          continue
+        }
+      }
 
       try {
         // Build query params for new API search endpoint
@@ -352,8 +383,24 @@ Deno.serve(async (req) => {
             // Collect person IDs to enrich (get emails)
             const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
             
+            // Determine quota limit for this combination's industry
+            const comboIndustryQuota = (useEqualDistribution && comboIndustry) 
+              ? (industryQuotas[comboIndustry] || maxContacts) 
+              : maxContacts
+            const currentIndustryCount = (useEqualDistribution && comboIndustry)
+              ? (industryContacts[comboIndustry]?.length || 0)
+              : 0
+            
             for (const person of people) {
               if (allContacts.length + peopleToEnrich.length >= maxContacts) break
+              
+              // For equal distribution: check industry-specific quota
+              if (useEqualDistribution && comboIndustry) {
+                if (currentIndustryCount + peopleToEnrich.length >= comboIndustryQuota) {
+                  console.log(`Industry ${comboIndustry} quota reached, stopping collection`)
+                  break
+                }
+              }
               
               const companyName = person.organization?.name || person.organization_name || 'Unknown'
               const personLocation = person.city || person.state || person.country || 'Unknown'
@@ -443,15 +490,30 @@ Deno.serve(async (req) => {
                       // Skip duplicates from other search combinations
                       console.log(`Skipping duplicate from other search: ${fullName} (${email})`)
                     } else {
-                      console.log(`Adding contact: ${fullName} at ${companyName} (industry: ${person.organization?.industry || 'unknown'})`)
-                      seenEmails.add(emailLower)
-                      allContacts.push({
+                      const newContact: ApolloContact = {
                         name: fullName,
                         title: jobTitle,
                         location: fullLocation,
                         email: email,
                         company: companyName,
-                      })
+                      }
+                      
+                      // Track per-industry for equal distribution
+                      if (useEqualDistribution && comboIndustry) {
+                        const quota = industryQuotas[comboIndustry] || 0
+                        const currentCount = industryContacts[comboIndustry]?.length || 0
+                        if (currentCount >= quota) {
+                          console.log(`Skipping - industry ${comboIndustry} quota full (${currentCount}/${quota})`)
+                          continue
+                        }
+                        industryContacts[comboIndustry].push(newContact)
+                        console.log(`Adding contact for ${comboIndustry}: ${fullName} at ${companyName} (${currentCount + 1}/${quota})`)
+                      } else {
+                        console.log(`Adding contact: ${fullName} at ${companyName} (industry: ${person.organization?.industry || 'unknown'})`)
+                      }
+                      
+                      seenEmails.add(emailLower)
+                      allContacts.push(newContact)
                     }
                   } else {
                     console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
