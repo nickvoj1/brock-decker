@@ -401,64 +401,58 @@ async function searchWithStrategy(
     }
   }
 
-  // Reveal emails for people without emails (using bulk reveal - costs 1 credit per email)
+  // Enrich people to get emails using people/match endpoint
   if (pendingReveals.length > 0) {
-    console.log(`  Revealing ${pendingReveals.length} emails...`)
+    console.log(`  Enriching ${pendingReveals.length} contacts...`)
     
-    // Process in batches of 10 for bulk reveal
-    const batchSize = 10
-    for (let i = 0; i < pendingReveals.length; i += batchSize) {
-      const batch = pendingReveals.slice(i, i + batchSize)
-      const personIds = batch.map(p => p.person.id as string)
+    for (const pending of pendingReveals) {
+      const person = pending.person
+      const personId = person.id as string
       
       try {
-        const response = await fetch('https://api.apollo.io/api/v1/people/bulk_reveal', {
+        const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Api-Key': apolloApiKey,
           },
-          body: JSON.stringify({ ids: personIds }),
+          body: JSON.stringify({ id: personId }),
         })
 
-        if (response.ok) {
-          const data = await response.json()
-          const matches = data.matches || []
+        if (enrichResponse.ok) {
+          const enriched = await enrichResponse.json()
+          const enrichedPerson = enriched.person || {}
           
-          for (const match of matches) {
-            const email = match.email?.toLowerCase()
-            if (!email || seenEmails.has(email)) continue
-            
-            // Find the original person data
-            const originalPending = batch.find(p => p.person.id === match.id)
-            if (!originalPending) continue
-            
-            const person = originalPending.person
-            const firstName = person.first_name || ''
-            const lastName = person.last_name || ''
-            const fullName = `${firstName} ${lastName}`.trim()
-            const personCompany = (person.organization as Record<string, unknown>)?.name as string || ''
-            
-            const locationParts = [
-              person.city,
-              person.state,
-              person.country
-            ].filter(Boolean)
-            const location = (locationParts as string[]).join(', ') || 'Unknown'
+          const email = enrichedPerson.email?.toLowerCase()
+          if (!email || seenEmails.has(email)) continue
+          
+          const firstName = enrichedPerson.first_name || person.first_name || ''
+          const lastName = enrichedPerson.last_name || person.last_name || ''
+          const fullName = `${firstName} ${lastName}`.trim()
+          const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
+          
+          const locationParts = [
+            enrichedPerson.city || person.city,
+            enrichedPerson.state || person.state,
+            enrichedPerson.country || person.country
+          ].filter(Boolean)
+          const location = (locationParts as string[]).join(', ') || 'Unknown'
 
-            contacts.push({
-              name: fullName,
-              title: (person.title as string) || 'Unknown',
-              location,
-              email,
-              company: personCompany,
-              category: originalPending.categoryName,
-            })
-            seenEmails.add(email)
-          }
+          contacts.push({
+            name: fullName,
+            title: enrichedPerson.title || (person.title as string) || 'Unknown',
+            location,
+            email,
+            company: personCompany,
+            category: pending.categoryName,
+          })
+          seenEmails.add(email)
         }
+        
+        // Small delay between calls
+        await new Promise(resolve => setTimeout(resolve, 100))
       } catch (err) {
-        console.error('Bulk reveal failed:', err)
+        console.error('Enrichment failed:', err)
       }
     }
   }

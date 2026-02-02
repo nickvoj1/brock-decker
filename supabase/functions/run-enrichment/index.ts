@@ -913,50 +913,44 @@ Deno.serve(async (req) => {
               }
             }
           
-          // Reveal emails using bulk_reveal (cheaper than enrichment)
+          // Enrich people to get emails using people/match endpoint
           for (let i = 0; i < peopleToEnrich.length; i += 10) {
             const batch = peopleToEnrich.slice(i, i + 10)
-            const personIds = batch.map(p => p.id)
             
-            try {
-              const revealResponse = await fetch('https://api.apollo.io/api/v1/people/bulk_reveal', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-api-key': apolloApiKey,
-                },
-                body: JSON.stringify({ ids: personIds }),
-              })
-              
-              if (revealResponse.ok) {
-                const revealData = await revealResponse.json()
-                const matches = revealData.matches || []
+            for (const personData of batch) {
+              try {
+                const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apolloApiKey,
+                  },
+                  body: JSON.stringify({ id: personData.id }),
+                })
                 
-                for (const match of matches) {
-                  const email = match.email || ''
-                  if (!email) continue
+                if (enrichResponse.ok) {
+                  const enriched = await enrichResponse.json()
+                  const person = enriched.person || {}
                   
-                  // Find original person data
-                  const originalPerson = batch.find(p => p.id === match.id)
-                  if (!originalPerson) continue
+                  // Get full details from enrichment response
+                  const email = person.email || ''
+                  const fullName = person.name || (person.first_name && person.last_name 
+                    ? `${person.first_name} ${person.last_name}`.trim() 
+                    : personData.name)
                   
-                  const fullName = match.name || match.first_name && match.last_name 
-                    ? `${match.first_name} ${match.last_name}`.trim() 
-                    : originalPerson.name
-                  
-                  // Build location from reveal data
+                  // Build location from enrichment data
                   const locationParts = [
-                    match.city,
-                    match.state,
-                    match.country
+                    person.city,
+                    person.state,
+                    person.country
                   ].filter(Boolean)
-                  const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : originalPerson.location
+                  const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
                   
-                  // Get company from reveal if available
-                  const companyName = match.organization?.name || originalPerson.company
+                  // Get company from enrichment if available
+                  const companyName = person.organization?.name || personData.company
                   
-                  // Get job title from reveal
-                  const jobTitle = match.title || originalPerson.title || 'Unknown'
+                  // Get job title from enrichment
+                  const jobTitle = person.title || personData.title || 'Unknown'
                   
                   // Only add if we got an email and a valid name
                   if (email && fullName && fullName !== 'Unknown') {
@@ -993,16 +987,18 @@ Deno.serve(async (req) => {
                       seenEmails.add(emailLower)
                       allContacts.push(newContact)
                     }
+                  } else {
+                    console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
                   }
+                } else {
+                  console.log('Enrichment failed for', personData.name)
                 }
-              } else {
-                console.log('Bulk reveal failed for batch, status:', revealResponse.status)
+                
+                // Small delay between enrichment calls
+                await new Promise(resolve => setTimeout(resolve, 100))
+              } catch (enrichError) {
+                console.error('Enrichment error for', personData.name, enrichError)
               }
-              
-              // Small delay between reveal calls
-              await new Promise(resolve => setTimeout(resolve, 100))
-            } catch (revealError) {
-              console.error('Bulk reveal error:', revealError)
             }
           }
           } else {
@@ -1133,44 +1129,35 @@ Deno.serve(async (req) => {
               
               console.log(`Found ${peopleToEnrich.length} new candidates from target company`)
               
-              // Reveal emails using bulk_reveal (cheaper than enrichment)
+              // Enrich people to get emails
               for (let i = 0; i < peopleToEnrich.length; i += 10) {
                 if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
                 
                 const batch = peopleToEnrich.slice(i, i + 10)
-                const personIds = batch.map(p => p.id)
                 
-                try {
-                  const revealResponse = await fetch('https://api.apollo.io/api/v1/people/bulk_reveal', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'x-api-key': apolloApiKey,
-                    },
-                    body: JSON.stringify({ ids: personIds }),
-                  })
+                for (const personData of batch) {
+                  if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
                   
-                  if (revealResponse.ok) {
-                    const revealData = await revealResponse.json()
-                    const matches = revealData.matches || []
+                  try {
+                    const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apolloApiKey,
+                      },
+                      body: JSON.stringify({ id: personData.id }),
+                    })
                     
-                    for (const match of matches) {
-                      if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
+                    if (enrichResponse.ok) {
+                      const enriched = await enrichResponse.json()
+                      const person = enriched.person || {}
                       
-                      const email = match.email || ''
-                      if (!email) continue
-                      
-                      // Find original person data
-                      const originalPerson = batch.find(p => p.id === match.id)
-                      if (!originalPerson) continue
-                      
-                      const fullName = match.name || (match.first_name && match.last_name 
-                        ? `${match.first_name} ${match.last_name}`.trim() 
-                        : originalPerson.name)
-                      const companyName = match.organization?.name || originalPerson.company
-                      const jobTitle = match.title || originalPerson.title || 'Unknown'
-                      const locationParts = [match.city, match.state, match.country].filter(Boolean)
-                      const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : originalPerson.location
+                      const email = person.email || ''
+                      const fullName = person.name || personData.name
+                      const companyName = person.organization?.name || personData.company
+                      const jobTitle = person.title || personData.title || 'Unknown'
+                      const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                      const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
                       
                       if (email && fullName && fullName !== 'Unknown') {
                         const emailLower = email.toLowerCase()
@@ -1187,11 +1174,11 @@ Deno.serve(async (req) => {
                         }
                       }
                     }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 100))
+                  } catch (enrichError) {
+                    console.error('Retry enrichment error:', enrichError)
                   }
-                  
-                  await new Promise(resolve => setTimeout(resolve, 100))
-                } catch (revealError) {
-                  console.error('Retry bulk reveal error:', revealError)
                 }
               }
             } else {
