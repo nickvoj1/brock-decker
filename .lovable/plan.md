@@ -1,184 +1,85 @@
 
+# Fix Location Suggestions to Prioritize CV Applicant Location
 
-# Improve Skills Allocation by Analyzing Existing Bullhorn Contacts
+## Problem Analysis
 
-## Overview
+The location suggestion system currently has complex logic that tries to be "smart" about location mapping but ends up suggesting wrong cities like Tokyo for a candidate based in Boston/MA. The issue stems from:
 
-Enhance the skill allocation system by learning from existing contacts in Bullhorn. This approach analyzes patterns from successfully assigned skills in your Bullhorn database to improve accuracy for new contact exports.
+1. **Fragmented matching logic** - US state matching regex may not correctly capture all formats
+2. **Fallback paths** - When the primary match fails, secondary sources (work history, education) can override with unrelated cities
+3. **Keyword-based extraction** - The `extractLocationsFromText` function looks for city names as keywords, which can pick up irrelevant mentions
 
-## Current Limitations
+## Solution Overview
 
-The existing system uses static keyword mappings that:
-- Cannot adapt to your organization's specific skill naming conventions
-- Miss context-specific patterns unique to your Bullhorn instance
-- Don't learn from successful skill assignments made by recruiters
+Simplify the location analysis to make the candidate's explicit CV location the **absolute primary source**, with a reliable fallback chain:
 
-## Proposed Solution: Skills Pattern Learning
+1. **First**: Try to extract a known city/location directly from `candidate.location`
+2. **Second**: If only a US state is found, map to the major hub for that state
+3. **Third**: If only a country is found, map to major cities for that country
+4. **Fourth**: Only if no location is found at all, use secondary signals (work history, etc.) as supplementary
 
-Create a new edge function that queries existing Bullhorn contacts, extracts skill patterns, and builds a reference dataset for better skill matching.
+## Technical Changes
 
-```text
-+------------------------+     +------------------------+     +------------------------+
-| Bullhorn Contacts      | --> | Pattern Analyzer       | --> | Skills Reference DB    |
-| (existing skills data) |     | (extract patterns)     |     | (company→skills map)   |
-+------------------------+     +------------------------+     +------------------------+
-                                                                        |
-                                                                        v
-+------------------------+     +------------------------+     +------------------------+
-| New Apollo Contacts    | --> | Enhanced Skill Engine  | --> | Bullhorn Export        |
-| (from enrichment run)  |     | (learned + rules)      |     | (better skills)        |
-+------------------------+     +------------------------+     +------------------------+
-```
+### File: `src/lib/cvAnalyzer.ts`
 
-## Implementation Details
-
-### Phase 1: Create Skills Analysis Edge Function
-
-**New file: `supabase/functions/analyze-bullhorn-skills/index.ts`**
-
-This function will:
-
-1. **Query existing Bullhorn contacts** with skills data:
-   ```text
-   GET /search/ClientContact?fields=id,name,firstName,lastName,occupation,
-       desiredSkills,customText1,categorySkills,address(city,countryID),
-       clientCorporation(id,name)
-   ```
-
-2. **Extract skill patterns** by grouping contacts by:
-   - Company name → skills associations
-   - Job title patterns → skills associations
-   - Location → skills associations
-
-3. **Store learned mappings** in a new `skill_patterns` table:
-   ```text
-   | pattern_type | pattern_value      | skills           | frequency |
-   |--------------|-------------------|------------------|-----------|
-   | company      | goldman sachs     | TIER 1;IB;...    | 47        |
-   | title        | managing director | SENIOR;BUSINESS  | 128       |
-   | location     | london            | LONDON;EMEA      | 312       |
-   ```
-
-### Phase 2: Database Schema
-
-**New table: `skill_patterns`**
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | uuid | Primary key |
-| pattern_type | text | 'company', 'title', 'location' |
-| pattern_value | text | Lowercase normalized value |
-| skills | text[] | Array of learned skills |
-| frequency | integer | How many times this pattern appears |
-| confidence | numeric | Confidence score (frequency-based) |
-| last_analyzed_at | timestamptz | When pattern was last updated |
-
-### Phase 3: Enhance Export Function
-
-**Modify: `supabase/functions/export-to-bullhorn/index.ts`**
-
-Update `generateSkillsString()` to:
-
-1. **Query learned patterns** from `skill_patterns` table
-2. **Prioritize high-frequency patterns** for skill matching
-3. **Fall back to existing rules** when no learned pattern exists
-4. **Merge learned + rule-based skills** with deduplication
+#### 1. Simplify the Primary Location Extraction (Lines 416-502)
 
 ```text
-Skill Priority Order:
-1. Learned patterns (confidence > 0.7, frequency > 5)
-2. Existing rule-based mappings (COMPANY_SKILLS, TITLE_SKILLS)
-3. Generic fallbacks (BUSINESS, GLOBAL, etc.)
+Current flow:
+  candidate.location → US state regex → stateToCity map OR extractLocationsFromText
+
+New flow:
+  candidate.location → extractLocationsFromText FIRST (check for known cities)
+                     → THEN US state detection (only if no city found)
+                     → THEN country-to-hub fallback (only if still nothing)
 ```
 
-### Phase 4: Admin UI Integration
+The key change is to **check for known city names first** in the location string. For example:
+- "Boston, MA" → matches "boston" directly → ✅ Primary: Boston
+- "Chelsea, MA" → no city match → US state "MA" → maps to Boston
+- "London, UK" → matches "london" directly → ✅ Primary: London
 
-**Add to Settings page:**
+#### 2. Ensure Secondary Signals Don't Override
 
-- "Analyze Bullhorn Skills" button that triggers the analysis
-- Display last analysis timestamp
-- Show top learned patterns for verification
-- Option to clear learned patterns
+When a primary location is found from `candidate.location`, secondary sources (work history regional hints, summary, education) should only be added as **supplementary suggestions with much lower weight**, never replacing the primary.
 
-## Data Flow
+Currently the code does try to do this (`foundPrimaryLocation` flag), but the logic flow allows edge cases where the flag isn't set properly.
 
-```text
-User clicks "Analyze Bullhorn Skills"
-       |
-       v
-Edge function queries up to 1000 recent contacts from Bullhorn
-       |
-       v
-Extract skills from: desiredSkills, customText1, categorySkills
-       |
-       v
-Group by company/title/location and count frequencies
-       |
-       v
-Store patterns with frequency >= 3 (minimum threshold)
-       |
-       v
-During export, match new contacts against learned patterns
-       |
-       v
-Merge learned skills with rule-based skills
-```
+#### 3. Add Direct City Extraction Before US State Regex
 
-## Files to Create
+Before running the US state regex, first try to extract any known city name from the location string. This handles cases like:
+- "Greater Boston Area, MA"
+- "Boston Metropolitan Area"
+- "London, United Kingdom"
 
-| File | Purpose |
-|------|---------|
-| `supabase/functions/analyze-bullhorn-skills/index.ts` | New edge function for pattern analysis |
-| Migration for `skill_patterns` table | Store learned mappings |
+## Implementation Steps
 
-## Files to Modify
+1. **Reorder extraction logic** in `analyzeLocations`:
+   - Call `extractLocationsFromText(candidate.location)` FIRST
+   - If it finds a known city, use that as primary (weight 15)
+   - If it doesn't find a city but finds a country, continue to step 2
+   - Only if no city found, run US state detection and state-to-city mapping
 
-| File | Changes |
-|------|---------|
-| `supabase/functions/export-to-bullhorn/index.ts` | Query learned patterns before rule-based matching |
-| `supabase/functions/data-api/index.ts` | Add actions for triggering analysis and viewing patterns |
-| `src/pages/Settings.tsx` | Add UI for skill analysis trigger |
-| `src/components/settings/BullhornSettingsCard.tsx` | Add analysis button and status display |
+2. **Strengthen the foundPrimaryLocation guard**:
+   - Once a primary location is set, prevent any secondary signal from adding locations with weight > 5
 
-## API Endpoints
+3. **Improve US state-to-city fallback coverage**:
+   - Add more states to the stateToCity map (currently missing some like NJ, NH, CT, etc.)
+   - Map New Jersey to New York, New Hampshire to Boston, Connecticut to New York, etc.
 
-| Action | Description |
-|--------|-------------|
-| `analyze-bullhorn-skills` | Trigger full skill pattern analysis |
-| `get-skill-patterns` | Retrieve learned patterns for display |
-| `clear-skill-patterns` | Reset learned patterns |
+4. **Remove the "if no match, add all major US hubs" fallback** (lines 475-479):
+   - This is causing suggestions like "New York, Boston, Chicago, San Francisco, Los Angeles" to appear when the state isn't in the map
+   - Instead, add just the country ("United States") and let the country-to-hub fallback handle it later
 
-## Technical Considerations
+## Expected Outcome
 
-### Bullhorn API Rate Limits
-- Query contacts in batches of 100
-- Add 200ms delay between batches
-- Total analysis limited to 1000 contacts (configurable)
+For a CV with location "Chelsea, MA":
+- **Before**: Could suggest Tokyo, New York, or other unrelated cities
+- **After**: Suggests Boston (nearest hub in MA) as primary, with United States as country
 
-### Pattern Quality Filters
-- Minimum frequency threshold: 3 occurrences
-- Skip patterns with only generic skills (BUSINESS, GLOBAL)
-- Normalize company names (lowercase, trim whitespace)
+For a CV with location "London, UK":
+- **Before & After**: Suggests London as primary (no change, already working)
 
-### Confidence Scoring
-```text
-confidence = min(1.0, frequency / 20)
-```
-- 3+ occurrences = included
-- 20+ occurrences = max confidence (1.0)
-
-## Expected Benefits
-
-| Aspect | Before | After |
-|--------|--------|-------|
-| Unknown companies | Generic fallback skills | Learned from similar contacts |
-| Skill accuracy | ~70% relevant | ~85-90% relevant |
-| Adaptation | Manual rule updates | Automatic pattern learning |
-| Organization fit | Generic mappings | Your Bullhorn's actual skills |
-
-## Limitations
-
-- Requires existing contacts in Bullhorn to learn from
-- Initial analysis may take 1-2 minutes
-- Patterns reflect historical data (may include outdated skills)
-
+For a CV with location "Frankfurt am Main, Germany":
+- **Before**: Might not match if "Frankfurt am Main" isn't exact
+- **After**: Matches "frankfurt" keyword → suggests Frankfurt as primary
