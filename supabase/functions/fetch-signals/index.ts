@@ -352,7 +352,7 @@ Deno.serve(async (req) => {
     const regionsToFetch = region ? [region] : Object.keys(RSS_FEEDS);
     const allSignals: any[] = [];
     const now = new Date();
-    const cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago for better coverage
+    const cutoffDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 14 days (2 weeks) for more quality leads
 
     for (const reg of regionsToFetch) {
       const feeds = RSS_FEEDS[reg as keyof typeof RSS_FEEDS] || [];

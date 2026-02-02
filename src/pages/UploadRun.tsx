@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Play, Loader2, FileText, Settings2, Users, MapPin } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
@@ -55,14 +55,24 @@ const ROLES_STORAGE_KEY = 'apollo-search-selected-roles';
 
 export default function UploadRun() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   
   // Use the shared profile name hook - this ensures sync with header profile selector
   const profileName = useProfileName();
   
+  // Signal context from URL params (when coming from Signals dashboard)
+  const signalContext = {
+    company: searchParams.get('company') || '',
+    locations: searchParams.get('locations') || '',
+    industries: searchParams.get('industries') || '',
+    signalId: searchParams.get('signalId') || '',
+    signalTitle: searchParams.get('signalTitle') || '',
+  };
+  
   // Quick search mode (no CV)
-  const [isQuickSearch, setIsQuickSearch] = useState(false);
-  const [quickSearchName, setQuickSearchName] = useState('');
+  const [isQuickSearch, setIsQuickSearch] = useState(!!signalContext.company);
+  const [quickSearchName, setQuickSearchName] = useState(signalContext.company || '');
   const [existingSearchNames, setExistingSearchNames] = useState<string[]>([]);
   
   // CV file states
@@ -136,6 +146,28 @@ export default function UploadRun() {
       }
     }
   }, []);
+
+  // Apply signal context from URL params (from Signals dashboard TA Contacts button)
+  useEffect(() => {
+    if (signalContext.locations) {
+      const locs = signalContext.locations.split(',').map(l => l.trim()).filter(Boolean);
+      if (locs.length > 0) {
+        setSelectedLocations(locs);
+      }
+    }
+    if (signalContext.industries) {
+      const inds = signalContext.industries.split(',').map(i => i.trim()).filter(Boolean);
+      if (inds.length > 0) {
+        setSelectedIndustries(inds);
+      }
+    }
+    if (signalContext.signalTitle) {
+      toast({
+        title: "Signal Context Loaded",
+        description: `Finding contacts for: ${signalContext.company || signalContext.signalTitle}`,
+      });
+    }
+  }, [signalContext.locations, signalContext.industries, signalContext.signalTitle]);
 
   // Profile name now managed by useProfileName hook - no need to save here
 
