@@ -420,6 +420,7 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
   
   // Track primary locations (from recent work history) separately
   const primaryLocations = new Set<string>();
+  let foundWorkHistoryLocations = false;
   
   // 1. HIGHEST PRIORITY: Extract from recent work history (top 3 jobs)
   // These are the PRIMARY suggestions based on where the candidate actually worked
@@ -433,6 +434,7 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     companyLocations.locations.forEach(loc => {
       locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
       primaryLocations.add(loc);
+      foundWorkHistoryLocations = true;
     });
     companyLocations.countries.forEach(country => {
       countryScores.set(country, (countryScores.get(country) || 0) + recencyWeight);
@@ -444,6 +446,7 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
       ["london", "frankfurt", "paris", "amsterdam"].forEach(loc => {
         locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
         primaryLocations.add(loc);
+        foundWorkHistoryLocations = true;
       });
       if (index === 0) reasoning.push(`${job.title} suggests European market focus`);
     }
@@ -451,6 +454,7 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
       ["hong-kong", "singapore", "tokyo", "sydney"].forEach(loc => {
         locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
         primaryLocations.add(loc);
+        foundWorkHistoryLocations = true;
       });
       if (index === 0) reasoning.push(`${job.title} suggests Asia Pacific market focus`);
     }
@@ -458,6 +462,7 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
       ["new-york", "sao-paulo", "mexico-city"].forEach(loc => {
         locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
         primaryLocations.add(loc);
+        foundWorkHistoryLocations = true;
       });
       if (index === 0) reasoning.push(`${job.title} suggests Americas market focus`);
     }
@@ -467,17 +472,33 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     }
   });
   
-  // 2. Extract from current location field (secondary, lower weight now)
+  // 2. Extract from current location field
+  // If work history didn't yield locations, make this PRIMARY with high weight
   if (candidate.location) {
     const { locations, countries } = extractLocationsFromText(candidate.location);
+    const locationWeight = foundWorkHistoryLocations ? 3 : 10; // High weight if no work history locations
+    
     locations.forEach(loc => {
-      locationScores.set(loc, (locationScores.get(loc) || 0) + 3);
+      locationScores.set(loc, (locationScores.get(loc) || 0) + locationWeight);
+      if (!foundWorkHistoryLocations) primaryLocations.add(loc);
     });
     countries.forEach(country => {
-      countryScores.set(country, (countryScores.get(country) || 0) + 3);
+      countryScores.set(country, (countryScores.get(country) || 0) + locationWeight);
     });
     if (locations.length > 0) {
       reasoning.push(`Current location: ${candidate.location}`);
+    }
+    
+    // If still no locations found, try to infer from US state abbreviations or general patterns
+    if (locationScores.size === 0 && candidate.location) {
+      const locLower = candidate.location.toLowerCase();
+      // Check for US patterns (city, state abbreviation like "Chelsea, MA")
+      const usStatePattern = /,\s*(ma|ny|ca|tx|fl|il|pa|oh|ga|nc|nj|va|wa|az|co|mi|tn|md|wi|mn|mo|sc|al|la|ky|or|ok|ct|ut|ia|nv|ar|ms|ks|nm|ne|wv|id|hi|nh|me|ri|mt|de|sd|nd|ak|vt|dc|wy)\b/i;
+      if (usStatePattern.test(candidate.location)) {
+        // This is a US-based candidate - suggest major US cities based on their industry focus
+        countryScores.set("United States", 10);
+        reasoning.push(`US-based candidate (${candidate.location})`);
+      }
     }
   }
   
@@ -509,7 +530,32 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     });
   }
   
-  // 5. Add financial hub suggestions based on industry (supplementary only)
+  // 5. If we have a country but no cities, add major cities for that country
+  if (locationScores.size === 0 && countryScores.size > 0) {
+    const topCountry = Array.from(countryScores.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const countryCityMap: Record<string, string[]> = {
+      "United States": ["new-york", "boston", "chicago", "san-francisco", "los-angeles"],
+      "United Kingdom": ["london", "manchester", "edinburgh"],
+      "Germany": ["frankfurt", "berlin", "munich"],
+      "France": ["paris", "lyon"],
+      "Switzerland": ["zurich", "geneva"],
+      "Singapore": ["singapore"],
+      "Hong Kong": ["hong-kong"],
+      "Australia": ["sydney", "melbourne"],
+      "Canada": ["toronto", "vancouver"],
+    };
+    
+    const suggestedCities = countryCityMap[topCountry];
+    if (suggestedCities) {
+      suggestedCities.forEach((city, index) => {
+        locationScores.set(city, 8 - index);
+        primaryLocations.add(city);
+      });
+      reasoning.push(`Major ${topCountry} cities suggested`);
+    }
+  }
+  
+  // 6. Add financial hub suggestions based on industry (supplementary only)
   const isFinanceRelated = industries.some(ind => 
     INDUSTRY_TO_SECTOR[ind]?.includes("Financial Services")
   );
