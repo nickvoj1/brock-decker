@@ -29,6 +29,17 @@ interface SearchPreference {
   location?: string
 }
 
+interface LearnedPattern {
+  pattern_type: 'company' | 'title' | 'location'
+  pattern_value: string
+  skills: string[]
+  frequency: number
+  confidence: number
+}
+
+// Cache for learned patterns (loaded once per function invocation)
+let learnedPatternsCache: LearnedPattern[] | null = null
+
 function normalizePreferences(raw: unknown): SearchPreference | undefined {
   const anyRaw = raw as any
   if (!anyRaw) return undefined
@@ -478,15 +489,64 @@ const BUY_SIDE_ONLY_SKILLS = ['BUY SIDE', 'PE', 'CORP VC', 'VC', 'ALT INVESTMENT
 const SELL_SIDE_ONLY_SKILLS = ['SELL SIDE', 'CORPORATE BANKING', 'TIER 1']
 // CORP M&A can appear on both sides (PE does M&A, IB advises on M&A)
 
+// Helper to normalize pattern values for matching
+function normalizeForPatternMatch(value: string): string {
+  return value.toLowerCase().trim().replace(/[^\w\s&.-]/g, '').replace(/\s+/g, ' ')
+}
+
+// Get skills from learned patterns
+function getLearnedSkills(
+  contact: ApolloContact,
+  patterns: LearnedPattern[],
+  minConfidence: number = 0.15
+): Set<string> {
+  const skills = new Set<string>()
+  
+  const companyNorm = normalizeForPatternMatch(contact.company || '')
+  const titleNorm = normalizeForPatternMatch(contact.title || '')
+  const locationNorm = normalizeForPatternMatch(contact.location?.split(',')[0] || '')
+  
+  for (const pattern of patterns) {
+    if (pattern.confidence < minConfidence) continue
+    
+    let matched = false
+    
+    if (pattern.pattern_type === 'company' && companyNorm.includes(pattern.pattern_value)) {
+      matched = true
+    } else if (pattern.pattern_type === 'title' && titleNorm.includes(pattern.pattern_value)) {
+      matched = true
+    } else if (pattern.pattern_type === 'location' && locationNorm.includes(pattern.pattern_value)) {
+      matched = true
+    }
+    
+    if (matched) {
+      console.log(`[Skills] Learned pattern matched: ${pattern.pattern_type}="${pattern.pattern_value}" (freq=${pattern.frequency}, conf=${pattern.confidence.toFixed(2)})`)
+      pattern.skills.forEach(s => skills.add(s))
+    }
+  }
+  
+  return skills
+}
+
 function generateSkillsString(
   contact: ApolloContact,
-  searchPreferences?: SearchPreference
+  searchPreferences?: SearchPreference,
+  learnedPatterns?: LearnedPattern[]
 ): string {
   const skills = new Set<string>()
 
   // FIRST: Detect company side to enforce skill consistency
   const companySide = detectCompanySide(contact.company || '')
   console.log(`[Skills] Contact ${contact.name} @ ${contact.company} -> side: ${companySide || 'unknown'}`)
+
+  // 0. PRIORITY: Add skills from learned patterns first (highest priority)
+  if (learnedPatterns && learnedPatterns.length > 0) {
+    const learnedSkills = getLearnedSkills(contact, learnedPatterns)
+    learnedSkills.forEach(s => skills.add(s))
+    if (learnedSkills.size > 0) {
+      console.log(`[Skills] Added ${learnedSkills.size} skills from learned patterns`)
+    }
+  }
 
   // 1. PRIMARY: Match from contact's COMPANY (most specific to this contact)
   const companyLower = contact.company?.toLowerCase() || ''
@@ -1743,6 +1803,17 @@ Deno.serve(async (req) => {
     const skillsFieldName = await getSkillsFieldName(tokens.restUrl, tokens.bhRestToken)
     console.log(`Using skills field: ${skillsFieldName}`)
 
+    // Load learned patterns from database for enhanced skill generation
+    const { data: patterns } = await supabase
+      .from('skill_patterns')
+      .select('pattern_type, pattern_value, skills, frequency, confidence')
+      .gte('confidence', 0.15)
+      .order('frequency', { ascending: false })
+      .limit(500)
+    
+    learnedPatternsCache = (patterns as LearnedPattern[]) || []
+    console.log(`Loaded ${learnedPatternsCache.length} learned skill patterns from database`)
+
     const candidateName = (run.candidates_data as any[])?.[0]?.name || 'Unknown'
     const runDate = new Date(run.created_at)
     const listName = `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
@@ -1777,7 +1848,7 @@ Deno.serve(async (req) => {
             companyCache[companyName] = clientCorporationId
           }
           
-          const skillsString = generateSkillsString(contact, searchPreferences)
+          const skillsString = generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
           
           const { contactId, skillsString: generatedSkills } = await findOrCreateClientContact(
             tokens.restUrl,

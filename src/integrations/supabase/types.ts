@@ -376,6 +376,42 @@ export type Database = {
         }
         Relationships: []
       }
+      skill_patterns: {
+        Row: {
+          confidence: number
+          created_at: string
+          frequency: number
+          id: string
+          last_analyzed_at: string
+          pattern_type: string
+          pattern_value: string
+          skills: string[]
+          updated_at: string
+        }
+        Insert: {
+          confidence?: number
+          created_at?: string
+          frequency?: number
+          id?: string
+          last_analyzed_at?: string
+          pattern_type: string
+          pattern_value: string
+          skills?: string[]
+          updated_at?: string
+        }
+        Update: {
+          confidence?: number
+          created_at?: string
+          frequency?: number
+          id?: string
+          last_analyzed_at?: string
+          pattern_type?: string
+          pattern_value?: string
+          skills?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       used_contacts: {
         Row: {
           added_at: string

@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.test-bullhorn-distlist]
 verify_jwt = false
+
+[functions.analyze-bullhorn-skills]
+verify_jwt = false

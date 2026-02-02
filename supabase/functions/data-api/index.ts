@@ -1182,6 +1182,61 @@ Deno.serve(async (req) => {
       );
     }
 
+    // === SKILL PATTERNS ===
+    if (action === "get-skill-patterns") {
+      const { data: patterns, error } = await supabase
+        .from("skill_patterns")
+        .select("*")
+        .order("frequency", { ascending: false })
+        .limit(500);
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true, data: patterns }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "get-skill-patterns-stats") {
+      const { data: patterns, error } = await supabase
+        .from("skill_patterns")
+        .select("pattern_type, last_analyzed_at");
+
+      if (error) throw error;
+
+      const companyPatterns = patterns?.filter((p: any) => p.pattern_type === "company").length || 0;
+      const titlePatterns = patterns?.filter((p: any) => p.pattern_type === "title").length || 0;
+      const locationPatterns = patterns?.filter((p: any) => p.pattern_type === "location").length || 0;
+      const lastAnalyzedAt = patterns?.[0]?.last_analyzed_at || null;
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            totalPatterns: patterns?.length || 0,
+            companyPatterns,
+            titlePatterns,
+            locationPatterns,
+            lastAnalyzedAt,
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "clear-skill-patterns") {
+      const { error } = await supabase
+        .from("skill_patterns")
+        .delete()
+        .gte("created_at", "1970-01-01");
+
+      if (error) throw error;
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(
       JSON.stringify({ success: false, error: "Invalid action" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
