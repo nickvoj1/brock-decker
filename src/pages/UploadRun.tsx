@@ -318,6 +318,9 @@ export default function UploadRun() {
       targetRoles: selectedRoles,
       sectors: selectedSectors, // Include selected sectors for Apollo filtering
       targetCompany: targetCompany.trim() || undefined, // Add target company for signal-based search
+      // Pass signal context for retry strategies
+      signalTitle: signalContext.signalTitle || undefined,
+      signalRegion: signalContext.signalRegion || undefined,
     }));
   };
 

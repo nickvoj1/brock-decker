@@ -268,6 +268,8 @@ interface Preference {
   targetRoles?: string[]
   sectors?: string[]
   targetCompany?: string
+  signalTitle?: string // For fallback company extraction
+  signalRegion?: string // For location widening
 }
 
 interface ApolloContact {
@@ -285,6 +287,170 @@ interface ApolloSearchPayload {
   organization_industry_tag_ids?: string[]
   page?: number
   per_page?: number
+}
+
+// ============ Company Name Normalization & Matching ============
+const COMPANY_SUFFIXES = [
+  'ltd', 'limited', 'llc', 'inc', 'incorporated', 'corp', 'corporation',
+  'plc', 'gmbh', 'ag', 'sa', 'sas', 'sarl', 'bv', 'nv', 'co', 'company',
+  'capital', 'partners', 'ventures', 'equity', 'advisors', 'advisory',
+  'management', 'group', 'holdings', 'fund', 'investments', 'asset',
+  'uk', 'us', 'europe', 'eu', 'global', 'international', 'intl'
+]
+
+function normalizeCompanyName(name: string): string {
+  if (!name) return ''
+  let normalized = name
+    .toLowerCase()
+    .trim()
+    .replace(/[''`]/g, "'") // Normalize quotes
+    .replace(/[^\w\s'-]/g, ' ') // Remove special chars except apostrophe/hyphen
+    .replace(/\s+/g, ' ') // Collapse whitespace
+    .trim()
+  return normalized
+}
+
+function stripCompanySuffixes(name: string): string {
+  let stripped = normalizeCompanyName(name)
+  for (const suffix of COMPANY_SUFFIXES) {
+    const pattern = new RegExp(`\\s+${suffix}$`, 'i')
+    stripped = stripped.replace(pattern, '').trim()
+  }
+  return stripped
+}
+
+function companiesMatch(target: string, candidate: string): boolean {
+  const normTarget = normalizeCompanyName(target)
+  const normCandidate = normalizeCompanyName(candidate)
+  
+  // Exact match
+  if (normTarget === normCandidate) return true
+  
+  // Stripped suffix match
+  const strippedTarget = stripCompanySuffixes(target)
+  const strippedCandidate = stripCompanySuffixes(candidate)
+  if (strippedTarget === strippedCandidate) return true
+  
+  // One contains the other (for cases like "Fleet" vs "Fleet Technologies")
+  if (strippedTarget.length >= 3 && strippedCandidate.includes(strippedTarget)) return true
+  if (strippedCandidate.length >= 3 && strippedTarget.includes(strippedCandidate)) return true
+  
+  return false
+}
+
+// Extract company from signal title (fallback when signal.company fails)
+function extractCompanyFromSignalTitle(title: string): string {
+  if (!title) return ''
+  
+  // Clean title - remove leading descriptors
+  let cleanTitle = title
+    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
+    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\s+/i, "")
+    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\s+/i, "")
+    .replace(/^(it\s+)?scale-up\s+/i, "")
+    .replace(/^startup\s+/i, "")
+    .trim()
+  
+  // Extract company BEFORE common action verbs
+  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i
+  
+  const match = cleanTitle.match(verbPattern)
+  if (match) {
+    let company = match[1]
+      .trim()
+      .replace(/['']s$/i, "") // Remove possessive
+      .replace(/\s+/g, " ") // Normalize spaces
+    
+    // Skip if it's a generic phrase
+    const skipPhrases = [
+      "the", "a", "an", "new", "report", "update", "breaking", "exclusive",
+      "bootstrapped for seven years", "backed by", "formerly known as",
+      "sources say", "according to", "report says", "rumor has it"
+    ]
+    
+    if (skipPhrases.some(phrase => company.toLowerCase() === phrase || company.toLowerCase().startsWith(phrase + " "))) {
+      return ''
+    }
+    
+    if (company.length >= 2 && company.length <= 50) {
+      return company
+    }
+  }
+  
+  return ''
+}
+
+// Region to country-level locations mapping (for widening)
+const REGION_COUNTRY_LOCATIONS: Record<string, string[]> = {
+  europe: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Switzerland', 'Ireland', 'Spain', 'Italy', 'Belgium', 'Luxembourg', 'Sweden', 'Denmark', 'Norway', 'Finland', 'Austria', 'Poland', 'Portugal'],
+  uae: ['United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Bahrain', 'Kuwait', 'Oman'],
+  east_usa: ['New York', 'Massachusetts', 'Connecticut', 'New Jersey', 'Pennsylvania', 'Washington D.C.', 'Virginia', 'Maryland', 'Florida', 'Georgia', 'Illinois'],
+  west_usa: ['California', 'Washington', 'Oregon', 'Colorado', 'Texas', 'Arizona'],
+}
+
+interface RetryStrategy {
+  name: string
+  companyName: string
+  locations: string[]
+}
+
+function buildRetryStrategies(
+  originalCompany: string,
+  signalTitle: string,
+  signalRegion: string,
+  originalLocations: string[]
+): RetryStrategy[] {
+  const strategies: RetryStrategy[] = []
+  
+  // Strategy 1: Original company, original locations (already tried)
+  
+  // Strategy 2: Stripped suffixes company name
+  const strippedCompany = stripCompanySuffixes(originalCompany)
+  if (strippedCompany !== normalizeCompanyName(originalCompany)) {
+    strategies.push({
+      name: 'stripped_suffixes',
+      companyName: strippedCompany,
+      locations: originalLocations,
+    })
+  }
+  
+  // Strategy 3: Title-derived company name
+  const titleCompany = extractCompanyFromSignalTitle(signalTitle)
+  if (titleCompany && normalizeCompanyName(titleCompany) !== normalizeCompanyName(originalCompany)) {
+    strategies.push({
+      name: 'title_derived',
+      companyName: titleCompany,
+      locations: originalLocations,
+    })
+  }
+  
+  // Strategy 4: Widen to country-level locations
+  const countryLocations = REGION_COUNTRY_LOCATIONS[signalRegion] || []
+  if (countryLocations.length > 0) {
+    strategies.push({
+      name: 'widen_location',
+      companyName: originalCompany,
+      locations: countryLocations,
+    })
+    
+    // Also try stripped company + widened locations
+    if (strippedCompany !== normalizeCompanyName(originalCompany)) {
+      strategies.push({
+        name: 'stripped_widen',
+        companyName: strippedCompany,
+        locations: countryLocations,
+      })
+    }
+  }
+  
+  // Strategy 5: No location filter (last resort)
+  strategies.push({
+    name: 'no_location_filter',
+    companyName: originalCompany,
+    locations: [],
+  })
+  
+  return strategies
 }
 
 Deno.serve(async (req) => {
@@ -389,8 +555,13 @@ Deno.serve(async (req) => {
     
     // Get target company if specified (for signal-based searches)
     const targetCompany = preferences[0]?.targetCompany || null
+    const signalTitle = (preferences[0] as any)?.signalTitle || ''
+    const signalRegion = (preferences[0] as any)?.signalRegion || ''
+    const TARGET_COMPANY_MIN_CONTACTS = 10 // Stop when we find this many contacts at target company
+    
     if (targetCompany) {
       console.log(`Signal-based search: targeting company "${targetCompany}"`)
+      console.log(`Will retry with fallback strategies until ${TARGET_COMPANY_MIN_CONTACTS} contacts found`)
     }
     
     // Expand target roles with native language translations based on selected locations
@@ -700,6 +871,14 @@ Deno.serve(async (req) => {
               const companyName = person.organization?.name || person.organization_name || 'Unknown'
               const personLocation = person.city || person.state || person.country || 'Unknown'
               
+              // For signal-based searches: STRICT company matching
+              if (targetCompany) {
+                if (!companiesMatch(targetCompany, companyName)) {
+                  // Skip contacts not from target company
+                  continue
+                }
+              }
+              
               // Skip contacts from candidate's previous employers
               const normalizedCompany = companyName.toLowerCase().trim()
               const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
@@ -709,8 +888,9 @@ Deno.serve(async (req) => {
                 continue
               }
               
-              // Check max per company limit
-              if ((companyContactCount[companyName] || 0) >= maxPerCompany) {
+              // Check max per company limit (relax for target company searches)
+              const effectiveMaxPerCompany = targetCompany ? 50 : maxPerCompany // Allow more for target company
+              if ((companyContactCount[companyName] || 0) >= effectiveMaxPerCompany) {
                 continue
               }
               
@@ -852,7 +1032,176 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Save newly found contacts to used_contacts table
+    // ============ SIGNAL-BASED RETRY LOOP ============
+    // If this is a signal-based search and we haven't found enough contacts, try retry strategies
+    if (targetCompany && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
+      console.log(`\n=== SIGNAL RETRY LOOP ===`)
+      console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${TARGET_COMPANY_MIN_CONTACTS}`)
+      
+      const retryStrategies = buildRetryStrategies(targetCompany, signalTitle, signalRegion, apolloLocations)
+      console.log(`Trying ${retryStrategies.length} retry strategies...`)
+      
+      for (const strategy of retryStrategies) {
+        if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) {
+          console.log(`Target reached (${allContacts.length} contacts), stopping retries`)
+          break
+        }
+        
+        console.log(`\n--- Retry strategy: ${strategy.name} ---`)
+        console.log(`Company: "${strategy.companyName}", Locations: ${strategy.locations.length > 0 ? strategy.locations.slice(0, 3).join(', ') + '...' : 'none'}`)
+        
+        try {
+          // Build query params for retry
+          const retryParams = new URLSearchParams()
+          targetRoles.forEach(title => retryParams.append('person_titles[]', title))
+          
+          // Add locations (may be widened)
+          if (strategy.locations.length > 0) {
+            strategy.locations.forEach(loc => retryParams.append('person_locations[]', loc))
+          }
+          
+          // Use the strategy's company name
+          retryParams.append('q_organization_name', strategy.companyName)
+          
+          // Search more pages for retries
+          const maxRetryPages = 10
+          let currentPage = 1
+          let hasMoreResults = true
+          
+          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
+            const pageParams = new URLSearchParams(retryParams)
+            pageParams.set('per_page', '100')
+            pageParams.set('page', String(currentPage))
+            
+            const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${pageParams.toString()}`
+            if (currentPage === 1) {
+              console.log(`Retry search params:`, pageParams.toString().substring(0, 200) + '...')
+            }
+            
+            const apolloResponse = await fetch(searchUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apolloApiKey,
+              },
+            })
+            
+            if (apolloResponse.ok) {
+              const apolloData = await apolloResponse.json()
+              const people = apolloData.people || []
+              console.log(`Retry page ${currentPage}: ${people.length} people`)
+              
+              if (people.length === 0) {
+                hasMoreResults = false
+                break
+              }
+              
+              // Process people with strict company matching
+              const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
+              
+              for (const person of people) {
+                if (allContacts.length + peopleToEnrich.length >= maxContacts) break
+                
+                const personCompanyName = person.organization?.name || person.organization_name || 'Unknown'
+                const personLocation = person.city || person.state || person.country || 'Unknown'
+                
+                // STRICT company matching - must match target
+                if (!companiesMatch(targetCompany, personCompanyName)) {
+                  continue
+                }
+                
+                // Skip excluded and duplicates
+                const normalizedCompany = personCompanyName.toLowerCase().trim()
+                const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
+                  normalizedCompany.includes(excluded) || excluded.includes(normalizedCompany)
+                )
+                if (isExcludedCompany) continue
+                
+                const isDuplicate = allContacts.some(c => c.name === person.name && c.company === personCompanyName) ||
+                                   seenEmails.has((person.email || '').toLowerCase())
+                if (isDuplicate) continue
+                
+                if (person.id) {
+                  peopleToEnrich.push({
+                    id: person.id,
+                    name: person.name || 'Unknown',
+                    title: person.title || 'Unknown',
+                    company: personCompanyName,
+                    location: personLocation,
+                  })
+                }
+              }
+              
+              console.log(`Found ${peopleToEnrich.length} new candidates from target company`)
+              
+              // Enrich in batches
+              for (let i = 0; i < peopleToEnrich.length; i += 10) {
+                const batch = peopleToEnrich.slice(i, i + 10)
+                
+                for (const personData of batch) {
+                  if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
+                  
+                  try {
+                    const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apolloApiKey,
+                      },
+                      body: JSON.stringify({ id: personData.id }),
+                    })
+                    
+                    if (enrichResponse.ok) {
+                      const enriched = await enrichResponse.json()
+                      const person = enriched.person || {}
+                      
+                      const email = person.email || ''
+                      const fullName = person.name || personData.name
+                      const companyName = person.organization?.name || personData.company
+                      const jobTitle = person.title || personData.title || 'Unknown'
+                      const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                      const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+                      
+                      if (email && fullName && fullName !== 'Unknown') {
+                        const emailLower = email.toLowerCase()
+                        if (!usedEmails.has(emailLower) && !seenEmails.has(emailLower)) {
+                          seenEmails.add(emailLower)
+                          allContacts.push({
+                            name: fullName,
+                            title: jobTitle,
+                            location: fullLocation,
+                            email: email,
+                            company: companyName,
+                          })
+                          console.log(`[Retry] Added: ${fullName} at ${companyName} (total: ${allContacts.length})`)
+                        }
+                      }
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 100))
+                  } catch (enrichError) {
+                    console.error('Retry enrichment error:', enrichError)
+                  }
+                }
+              }
+            } else {
+              const errorText = await apolloResponse.text()
+              console.error(`Retry Apollo error:`, apolloResponse.status, errorText.substring(0, 200))
+              hasMoreResults = false
+            }
+            
+            currentPage++
+            await new Promise(resolve => setTimeout(resolve, 200))
+          }
+        } catch (retryError) {
+          console.error(`Retry strategy ${strategy.name} failed:`, retryError)
+        }
+      }
+      
+      console.log(`\n=== RETRY COMPLETE: Found ${allContacts.length} total contacts ===\n`)
+    }
+    // ============ END SIGNAL RETRY LOOP ============
+
     if (allContacts.length > 0) {
       const contactsToSave = allContacts.map(c => ({
         email: c.email.toLowerCase(),
