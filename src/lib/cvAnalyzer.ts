@@ -466,6 +466,39 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
       reasoning.push(`${job.title} suggests Americas market focus`);
     }
   });
+
+  // 2b. Extract from candidate summary (if present)
+  // Useful when CV parsing captures a narrative like "Based in London" or "Relocating to Dubai"
+  if (candidate.summary) {
+    const { locations, countries } = extractLocationsFromText(candidate.summary);
+    locations.forEach((loc) => {
+      locationScores.set(loc, (locationScores.get(loc) || 0) + 3);
+    });
+    countries.forEach((country) => {
+      countryScores.set(country, (countryScores.get(country) || 0) + 3);
+    });
+    if (locations.length > 0 || countries.length > 0) {
+      reasoning.push("Location hints found in CV summary");
+    }
+  }
+
+  // 2c. Extract from education institutions (often includes country/city or well-known hubs)
+  if (candidate.education && Array.isArray(candidate.education)) {
+    candidate.education.forEach((edu) => {
+      const eduText = [edu.institution, edu.degree, edu.year].filter(Boolean).join(" ");
+      const { locations, countries } = extractLocationsFromText(eduText);
+      locations.forEach((loc) => {
+        locationScores.set(loc, (locationScores.get(loc) || 0) + 2);
+      });
+      countries.forEach((country) => {
+        countryScores.set(country, (countryScores.get(country) || 0) + 2);
+      });
+    });
+    // Don't add noisy reasoning entries per school; keep it compact
+    if (candidate.education.length > 0) {
+      reasoning.push("Considered education locations");
+    }
+  }
   
   // 3. Add financial hub suggestions based on industry
   const isFinanceRelated = industries.some(ind => 
