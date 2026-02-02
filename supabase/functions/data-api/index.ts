@@ -78,18 +78,46 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Check if exists
-      const { data: existing } = await supabase
+      // Check if exists by name + email (for deduplication) within this user's profiles
+      let existingQuery = supabase
         .from("candidate_profiles")
         .select("id")
-        .eq("candidate_id", candidateData.candidate_id)
         .eq("profile_name", profileName)
-        .maybeSingle();
+        .eq("name", candidateData.name);
+      
+      // Only match on email if provided
+      if (candidateData.email) {
+        existingQuery = existingQuery.eq("email", candidateData.email);
+      }
+      
+      const { data: existing } = await existingQuery.maybeSingle();
 
       if (existing) {
+        // Update existing profile
         const { error } = await supabase
           .from("candidate_profiles")
           .update({
+            candidate_id: candidateData.candidate_id,
+            current_title: candidateData.current_title,
+            location: candidateData.location,
+            phone: candidateData.phone,
+            summary: candidateData.summary,
+            skills: candidateData.skills,
+            work_history: candidateData.work_history,
+            education: candidateData.education,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+
+        if (error) throw error;
+        console.log(`Updated existing candidate profile: ${candidateData.name}`);
+      } else {
+        // Insert new profile
+        const { error } = await supabase
+          .from("candidate_profiles")
+          .insert({
+            profile_name: profileName,
+            candidate_id: candidateData.candidate_id,
             name: candidateData.name,
             current_title: candidateData.current_title,
             location: candidateData.location,
@@ -99,19 +127,10 @@ Deno.serve(async (req) => {
             skills: candidateData.skills,
             work_history: candidateData.work_history,
             education: candidateData.education,
-          })
-          .eq("id", existing.id);
-
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("candidate_profiles")
-          .insert({
-            ...candidateData,
-            profile_name: profileName,
           });
 
         if (error) throw error;
+        console.log(`Inserted new candidate profile: ${candidateData.name}`);
       }
 
       return new Response(
