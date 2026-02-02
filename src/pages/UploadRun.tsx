@@ -20,7 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCVAnalysis } from "@/hooks/useCVAnalysis";
 import { useProfileName } from "@/hooks/useProfileName";
-import { createEnrichmentRun, updateEnrichmentRun } from "@/lib/dataApi";
+import { createEnrichmentRun, updateEnrichmentRun, saveCandidateProfile as saveProfileToApi } from "@/lib/dataApi";
 import type { Json } from "@/integrations/supabase/types";
 
 interface WorkExperience {
@@ -227,59 +227,26 @@ export default function UploadRun() {
     });
   };
 
-  // Save parsed CV to database (upsert - update if same name+email exists)
+  // Save parsed CV to database via secure API
   const saveCandidateProfile = async (candidate: ParsedCandidate) => {
     if (!profileName.trim()) return;
     
     try {
-      // Check if a profile with the same name and email already exists
-      let query = supabase
-        .from("candidate_profiles")
-        .select("id")
-        .eq("name", candidate.name);
-      
-      if (candidate.email) {
-        query = query.eq("email", candidate.email);
-      }
-      
-      const { data: existing } = await query.maybeSingle();
-      
-      if (existing) {
-        // Update existing profile
-        const { error } = await supabase
-          .from("candidate_profiles")
-          .update({
-            profile_name: profileName.trim(),
-            candidate_id: candidate.candidate_id,
-            current_title: candidate.current_title,
-            location: candidate.location,
-            phone: candidate.phone || null,
-            summary: candidate.summary || null,
-            skills: candidate.skills as unknown as Json,
-            work_history: candidate.work_history as unknown as Json,
-            education: candidate.education as unknown as Json,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id);
+      const response = await saveProfileToApi(profileName.trim(), {
+        candidate_id: candidate.candidate_id,
+        name: candidate.name,
+        current_title: candidate.current_title,
+        location: candidate.location,
+        email: candidate.email || null,
+        phone: candidate.phone || null,
+        summary: candidate.summary || null,
+        skills: candidate.skills,
+        work_history: candidate.work_history,
+        education: candidate.education,
+      });
 
-        if (error) throw error;
-      } else {
-        // Insert new profile
-        const { error } = await supabase.from("candidate_profiles").insert({
-          profile_name: profileName.trim(),
-          candidate_id: candidate.candidate_id,
-          name: candidate.name,
-          current_title: candidate.current_title,
-          location: candidate.location,
-          email: candidate.email || null,
-          phone: candidate.phone || null,
-          summary: candidate.summary || null,
-          skills: candidate.skills as unknown as Json,
-          work_history: candidate.work_history as unknown as Json,
-          education: candidate.education as unknown as Json,
-        });
-
-        if (error) throw error;
+      if (!response.success) {
+        console.error("Error saving candidate profile:", response.error);
       }
     } catch (error) {
       console.error("Error saving candidate profile:", error);
