@@ -267,6 +267,7 @@ interface Preference {
   locations?: string[]
   targetRoles?: string[]
   sectors?: string[]
+  targetCompany?: string
 }
 
 interface ApolloContact {
@@ -385,6 +386,12 @@ Deno.serve(async (req) => {
 
     // Get locations from preferences (all prefs share the same locations)
     const searchLocations = preferences[0]?.locations || []
+    
+    // Get target company if specified (for signal-based searches)
+    const targetCompany = preferences[0]?.targetCompany || null
+    if (targetCompany) {
+      console.log(`Signal-based search: targeting company "${targetCompany}"`)
+    }
     
     // Expand target roles with native language translations based on selected locations
     const targetRoles = expandRolesWithTranslations(baseTargetRoles, searchLocations)
@@ -577,6 +584,12 @@ Deno.serve(async (req) => {
         // Add locations
         if (apolloLocations.length > 0) {
           apolloLocations.forEach(loc => queryParams.append('person_locations[]', loc))
+        }
+        
+        // Add target company filter if specified (signal-based search)
+        if (targetCompany) {
+          queryParams.append('q_organization_name', targetCompany)
+          console.log(`Filtering by company: ${targetCompany}`)
         }
         
         // Build optimized keyword query from industry and/or sector

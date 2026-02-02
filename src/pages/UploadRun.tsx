@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Play, Loader2, FileText, Settings2, Users, MapPin } from "lucide-react";
+import { Play, Loader2, FileText, Settings2, Users, MapPin, Building2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
@@ -12,6 +12,7 @@ import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
 import { SearchDebugPanel } from "@/components/upload/SearchDebugPanel";
 import { ContactPreviewModal, Contact } from "@/components/upload/ContactPreviewModal";
 import { SavedProfilesSelector, SavedProfile } from "@/components/upload/SavedProfilesSelector";
+import { SignalContextCard } from "@/components/signals/SignalContextCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,11 +69,21 @@ export default function UploadRun() {
     industries: searchParams.get('industries') || '',
     signalId: searchParams.get('signalId') || '',
     signalTitle: searchParams.get('signalTitle') || '',
+    signalRegion: searchParams.get('signalRegion') || '',
+    signalType: searchParams.get('signalType') || '',
+    signalAmount: searchParams.get('signalAmount') || '',
+    signalCurrency: searchParams.get('signalCurrency') || '',
   };
   
-  // Quick search mode (no CV)
-  const [isQuickSearch, setIsQuickSearch] = useState(!!signalContext.company);
+  const hasSignalContext = !!signalContext.signalId && !!signalContext.signalTitle;
+  
+  // Quick search mode (no CV) - auto-enable if coming from signal
+  const [isQuickSearch, setIsQuickSearch] = useState(!!signalContext.company || hasSignalContext);
   const [quickSearchName, setQuickSearchName] = useState(signalContext.company || '');
+  
+  // Target company filter (for company-specific searches from signals)
+  const [targetCompany, setTargetCompany] = useState(signalContext.company || '');
+  
   const [existingSearchNames, setExistingSearchNames] = useState<string[]>([]);
   
   // CV file states
@@ -161,13 +172,17 @@ export default function UploadRun() {
         setSelectedIndustries(inds);
       }
     }
-    if (signalContext.signalTitle) {
+    if (signalContext.company) {
+      setTargetCompany(signalContext.company);
+      setQuickSearchName(signalContext.company);
+    }
+    if (hasSignalContext) {
       toast({
-        title: "Signal Context Loaded",
-        description: `Finding contacts for: ${signalContext.company || signalContext.signalTitle}`,
+        title: "Signal-Based Search",
+        description: `Finding contacts at ${signalContext.company || "company"} based on the signal`,
       });
     }
-  }, [signalContext.locations, signalContext.industries, signalContext.signalTitle]);
+  }, [signalContext.locations, signalContext.industries, signalContext.company, hasSignalContext]);
 
   // Profile name now managed by useProfileName hook - no need to save here
 
@@ -302,7 +317,17 @@ export default function UploadRun() {
       locations: selectedLocations,
       targetRoles: selectedRoles,
       sectors: selectedSectors, // Include selected sectors for Apollo filtering
+      targetCompany: targetCompany.trim() || undefined, // Add target company for signal-based search
     }));
+  };
+
+  // Clear signal context
+  const handleClearSignalContext = () => {
+    setTargetCompany('');
+    setQuickSearchName('');
+    // Clear URL params
+    const newSearchParams = new URLSearchParams();
+    window.history.replaceState({}, '', `${window.location.pathname}${newSearchParams.toString() ? '?' + newSearchParams.toString() : ''}`);
   };
 
   const handleRunEnrichment = async () => {
@@ -416,10 +441,57 @@ export default function UploadRun() {
   return (
     <>
     <AppLayout 
-      title="Find Hiring Contacts" 
-      description="Upload a CV and find relevant hiring contacts on Apollo.io"
+      title={hasSignalContext ? "Signal-Based Contact Search" : "Find Hiring Contacts"}
+      description={hasSignalContext ? `Finding contacts at ${signalContext.company || "target company"}` : "Upload a CV and find relevant hiring contacts on Apollo.io"}
     >
       <div className="max-w-4xl space-y-6">
+        {/* Signal Context Card - shown when coming from Signals Dashboard */}
+        {hasSignalContext && (
+          <SignalContextCard
+            signalTitle={signalContext.signalTitle}
+            company={signalContext.company}
+            region={signalContext.signalRegion}
+            amount={signalContext.signalAmount ? parseInt(signalContext.signalAmount) : undefined}
+            currency={signalContext.signalCurrency || undefined}
+            signalType={signalContext.signalType || undefined}
+            onClear={handleClearSignalContext}
+          />
+        )}
+
+        {/* Target Company Filter - for signal-based searches */}
+        {hasSignalContext && (
+          <Card className="animate-slide-up border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Building2 className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">Target Company</CardTitle>
+                  <CardDescription>Search for contacts at this specific company</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <Label htmlFor="targetCompany">Company Name</Label>
+                <Input
+                  id="targetCompany"
+                  placeholder="e.g., Fleet, Blackstone, KKR"
+                  value={targetCompany}
+                  onChange={(e) => {
+                    setTargetCompany(e.target.value);
+                    setQuickSearchName(e.target.value);
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Contacts will be filtered to only show people at this company
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Step 1: Upload CV or Quick Search */}
         <Card className="animate-slide-up">
           <CardHeader>
