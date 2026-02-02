@@ -636,18 +636,45 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
   }
   
   // 5. If we have a country but no cities, add major cities for that country
+  // Priority: European countries first since most CVs are European
   if (locationScores.size === 0 && countryScores.size > 0) {
     const topCountry = Array.from(countryScores.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
     const countryCityMap: Record<string, string[]> = {
-      "United States": ["new-york", "boston", "chicago", "san-francisco", "los-angeles"],
-      "United Kingdom": ["london", "manchester", "edinburgh"],
-      "Germany": ["frankfurt", "berlin", "munich"],
-      "France": ["paris", "lyon"],
-      "Switzerland": ["zurich", "geneva"],
+      // Europe - prioritized
+      "United Kingdom": ["london", "manchester", "edinburgh", "birmingham"],
+      "Germany": ["frankfurt", "berlin", "munich", "hamburg", "dusseldorf"],
+      "France": ["paris", "lyon", "marseille"],
+      "Switzerland": ["zurich", "geneva", "basel"],
+      "Netherlands": ["amsterdam", "rotterdam"],
+      "Belgium": ["brussels", "antwerp"],
+      "Luxembourg": ["luxembourg-city"],
+      "Ireland": ["dublin", "cork"],
+      "Spain": ["madrid", "barcelona"],
+      "Italy": ["milan", "rome"],
+      "Portugal": ["lisbon", "porto"],
+      "Austria": ["vienna"],
+      "Sweden": ["stockholm", "gothenburg"],
+      "Norway": ["oslo"],
+      "Denmark": ["copenhagen"],
+      "Finland": ["helsinki"],
+      "Poland": ["warsaw", "krakow"],
+      // APAC
       "Singapore": ["singapore"],
       "Hong Kong": ["hong-kong"],
+      "Japan": ["tokyo", "osaka"],
       "Australia": ["sydney", "melbourne"],
-      "Canada": ["toronto", "vancouver"],
+      "India": ["mumbai", "bangalore", "delhi"],
+      "China": ["shanghai", "beijing", "shenzhen"],
+      "South Korea": ["seoul"],
+      // Middle East
+      "UAE": ["dubai", "abu-dhabi"],
+      "Israel": ["tel-aviv"],
+      "Saudi Arabia": ["riyadh"],
+      // Americas
+      "Canada": ["toronto", "vancouver", "montreal"],
+      "United States": ["new-york", "boston", "chicago", "san-francisco"],
+      "Mexico": ["mexico-city"],
+      "Brazil": ["sao-paulo", "rio"],
     };
     
     const suggestedCities = countryCityMap[topCountry];
