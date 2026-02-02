@@ -65,6 +65,27 @@ export async function updateSignal(profileName: string, signalId: string, update
   return callDataApi("update-signal", profileName, { signalId, updates });
 }
 
+export async function markSignalBullhornAdded(profileName: string, signalId: string) {
+  return callDataApi("update-signal", profileName, { 
+    signalId, 
+    updates: { bullhorn_note_added: true } 
+  });
+}
+
+export async function incrementSignalContacts(profileName: string, signalId: string, count: number) {
+  return callDataApi("update-signal", profileName, { 
+    signalId, 
+    updates: { contacts_found: count } 
+  });
+}
+
+export async function incrementSignalCVMatches(profileName: string, signalId: string, count: number) {
+  return callDataApi("update-signal", profileName, { 
+    signalId, 
+    updates: { cv_matches: count } 
+  });
+}
+
 export async function refreshSignals(profileName: string, region?: string) {
   try {
     const { data: response, error } = await supabase.functions.invoke("fetch-signals", {
@@ -93,4 +114,90 @@ export async function refreshSignals(profileName: string, region?: string) {
     console.error("Refresh signals failed:", err);
     return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
+}
+
+// Build Apollo search URL for a signal
+export function buildApolloSearchUrl(signal: Signal): string {
+  const baseUrl = "https://app.apollo.io/";
+  const companyName = signal.company || "";
+  
+  // This creates a search query that would work in Apollo
+  // In practice, we navigate to our own enrichment page
+  const query = encodeURIComponent(companyName);
+  return `${baseUrl}#/people?qKeywords=${query}`;
+}
+
+// Build Bullhorn note text for a signal
+export function buildBullhornNote(signal: Signal): string {
+  const parts: string[] = [];
+  
+  if (signal.company) {
+    parts.push(`Company: ${signal.company}`);
+  }
+  
+  parts.push(`Signal: ${signal.title}`);
+  
+  if (signal.amount && signal.currency) {
+    const symbol = signal.currency === "EUR" ? "€" : signal.currency === "GBP" ? "£" : "$";
+    const amountStr = signal.amount >= 1000 
+      ? `${symbol}${(signal.amount / 1000).toFixed(1)}B` 
+      : `${symbol}${signal.amount}M`;
+    parts.push(`Amount: ${amountStr}`);
+  }
+  
+  if (signal.signal_type) {
+    parts.push(`Type: ${signal.signal_type.replace(/_/g, " ").toUpperCase()}`);
+  }
+  
+  if (signal.source) {
+    parts.push(`Source: ${signal.source}`);
+  }
+  
+  if (signal.url) {
+    parts.push(`Link: ${signal.url}`);
+  }
+  
+  parts.push(`Date: ${new Date().toLocaleDateString()}`);
+  parts.push("— Added via Brock & Decker Signals");
+  
+  return parts.join("\n");
+}
+
+// Get enrichment preferences from signal
+export function getSignalEnrichmentParams(signal: Signal): Record<string, string> {
+  const params: Record<string, string> = {};
+  
+  if (signal.company) {
+    params.company = signal.company;
+  }
+  
+  if (signal.region) {
+    // Map signal region to location preferences
+    const regionLocationMap: Record<string, string> = {
+      europe: "London,Frankfurt,Paris",
+      uae: "Dubai,Abu Dhabi",
+      east_usa: "New York,Boston",
+      west_usa: "San Francisco,Los Angeles",
+    };
+    params.locations = regionLocationMap[signal.region] || "";
+  }
+  
+  // Map signal type to likely industries
+  const signalTypeIndustryMap: Record<string, string> = {
+    fund_close: "Private Equity,Venture Capital,Asset Management",
+    new_fund: "Private Equity,Venture Capital,Asset Management",
+    deal: "Private Equity,Investment Banking,Corporate Finance",
+    exit: "Private Equity,Venture Capital",
+    expansion: "Financial Services,Investment Management",
+    senior_hire: "Financial Services,Private Equity",
+  };
+  
+  if (signal.signal_type && signalTypeIndustryMap[signal.signal_type]) {
+    params.industries = signalTypeIndustryMap[signal.signal_type];
+  }
+  
+  params.signalId = signal.id;
+  params.signalTitle = signal.title;
+  
+  return params;
 }

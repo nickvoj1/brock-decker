@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { 
   Globe, 
   TrendingUp, 
@@ -14,10 +15,12 @@ import {
   FileText,
   Briefcase,
   Sparkles,
-  MapPin
+  MapPin,
+  Check,
+  Loader2
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,7 +32,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProfileName } from "@/hooks/useProfileName";
-import { getSignals, dismissSignal, refreshSignals, Signal } from "@/lib/signalsApi";
+import { 
+  getSignals, 
+  dismissSignal, 
+  refreshSignals, 
+  markSignalBullhornAdded,
+  buildBullhornNote,
+  getSignalEnrichmentParams,
+  Signal 
+} from "@/lib/signalsApi";
+import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -116,6 +128,7 @@ function getIntentStars(signal: Signal): number {
 }
 
 export default function SignalsDashboard() {
+  const navigate = useNavigate();
   const profileName = useProfileName();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [regionCounts, setRegionCounts] = useState<Record<string, number>>({});
@@ -126,6 +139,13 @@ export default function SignalsDashboard() {
   const [showHighIntentOnly, setShowHighIntentOnly] = useState(false);
   const [signalTypeFilter, setSignalTypeFilter] = useState<SignalTypeFilter>("all");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  
+  // CV Matches modal
+  const [cvModalOpen, setCvModalOpen] = useState(false);
+  const [selectedSignalForCV, setSelectedSignalForCV] = useState<Signal | null>(null);
+  
+  // Bullhorn loading state per signal
+  const [bullhornLoading, setBullhornLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (profileName) {
@@ -187,22 +207,47 @@ export default function SignalsDashboard() {
   };
 
   const handleTAContacts = (signal: Signal) => {
-    // Open Apollo search for TA contacts
-    const query = `VP Talent Acquisition ${signal.company || ""} ${signal.region === "europe" ? "Germany" : signal.region === "uae" ? "Dubai" : ""}`.trim();
-    toast.info(`Searching Apollo for: ${query}`);
-    // In real implementation, this would trigger the Apollo search workflow
+    // Navigate to Upload & Run page with signal context as query params
+    const params = getSignalEnrichmentParams(signal);
+    const queryString = new URLSearchParams(params).toString();
+    navigate(`/upload?${queryString}`);
+    toast.success(`Opening enrichment for ${signal.company || "signal"}`);
   };
 
   const handleCVMatches = (signal: Signal) => {
-    // Navigate to CV matches
-    toast.info(`Finding CV matches for ${signal.company || signal.title}`);
-    // In real implementation, this would open a CV matching dialog
+    setSelectedSignalForCV(signal);
+    setCvModalOpen(true);
   };
 
-  const handleBullhornNote = (signal: Signal) => {
-    const note = `Signal: ${signal.company || "Company"} - ${formatAmount(signal.amount, signal.currency)} ${signal.signal_type} - spec ready`;
-    navigator.clipboard.writeText(note);
-    toast.success("Note copied to clipboard for Bullhorn");
+  const handleSelectCV = (cv: { id: string; name: string }) => {
+    setCvModalOpen(false);
+    // Navigate to upload page with the selected CV pre-loaded
+    navigate(`/upload?savedProfileId=${cv.id}&signalId=${selectedSignalForCV?.id || ""}`);
+    toast.success(`Using CV: ${cv.name}`);
+  };
+
+  const handleBullhornNote = async (signal: Signal) => {
+    if (!profileName) return;
+    
+    // Copy note to clipboard
+    const note = buildBullhornNote(signal);
+    await navigator.clipboard.writeText(note);
+    toast.success("Note copied to clipboard");
+    
+    // Mark signal as processed in Bullhorn
+    setBullhornLoading(prev => ({ ...prev, [signal.id]: true }));
+    try {
+      await markSignalBullhornAdded(profileName, signal.id);
+      // Update local state
+      setSignals(prev => prev.map(s => 
+        s.id === signal.id ? { ...s, bullhorn_note_added: true } : s
+      ));
+      toast.success("Signal marked as added to Bullhorn");
+    } catch (error) {
+      console.error("Failed to mark Bullhorn:", error);
+    } finally {
+      setBullhornLoading(prev => ({ ...prev, [signal.id]: false }));
+    }
   };
 
   const filteredSignals = useMemo(() => {
@@ -360,6 +405,7 @@ export default function SignalsDashboard() {
                       onTAContacts={handleTAContacts}
                       onCVMatches={handleCVMatches}
                       onBullhornNote={handleBullhornNote}
+                      bullhornLoading={bullhornLoading[signal.id] || false}
                     />
                   ))}
                 </div>
@@ -368,6 +414,15 @@ export default function SignalsDashboard() {
           ))}
         </Tabs>
       </div>
+      
+      {/* CV Matches Modal */}
+      <CVMatchesModal
+        open={cvModalOpen}
+        onOpenChange={setCvModalOpen}
+        signal={selectedSignalForCV}
+        profileName={profileName || ""}
+        onSelectCV={handleSelectCV}
+      />
     </AppLayout>
   );
 }
@@ -378,9 +433,10 @@ interface SignalCardProps {
   onTAContacts: (signal: Signal) => void;
   onCVMatches: (signal: Signal) => void;
   onBullhornNote: (signal: Signal) => void;
+  bullhornLoading?: boolean;
 }
 
-function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNote }: SignalCardProps) {
+function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNote, bullhornLoading }: SignalCardProps) {
   const intentStars = getIntentStars(signal);
   const regionConfig = REGION_CONFIG[signal.region as Region];
   
@@ -483,12 +539,19 @@ function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNo
                 
                 <Button 
                   size="sm" 
-                  variant="outline" 
-                  className="h-8 text-xs gap-1"
+                  variant={signal.bullhorn_note_added ? "default" : "outline"}
+                  className={`h-8 text-xs gap-1 ${signal.bullhorn_note_added ? "bg-green-600 hover:bg-green-700" : ""}`}
                   onClick={() => onBullhornNote(signal)}
+                  disabled={bullhornLoading}
                 >
-                  <Briefcase className="h-3 w-3" />
-                  Bullhorn
+                  {bullhornLoading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : signal.bullhorn_note_added ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Briefcase className="h-3 w-3" />
+                  )}
+                  {signal.bullhorn_note_added ? "Added" : "Bullhorn"}
                 </Button>
                 
                 {signal.url && (
