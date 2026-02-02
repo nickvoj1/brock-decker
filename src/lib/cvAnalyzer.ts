@@ -424,78 +424,152 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
   let foundPrimaryLocation = false;
   
   if (candidate.location) {
-    const locLower = candidate.location.toLowerCase();
+    // STEP 1A: First, try to extract a known city DIRECTLY from the location string
+    // This handles cases like "Boston, MA", "London, UK", "Greater Boston Area"
+    const directMatch = extractLocationsFromText(candidate.location);
     
-    // Check for US state patterns (city, state like "Chelsea, MA" or "Boston, Massachusetts")
-    const usStateMatch = locLower.match(/,?\s*(ma|ny|ca|tx|fl|il|pa|oh|ga|nc|nj|va|wa|az|co|mi|tn|md|wi|mn|mo|sc|al|la|ky|or|ok|ct|ut|ia|nv|ar|ms|ks|nm|ne|wv|id|hi|nh|me|ri|mt|de|sd|nd|ak|vt|dc|wy|massachusetts|california|texas|florida|illinois|pennsylvania|ohio|georgia|virginia|washington|arizona|colorado|michigan|tennessee|maryland|wisconsin|minnesota|missouri|oregon|connecticut|utah|iowa|nevada|arkansas|mississippi|kansas|nebraska|idaho|hawaii|maine|montana|delaware|wyoming|vermont)\b/i);
-    
-    if (usStateMatch) {
-      countryScores.set("United States", 15);
-      const state = usStateMatch[1].toLowerCase();
-      
-      // Map states to nearest major city hubs
-      const stateToCity: Record<string, { city: string; value: string }> = {
-        "ma": { city: "Boston", value: "boston" },
-        "massachusetts": { city: "Boston", value: "boston" },
-        "ny": { city: "New York", value: "new-york" },
-        "ca": { city: "San Francisco", value: "san-francisco" },
-        "california": { city: "San Francisco", value: "san-francisco" },
-        "tx": { city: "Houston", value: "houston" },
-        "texas": { city: "Houston", value: "houston" },
-        "fl": { city: "Miami", value: "miami" },
-        "florida": { city: "Miami", value: "miami" },
-        "il": { city: "Chicago", value: "chicago" },
-        "illinois": { city: "Chicago", value: "chicago" },
-        "ga": { city: "Atlanta", value: "atlanta" },
-        "georgia": { city: "Atlanta", value: "atlanta" },
-        "co": { city: "Denver", value: "denver" },
-        "colorado": { city: "Denver", value: "denver" },
-        "wa": { city: "Seattle", value: "seattle" },
-        "washington": { city: "Seattle", value: "seattle" },
-        "dc": { city: "Washington DC", value: "washington-dc" },
-        "az": { city: "Phoenix", value: "phoenix" },
-        "arizona": { city: "Phoenix", value: "phoenix" },
-        "pa": { city: "Philadelphia", value: "philadelphia" },
-        "pennsylvania": { city: "Philadelphia", value: "philadelphia" },
-        "mi": { city: "Detroit", value: "detroit" },
-        "michigan": { city: "Detroit", value: "detroit" },
-        "mn": { city: "Minneapolis", value: "minneapolis" },
-        "minnesota": { city: "Minneapolis", value: "minneapolis" },
-        "nc": { city: "Charlotte", value: "charlotte" },
-      };
-      
-      const mapping = stateToCity[state];
-      if (mapping) {
-        locationScores.set(mapping.value, 15);
-        primaryLocations.add(mapping.value);
-        reasoning.push(`${mapping.city} area (${candidate.location})`);
-        foundPrimaryLocation = true;
-      } else {
-        // Unknown US state - suggest major US hubs
-        ["new-york", "boston", "chicago", "san-francisco", "los-angeles"].forEach((city, i) => {
-          locationScores.set(city, 10 - i);
-        });
-        primaryLocations.add("new-york");
-        reasoning.push(`US-based (${candidate.location})`);
-        foundPrimaryLocation = true;
-      }
+    if (directMatch.locations.length > 0) {
+      // Found a known city directly - this is the most reliable match
+      directMatch.locations.forEach(loc => {
+        locationScores.set(loc, 15); // Highest weight
+        primaryLocations.add(loc);
+      });
+      directMatch.countries.forEach(country => {
+        countryScores.set(country, 15);
+      });
+      reasoning.push(`Based in ${candidate.location}`);
+      foundPrimaryLocation = true;
     } else {
-      // Try standard location extraction for non-US locations
-      const { locations, countries } = extractLocationsFromText(candidate.location);
-      if (locations.length > 0) {
-        locations.forEach(loc => {
-          locationScores.set(loc, 15); // Highest weight for CV location
-          primaryLocations.add(loc);
-        });
-        countries.forEach(country => {
+      // STEP 1B: No known city found - check for US state patterns
+      // This handles cases like "Chelsea, MA" where Chelsea isn't in our city list
+      const locLower = candidate.location.toLowerCase();
+      const usStateMatch = locLower.match(/,?\s*(ma|ny|ca|tx|fl|il|pa|oh|ga|nc|nj|va|wa|az|co|mi|tn|md|wi|mn|mo|sc|al|la|ky|or|ok|ct|ut|ia|nv|ar|ms|ks|nm|ne|wv|id|hi|nh|me|ri|mt|de|sd|nd|ak|vt|dc|wy|massachusetts|california|texas|florida|illinois|pennsylvania|ohio|georgia|virginia|washington|arizona|colorado|michigan|tennessee|maryland|wisconsin|minnesota|missouri|oregon|connecticut|utah|iowa|nevada|arkansas|mississippi|kansas|nebraska|idaho|hawaii|maine|montana|delaware|wyoming|vermont|new york|new jersey|north carolina|south carolina)\b/i);
+      
+      if (usStateMatch) {
+        countryScores.set("United States", 15);
+        const state = usStateMatch[1].toLowerCase();
+        
+        // Comprehensive mapping of US states to their nearest major city/financial hub
+        const stateToCity: Record<string, { city: string; value: string }> = {
+          // Northeast
+          "ma": { city: "Boston", value: "boston" },
+          "massachusetts": { city: "Boston", value: "boston" },
+          "ny": { city: "New York", value: "new-york" },
+          "new york": { city: "New York", value: "new-york" },
+          "nj": { city: "New York", value: "new-york" },
+          "new jersey": { city: "New York", value: "new-york" },
+          "ct": { city: "New York", value: "new-york" },
+          "connecticut": { city: "New York", value: "new-york" },
+          "nh": { city: "Boston", value: "boston" },
+          "me": { city: "Boston", value: "boston" },
+          "maine": { city: "Boston", value: "boston" },
+          "vt": { city: "Boston", value: "boston" },
+          "vermont": { city: "Boston", value: "boston" },
+          "ri": { city: "Boston", value: "boston" },
+          "pa": { city: "Philadelphia", value: "philadelphia" },
+          "pennsylvania": { city: "Philadelphia", value: "philadelphia" },
+          "de": { city: "Philadelphia", value: "philadelphia" },
+          "delaware": { city: "Philadelphia", value: "philadelphia" },
+          "md": { city: "Washington DC", value: "washington-dc" },
+          "maryland": { city: "Washington DC", value: "washington-dc" },
+          "dc": { city: "Washington DC", value: "washington-dc" },
+          "va": { city: "Washington DC", value: "washington-dc" },
+          "virginia": { city: "Washington DC", value: "washington-dc" },
+          "wv": { city: "Washington DC", value: "washington-dc" },
+          
+          // Southeast
+          "nc": { city: "Charlotte", value: "charlotte" },
+          "north carolina": { city: "Charlotte", value: "charlotte" },
+          "sc": { city: "Charlotte", value: "charlotte" },
+          "south carolina": { city: "Charlotte", value: "charlotte" },
+          "ga": { city: "Atlanta", value: "atlanta" },
+          "georgia": { city: "Atlanta", value: "atlanta" },
+          "fl": { city: "Miami", value: "miami" },
+          "florida": { city: "Miami", value: "miami" },
+          "al": { city: "Atlanta", value: "atlanta" },
+          "tn": { city: "Atlanta", value: "atlanta" },
+          "tennessee": { city: "Atlanta", value: "atlanta" },
+          "ky": { city: "Chicago", value: "chicago" },
+          "la": { city: "Houston", value: "houston" },
+          "ms": { city: "Houston", value: "houston" },
+          "mississippi": { city: "Houston", value: "houston" },
+          "ar": { city: "Houston", value: "houston" },
+          "arkansas": { city: "Houston", value: "houston" },
+          
+          // Midwest
+          "il": { city: "Chicago", value: "chicago" },
+          "illinois": { city: "Chicago", value: "chicago" },
+          "oh": { city: "Chicago", value: "chicago" },
+          "ohio": { city: "Chicago", value: "chicago" },
+          "mi": { city: "Detroit", value: "detroit" },
+          "michigan": { city: "Detroit", value: "detroit" },
+          "in": { city: "Chicago", value: "chicago" },
+          "wi": { city: "Chicago", value: "chicago" },
+          "wisconsin": { city: "Chicago", value: "chicago" },
+          "mn": { city: "Minneapolis", value: "minneapolis" },
+          "minnesota": { city: "Minneapolis", value: "minneapolis" },
+          "ia": { city: "Chicago", value: "chicago" },
+          "iowa": { city: "Chicago", value: "chicago" },
+          "mo": { city: "Chicago", value: "chicago" },
+          "missouri": { city: "Chicago", value: "chicago" },
+          "ks": { city: "Denver", value: "denver" },
+          "kansas": { city: "Denver", value: "denver" },
+          "ne": { city: "Denver", value: "denver" },
+          "nebraska": { city: "Denver", value: "denver" },
+          "sd": { city: "Minneapolis", value: "minneapolis" },
+          "nd": { city: "Minneapolis", value: "minneapolis" },
+          
+          // Southwest / West
+          "tx": { city: "Houston", value: "houston" },
+          "texas": { city: "Houston", value: "houston" },
+          "ok": { city: "Dallas", value: "dallas" },
+          "nm": { city: "Denver", value: "denver" },
+          "az": { city: "Phoenix", value: "phoenix" },
+          "arizona": { city: "Phoenix", value: "phoenix" },
+          "co": { city: "Denver", value: "denver" },
+          "colorado": { city: "Denver", value: "denver" },
+          "ut": { city: "Denver", value: "denver" },
+          "utah": { city: "Denver", value: "denver" },
+          "nv": { city: "San Francisco", value: "san-francisco" },
+          "nevada": { city: "San Francisco", value: "san-francisco" },
+          
+          // West Coast
+          "ca": { city: "San Francisco", value: "san-francisco" },
+          "california": { city: "San Francisco", value: "san-francisco" },
+          "or": { city: "Seattle", value: "seattle" },
+          "oregon": { city: "Seattle", value: "seattle" },
+          "wa": { city: "Seattle", value: "seattle" },
+          "washington": { city: "Seattle", value: "seattle" },
+          
+          // Other
+          "hi": { city: "Los Angeles", value: "los-angeles" },
+          "hawaii": { city: "Los Angeles", value: "los-angeles" },
+          "ak": { city: "Seattle", value: "seattle" },
+          "id": { city: "Seattle", value: "seattle" },
+          "idaho": { city: "Seattle", value: "seattle" },
+          "mt": { city: "Denver", value: "denver" },
+          "montana": { city: "Denver", value: "denver" },
+          "wy": { city: "Denver", value: "denver" },
+          "wyoming": { city: "Denver", value: "denver" },
+        };
+        
+        const mapping = stateToCity[state];
+        if (mapping) {
+          locationScores.set(mapping.value, 15);
+          primaryLocations.add(mapping.value);
+          reasoning.push(`${mapping.city} area (${candidate.location})`);
+          foundPrimaryLocation = true;
+        } else {
+          // State not in map - still mark as US-based but don't flood with random cities
+          reasoning.push(`US-based (${candidate.location})`);
+          foundPrimaryLocation = true;
+        }
+      } else if (directMatch.countries.length > 0) {
+        // STEP 1C: Only found country (no city, no US state) - add country
+        directMatch.countries.forEach(country => {
           countryScores.set(country, 15);
         });
-        reasoning.push(`Based in ${candidate.location}`);
-        foundPrimaryLocation = true;
-      } else if (countries.length > 0) {
-        countries.forEach(country => {
-          countryScores.set(country, 15);
-        });
+        reasoning.push(`Country detected: ${directMatch.countries.join(", ")}`);
       }
     }
   }
