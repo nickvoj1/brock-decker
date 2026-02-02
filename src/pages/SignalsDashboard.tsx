@@ -35,6 +35,7 @@ import { toast } from "sonner";
 
 type Region = 'europe' | 'uae' | 'east_usa' | 'west_usa';
 type SortOption = 'newest' | 'amount' | 'intent';
+type SignalTypeFilter = 'all' | 'fund_close' | 'new_fund' | 'deal' | 'exit' | 'expansion' | 'senior_hire';
 
 const REGION_CONFIG = {
   europe: { label: "Europe", emoji: "🇪🇺", priority: 1 },
@@ -42,6 +43,16 @@ const REGION_CONFIG = {
   east_usa: { label: "East USA", emoji: "🇺🇸", priority: 3 },
   west_usa: { label: "West USA", emoji: "🇺🇸", priority: 4 },
 };
+
+const SIGNAL_TYPE_FILTERS: { value: SignalTypeFilter; label: string }[] = [
+  { value: "all", label: "All Types" },
+  { value: "fund_close", label: "Fund Close" },
+  { value: "new_fund", label: "New Fund" },
+  { value: "deal", label: "Deal/Investment" },
+  { value: "exit", label: "Exit" },
+  { value: "expansion", label: "Expansion" },
+  { value: "senior_hire", label: "Senior Hire" },
+];
 
 const SIGNAL_TYPE_ICONS: Record<string, React.ReactNode> = {
   fund_close: <DollarSign className="h-4 w-4" />,
@@ -113,6 +124,7 @@ export default function SignalsDashboard() {
   const [activeRegion, setActiveRegion] = useState<Region>("europe");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [showHighIntentOnly, setShowHighIntentOnly] = useState(false);
+  const [signalTypeFilter, setSignalTypeFilter] = useState<SignalTypeFilter>("all");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -200,6 +212,11 @@ export default function SignalsDashboard() {
       filtered = filtered.filter(s => s.is_high_intent);
     }
     
+    // Filter by signal type
+    if (signalTypeFilter !== "all") {
+      filtered = filtered.filter(s => s.signal_type === signalTypeFilter);
+    }
+    
     // Sort
     filtered.sort((a, b) => {
       if (sortBy === "newest") {
@@ -215,7 +232,7 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, sortBy, showHighIntentOnly]);
+  }, [signals, activeRegion, sortBy, showHighIntentOnly, signalTypeFilter]);
 
   if (!profileName) {
     return (
@@ -282,11 +299,24 @@ export default function SignalsDashboard() {
               High Intent Only
             </Button>
             
+            <Select value={signalTypeFilter} onValueChange={(v) => setSignalTypeFilter(v as SignalTypeFilter)}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Signal Type" />
+              </SelectTrigger>
+              <SelectContent className="bg-background border">
+                {SIGNAL_TYPE_FILTERS.map((filter) => (
+                  <SelectItem key={filter.value} value={filter.value}>
+                    {filter.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
             <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="bg-background border">
                 <SelectItem value="newest">Newest</SelectItem>
                 <SelectItem value="amount">Biggest Funding</SelectItem>
                 <SelectItem value="intent">Highest Intent</SelectItem>

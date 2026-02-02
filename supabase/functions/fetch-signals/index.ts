@@ -13,23 +13,30 @@ const RSS_FEEDS = {
     { url: "https://www.altassets.net/feed", source: "AltAssets" },
     { url: "https://sifted.eu/feed", source: "Sifted" },
     { url: "https://www.eu-startups.com/feed/", source: "EU-Startups" },
-    { url: "https://www.fintechfutures.com/feed/", source: "FinTech Futures" },
+    // Alternative sources (replaced FinTech Futures which returns 403)
+    { url: "https://www.privateequityinternational.com/feed/", source: "PE International" },
+    { url: "https://www.penews.com/feed/", source: "PE News" },
   ],
   uae: [
     { url: "https://gulfbusiness.com/feed/", source: "Gulf Business" },
-    { url: "https://www.arabianbusiness.com/rss", source: "Arabian Business" },
-    { url: "https://www.zawya.com/mena/en/rss/", source: "Zawya" },
+    // Replaced Arabian Business (403) and Zawya (404) with alternatives
+    { url: "https://www.thenationalnews.com/business/rss", source: "The National" },
+    { url: "https://www.khaleejtimes.com/rss/business", source: "Khaleej Times" },
+    { url: "https://gulfnews.com/rss/business", source: "Gulf News" },
   ],
   east_usa: [
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
-    { url: "https://pitchbook.com/rss/news", source: "PitchBook" },
+    // Replaced PitchBook (404) and Institutional Investor (404) with alternatives
     { url: "https://www.buyoutsinsider.com/feed/", source: "Buyouts Insider" },
-    { url: "https://www.institutionalinvestor.com/Feed/Index/", source: "Institutional Investor" },
+    { url: "https://www.axios.com/pro/deals/feed", source: "Axios Pro Deals" },
+    { url: "https://fortune.com/section/finance/feed", source: "Fortune Finance" },
+    { url: "https://feeds.feedburner.com/WSJPrivateEquity", source: "WSJ PE" },
   ],
   west_usa: [
     { url: "https://news.crunchbase.com/feed/", source: "Crunchbase News" },
     { url: "https://techcrunch.com/category/venture/feed/", source: "TechCrunch VC" },
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
+    { url: "https://www.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtXWg==", source: "BusinessWire PE" },
   ],
 };
 
