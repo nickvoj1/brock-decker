@@ -621,13 +621,13 @@ export default function RunsHistory() {
                       <Table>
                         <TableHeader>
                           <TableRow>
+                            <TableHead className="w-[80px]">Action</TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead>Title</TableHead>
                             <TableHead>Company</TableHead>
                             <TableHead>Skills</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead>Phone</TableHead>
-                            <TableHead className="w-[80px]">Action</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -636,14 +636,6 @@ export default function RunsHistory() {
                              const skills = generateBullhornSkillsString(contact, selectedRunPreferences);
                             return (
                               <TableRow key={i} className={isRemoved ? 'opacity-40 bg-muted/50' : ''}>
-                                <TableCell className="font-medium">{contact.name || '-'}</TableCell>
-                                <TableCell>{contact.title || '-'}</TableCell>
-                                <TableCell>{contact.company || '-'}</TableCell>
-                                <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground" title={skills}>
-                                  {skills || '-'}
-                                </TableCell>
-                                <TableCell className="text-primary">{contact.email || '-'}</TableCell>
-                                <TableCell>{contact.phone || '-'}</TableCell>
                                 <TableCell>
                                   {isRemoved ? (
                                     <Button
@@ -665,6 +657,14 @@ export default function RunsHistory() {
                                     </Button>
                                   )}
                                 </TableCell>
+                                <TableCell className="font-medium">{contact.name || '-'}</TableCell>
+                                <TableCell>{contact.title || '-'}</TableCell>
+                                <TableCell>{contact.company || '-'}</TableCell>
+                                <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground" title={skills}>
+                                  {skills || '-'}
+                                </TableCell>
+                                <TableCell className="text-primary">{contact.email || '-'}</TableCell>
+                                <TableCell>{contact.phone || '-'}</TableCell>
                               </TableRow>
                             );
                           })}
