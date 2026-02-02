@@ -1077,23 +1077,21 @@ Deno.serve(async (req) => {
         bullhorn_exported: s.bullhorn_exported,
       }));
 
-      // Aggregate hourly data for the past 24 hours
-      const hours24Ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      // Aggregate hourly data for TODAY only (not rolling 24h window)
       const hourlyMap: Record<string, number> = {};
+      const currentHour = now.getHours();
 
-      // Initialize all 24 hours with 0
-      for (let i = 0; i < 24; i++) {
-        const hourDate = new Date(now);
-        hourDate.setHours(now.getHours() - 23 + i, 0, 0, 0);
-        const hourKey = hourDate.toISOString().slice(11, 13) + ":00";
+      // Initialize hours from 00:00 up to current hour with 0
+      for (let i = 0; i <= currentHour; i++) {
+        const hourKey = i.toString().padStart(2, '0') + ":00";
         hourlyMap[hourKey] = 0;
       }
 
-      // Aggregate contacts by hour
+      // Aggregate contacts by hour for today only
       (runs || []).forEach((r: any) => {
         const createdAt = new Date(r.created_at);
-        if (createdAt >= hours24Ago) {
-          const hourKey = createdAt.toISOString().slice(11, 13) + ":00";
+        if (createdAt >= todayStart) {
+          const hourKey = createdAt.getHours().toString().padStart(2, '0') + ":00";
           const contacts = Array.isArray(r.enriched_data) ? r.enriched_data.length : 0;
           if (hourlyMap[hourKey] !== undefined) {
             hourlyMap[hourKey] += contacts;
@@ -1101,19 +1099,10 @@ Deno.serve(async (req) => {
         }
       });
 
-      // Convert to array sorted by hour
+      // Convert to array sorted chronologically (00:00 -> current hour)
       const hourlyData = Object.entries(hourlyMap)
         .map(([hour, contacts]) => ({ hour, contacts }))
-        .sort((a, b) => {
-          // Sort by hour, handling midnight wrap-around
-          const aHour = parseInt(a.hour);
-          const bHour = parseInt(b.hour);
-          const currentHour = now.getHours();
-          // Adjust hours relative to current hour for proper sorting
-          const aOffset = (aHour - currentHour + 24 + 1) % 24;
-          const bOffset = (bHour - currentHour + 24 + 1) % 24;
-          return aOffset - bOffset;
-        });
+        .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
 
       return new Response(
         JSON.stringify({ success: true, data: { stats, hourlyData } }),
