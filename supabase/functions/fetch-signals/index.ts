@@ -201,25 +201,77 @@ function detectFundType(text: string): string | null {
 }
 
 function extractFundOrCompany(title: string, description: string = ""): string | null {
-  const fullText = `${title} ${description}`;
+  // Clean title - remove leading descriptors
+  let cleanTitle = title
+    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
+    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\s+/i, "")
+    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\s+/i, "")
+    .replace(/^(it\s+)?scale-up\s+/i, "")
+    .replace(/^startup\s+/i, "")
+    .trim();
   
-  // PE/VC fund name patterns - look for "Capital", "Partners", "Ventures", etc.
+  // Extract company BEFORE common action verbs
+  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i;
+  
+  const match = cleanTitle.match(verbPattern);
+  if (match) {
+    let company = match[1]
+      .trim()
+      .replace(/['']s$/i, "") // Remove possessive
+      .replace(/\s+/g, " "); // Normalize spaces
+    
+    // Skip if it's a generic phrase
+    const skipPhrases = [
+      "the", "a", "an", "new", "report", "update", "breaking", "exclusive",
+      "bootstrapped for seven years", "backed by", "formerly known as",
+      "sources say", "according to", "report says", "rumor has it"
+    ];
+    
+    if (skipPhrases.some(phrase => company.toLowerCase() === phrase || company.toLowerCase().startsWith(phrase + " "))) {
+      // Try extracting from description if title is generic
+      if (description) {
+        const descMatch = description.match(/(?:company|startup|firm|fund)\s+([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:has|is|raises|closes|announced)/i);
+        if (descMatch) {
+          return descMatch[1].trim();
+        }
+      }
+      return null;
+    }
+    
+    // Valid company name
+    if (company.length >= 2 && company.length <= 50) {
+      return company;
+    }
+  }
+  
+  // Fallback: Look for known PE/VC fund name patterns
   const fundPatterns = [
     // "XYZ Capital closes €500M fund"
-    /^([A-Z][A-Za-z0-9\s&]+?(?:Capital|Partners|Ventures|Equity|Investment|Asset|Management|Advisors|Fund))\s+(?:closes|raises|launches|announces|completes|reaches)/i,
-    // "Fund manager XYZ closes..."
-    /(?:fund manager|pe firm|vc firm|investor)\s+([A-Z][A-Za-z0-9\s&]+?)\s+(?:closes|raises|launches)/i,
-    // Generic: "CompanyName closes/raises/acquires..."
-    /^([A-Z][A-Za-z0-9\s&]{2,30}?)\s+(?:closes|raises|acquires|backs|invests|launches|announces|exits|sells)/i,
+    /([A-Z][A-Za-z0-9\s&]{2,25}?(?:Capital|Partners|Ventures|Equity|Investment|Advisors|Management|Group|Holdings))\s+(?:closes|raises|launches|announces)/i,
+    // After colon: "Type: CompanyName announces..."
+    /:\s*([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:raises|closes|announces|launches|acquires)/i,
+    // "backed/acquired by CompanyName"
+    /(?:backed|acquired|led|funded)\s+by\s+([A-Z][A-Za-z0-9\-\.&\s]{2,30})/i,
   ];
   
   for (const pattern of fundPatterns) {
-    const match = title.match(pattern);
-    if (match) {
-      const name = match[1].trim();
-      // Filter out generic words that aren't fund names
-      if (!["The", "A", "An", "New", "Report", "Update", "Breaking"].includes(name)) {
-        return name;
+    const fundMatch = title.match(pattern);
+    if (fundMatch) {
+      return fundMatch[1].trim();
+    }
+  }
+  
+  // Last resort: Check description for company mentions
+  if (description) {
+    const descPatterns = [
+      /([A-Z][A-Za-z0-9\-\.&]{2,20}),?\s+(?:a|the|an)\s+(?:startup|company|firm|fund|fintech|platform)/i,
+      /(?:startup|company|firm)\s+([A-Z][A-Za-z0-9\-\.&]{2,20})/i,
+    ];
+    
+    for (const pattern of descPatterns) {
+      const descMatch = description.match(pattern);
+      if (descMatch) {
+        return descMatch[1].trim();
       }
     }
   }
