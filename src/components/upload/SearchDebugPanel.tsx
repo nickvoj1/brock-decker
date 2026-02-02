@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { ChevronDown, ChevronUp, Bug, MapPin, Building2, Users, Hash } from "lucide-react";
+import { useState, useMemo } from "react";
+import { ChevronDown, ChevronUp, Bug, MapPin, Building2, Users, Hash, Languages } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { getLanguageSummary, expandRolesWithTranslations } from "@/lib/roleTitleTranslations";
 
 interface SearchDebugPanelProps {
   selectedIndustries: string[];
@@ -23,6 +24,17 @@ export function SearchDebugPanel({
   candidateName,
 }: SearchDebugPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
+
+  // Calculate language summary and expanded roles
+  const languageSummary = useMemo(() => 
+    getLanguageSummary(selectedLocations), 
+    [selectedLocations]
+  );
+  
+  const expandedRoles = useMemo(() => 
+    expandRolesWithTranslations(selectedRoles, selectedLocations),
+    [selectedRoles, selectedLocations]
+  );
 
   const hasAnySelection = 
     selectedIndustries.length > 0 || 
@@ -141,11 +153,36 @@ export function SearchDebugPanel({
               </div>
             )}
 
+            {/* Language Translations */}
+            {languageSummary.length > 0 && selectedRoles.length > 0 && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Languages className="h-4 w-4 text-primary" />
+                  <span className="text-sm text-muted-foreground">
+                    Native Language Search:
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1 ml-6">
+                  {languageSummary.map((lang) => (
+                    <Badge key={lang.code} variant="secondary" className="text-xs">
+                      {lang.name}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="ml-6 text-xs text-muted-foreground">
+                  Searching {expandedRoles.length} role variants (incl. gender forms)
+                </div>
+              </div>
+            )}
+
             {/* Apollo Query Preview */}
             <div className="mt-4 p-3 bg-background rounded-md border text-xs font-mono space-y-1">
               <div className="text-muted-foreground mb-2">Apollo Query Preview:</div>
               <div><span className="text-primary">person_locations:</span> [{selectedLocations.map(l => `"${l}"`).join(", ")}]</div>
-              <div><span className="text-primary">person_titles:</span> [{selectedRoles.map(r => `"${r}"`).join(", ")}]</div>
+              <div>
+                <span className="text-primary">person_titles:</span> [{expandedRoles.slice(0, 5).map(r => `"${r}"`).join(", ")}
+                {expandedRoles.length > 5 && <span className="text-muted-foreground"> ...+{expandedRoles.length - 5} more</span>}]
+              </div>
               {selectedSectors.length > 0 && (
                 <div><span className="text-primary">organization_industries:</span> [{selectedSectors.map(s => `"${s}"`).join(", ")}]</div>
               )}
