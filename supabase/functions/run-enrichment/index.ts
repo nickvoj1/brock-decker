@@ -5,6 +5,243 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// ============ Role Title Translations ============
+// Map of languages and their associated location slugs
+const languageLocationMap: Record<string, string[]> = {
+  de: ["frankfurt", "berlin", "munich", "hamburg", "dusseldorf", "vienna", "zurich", "basel"],
+  fr: ["paris", "lyon", "marseille", "geneva", "brussels", "luxembourg-city", "montreal"],
+  es: ["madrid", "barcelona", "mexico-city"],
+  it: ["milan", "rome"],
+  nl: ["amsterdam", "rotterdam", "antwerp"],
+  pt: ["lisbon", "porto", "sao-paulo", "rio"],
+  pl: ["warsaw", "krakow"],
+  sv: ["stockholm", "gothenburg"],
+  da: ["copenhagen"],
+  no: ["oslo"],
+  fi: ["helsinki"],
+  ja: ["tokyo", "osaka"],
+  zh: ["shanghai", "beijing", "shenzhen", "hong-kong"],
+  ko: ["seoul"],
+  ar: ["dubai", "abu-dhabi", "riyadh"],
+  he: ["tel-aviv"],
+}
+
+// Role translations by language code (includes gender variants where applicable)
+const roleTranslations: Record<string, Record<string, string[]>> = {
+  de: {
+    "Recruiter": ["Recruiter", "Recruiterin", "Personalvermittler", "Personalvermittlerin"],
+    "Talent Acquisition": ["Talent Acquisition", "Talentakquise", "Personalgewinnung"],
+    "HR Manager": ["HR Manager", "HR Managerin", "Personalleiter", "Personalleiterin", "Personalmanager"],
+    "Human Resources": ["Human Resources", "Personalwesen", "Personalabteilung"],
+    "Hiring Manager": ["Hiring Manager", "Einstellungsleiter", "Einstellungsleiterin"],
+    "Head of Talent": ["Head of Talent", "Leiter Talentmanagement", "Leiterin Talentmanagement"],
+    "People Operations": ["People Operations", "People & Culture"],
+    "HR Director": ["HR Director", "Personaldirektor", "Personaldirektorin", "Leiter Personal", "Leiterin Personal"],
+    "Talent Partner": ["Talent Partner", "Talent Partnerin"],
+    "HR Business Partner": ["HR Business Partner", "Personalreferent", "Personalreferentin"],
+    "CEO": ["CEO", "Geschäftsführer", "Geschäftsführerin", "Vorstandsvorsitzender"],
+    "CTO": ["CTO", "Technischer Leiter", "Technische Leiterin"],
+    "CFO": ["CFO", "Finanzvorstand"],
+    "Managing Director": ["Managing Director", "Geschäftsführer", "Geschäftsführerin"],
+    "Director": ["Director", "Direktor", "Direktorin", "Leiter", "Leiterin"],
+    "Partner": ["Partner", "Partnerin"],
+    "Founder": ["Founder", "Gründer", "Gründerin", "Mitgründer"],
+    "General Counsel": ["General Counsel", "Chefjurist", "Chefjuristin"],
+    "Attorney": ["Attorney", "Rechtsanwalt", "Rechtsanwältin"],
+    "Lawyer": ["Lawyer", "Rechtsanwalt", "Rechtsanwältin", "Jurist", "Juristin"],
+    "Finance Director": ["Finance Director", "Finanzdirektor", "Finanzdirektorin"],
+    "Engineering Manager": ["Engineering Manager", "Entwicklungsleiter", "Entwicklungsleiterin"],
+    "IT Director": ["IT Director", "IT-Direktor", "IT-Direktorin", "IT-Leiter"],
+  },
+  fr: {
+    "Recruiter": ["Recruteur", "Recruteuse", "Chargé de recrutement", "Chargée de recrutement"],
+    "HR Manager": ["Responsable RH", "Directeur RH", "Directrice RH"],
+    "Human Resources": ["Ressources Humaines", "RH"],
+    "HR Director": ["Directeur RH", "Directrice RH"],
+    "CEO": ["CEO", "PDG", "Directeur Général", "Directrice Générale"],
+    "CTO": ["CTO", "Directeur Technique", "Directrice Technique"],
+    "CFO": ["CFO", "Directeur Financier", "Directrice Financière"],
+    "Managing Director": ["Directeur Général", "Directrice Générale"],
+    "Director": ["Directeur", "Directrice"],
+    "Partner": ["Associé", "Associée"],
+    "Founder": ["Fondateur", "Fondatrice"],
+    "General Counsel": ["Directeur Juridique", "Directrice Juridique"],
+    "Attorney": ["Avocat", "Avocate"],
+    "Lawyer": ["Avocat", "Avocate", "Juriste"],
+  },
+  es: {
+    "Recruiter": ["Reclutador", "Reclutadora"],
+    "HR Manager": ["Gerente de RRHH", "Director de RRHH", "Directora de RRHH"],
+    "HR Director": ["Director de Recursos Humanos", "Directora de Recursos Humanos"],
+    "CEO": ["CEO", "Director General", "Directora General"],
+    "CTO": ["CTO", "Director de Tecnología", "Directora de Tecnología"],
+    "Managing Director": ["Director General", "Directora General"],
+    "Director": ["Director", "Directora"],
+    "Partner": ["Socio", "Socia"],
+    "Founder": ["Fundador", "Fundadora"],
+    "Attorney": ["Abogado", "Abogada"],
+    "Lawyer": ["Abogado", "Abogada"],
+  },
+  it: {
+    "Recruiter": ["Recruiter", "Selezionatore", "Selezionatrice"],
+    "HR Manager": ["HR Manager", "Responsabile Risorse Umane"],
+    "HR Director": ["Direttore Risorse Umane", "Direttrice Risorse Umane"],
+    "CEO": ["CEO", "Amministratore Delegato"],
+    "Managing Director": ["Direttore Generale", "Direttrice Generale"],
+    "Director": ["Direttore", "Direttrice"],
+    "Partner": ["Partner", "Socio", "Socia"],
+    "Founder": ["Fondatore", "Fondatrice"],
+    "Attorney": ["Avvocato", "Avvocatessa"],
+  },
+  nl: {
+    "Recruiter": ["Recruiter", "Werving"],
+    "HR Manager": ["HR Manager", "Personeelsmanager"],
+    "HR Director": ["HR Directeur", "Directeur HR"],
+    "CEO": ["CEO", "Directeur", "Algemeen Directeur"],
+    "Managing Director": ["Algemeen Directeur", "Managing Director"],
+    "Director": ["Directeur"],
+    "Partner": ["Partner", "Vennoot"],
+    "Founder": ["Oprichter", "Medeoprichter"],
+    "Attorney": ["Advocaat"],
+    "Lawyer": ["Advocaat", "Jurist"],
+  },
+  pt: {
+    "Recruiter": ["Recrutador", "Recrutadora"],
+    "HR Manager": ["Gerente de RH", "Gestor de Recursos Humanos"],
+    "HR Director": ["Diretor de RH", "Diretora de RH"],
+    "CEO": ["CEO", "Diretor Executivo", "Diretora Executiva"],
+    "Managing Director": ["Diretor Geral", "Diretora Geral"],
+    "Director": ["Diretor", "Diretora"],
+    "Partner": ["Sócio", "Sócia"],
+    "Founder": ["Fundador", "Fundadora"],
+    "Attorney": ["Advogado", "Advogada"],
+  },
+  pl: {
+    "Recruiter": ["Rekruter", "Rekruterka"],
+    "HR Manager": ["Kierownik HR", "Manager HR"],
+    "HR Director": ["Dyrektor HR"],
+    "CEO": ["CEO", "Prezes", "Dyrektor Generalny"],
+    "Managing Director": ["Dyrektor Zarządzający"],
+    "Director": ["Dyrektor"],
+    "Founder": ["Założyciel", "Założycielka"],
+  },
+  sv: {
+    "Recruiter": ["Rekryterare"],
+    "HR Manager": ["HR-chef", "Personalchef"],
+    "HR Director": ["HR-direktör", "Personaldirektör"],
+    "CEO": ["CEO", "VD", "Verkställande direktör"],
+    "Managing Director": ["VD", "Verkställande direktör"],
+    "Director": ["Direktör", "Chef"],
+    "Founder": ["Grundare", "Medgrundare"],
+  },
+  da: {
+    "Recruiter": ["Rekrutterer"],
+    "HR Manager": ["HR-chef", "Personalechef"],
+    "HR Director": ["HR-direktør"],
+    "CEO": ["CEO", "Administrerende direktør"],
+    "Managing Director": ["Administrerende direktør"],
+    "Director": ["Direktør"],
+    "Founder": ["Grundlægger"],
+  },
+  no: {
+    "Recruiter": ["Rekrutterer"],
+    "HR Manager": ["HR-sjef", "Personalsjef"],
+    "HR Director": ["HR-direktør"],
+    "CEO": ["CEO", "Administrerende direktør", "Daglig leder"],
+    "Managing Director": ["Administrerende direktør"],
+    "Director": ["Direktør"],
+    "Founder": ["Grunnlegger"],
+  },
+  fi: {
+    "Recruiter": ["Rekrytoija"],
+    "HR Manager": ["HR-päällikkö", "Henkilöstöpäällikkö"],
+    "HR Director": ["HR-johtaja", "Henkilöstöjohtaja"],
+    "CEO": ["CEO", "Toimitusjohtaja"],
+    "Managing Director": ["Toimitusjohtaja"],
+    "Director": ["Johtaja"],
+    "Founder": ["Perustaja"],
+  },
+  ja: {
+    "Recruiter": ["リクルーター", "採用担当"],
+    "HR Manager": ["人事マネージャー", "人事部長"],
+    "HR Director": ["人事部長", "人事ディレクター"],
+    "CEO": ["CEO", "代表取締役", "社長"],
+    "CTO": ["CTO", "最高技術責任者"],
+    "Managing Director": ["代表取締役"],
+    "Director": ["ディレクター", "部長"],
+    "Founder": ["創業者", "ファウンダー"],
+  },
+  zh: {
+    "Recruiter": ["招聘专员", "招聘经理"],
+    "HR Manager": ["人力资源经理", "人事经理"],
+    "HR Director": ["人力资源总监", "人事总监"],
+    "CEO": ["CEO", "首席执行官", "总裁"],
+    "CTO": ["CTO", "首席技术官"],
+    "Managing Director": ["总经理"],
+    "Director": ["总监", "董事"],
+    "Founder": ["创始人"],
+  },
+  ko: {
+    "Recruiter": ["채용담당자", "리크루터"],
+    "HR Manager": ["인사매니저", "인사부장"],
+    "HR Director": ["인사이사"],
+    "CEO": ["CEO", "대표이사"],
+    "Managing Director": ["대표이사"],
+    "Director": ["이사", "디렉터"],
+    "Founder": ["창업자"],
+  },
+  ar: {
+    "Recruiter": ["مسؤول التوظيف"],
+    "HR Manager": ["مدير الموارد البشرية"],
+    "HR Director": ["مدير إدارة الموارد البشرية"],
+    "CEO": ["الرئيس التنفيذي", "المدير العام"],
+    "Managing Director": ["المدير العام"],
+    "Director": ["مدير"],
+    "Founder": ["مؤسس"],
+  },
+  he: {
+    "Recruiter": ["מגייס", "מגייסת"],
+    "HR Manager": ["מנהל משאבי אנוש", "מנהלת משאבי אנוש"],
+    "HR Director": ["סמנכ\"ל משאבי אנוש"],
+    "CEO": ["מנכ\"ל"],
+    "Managing Director": ["מנכ\"ל"],
+    "Director": ["מנהל", "מנהלת"],
+    "Founder": ["מייסד", "מייסדת"],
+  },
+}
+
+function getLanguagesForLocations(locationSlugs: string[]): string[] {
+  const languages = new Set<string>()
+  for (const slug of locationSlugs) {
+    for (const [lang, locations] of Object.entries(languageLocationMap)) {
+      if (locations.includes(slug.toLowerCase())) {
+        languages.add(lang)
+      }
+    }
+  }
+  return Array.from(languages)
+}
+
+function expandRolesWithTranslations(englishRoles: string[], locationSlugs: string[]): string[] {
+  const languages = getLanguagesForLocations(locationSlugs)
+  const allRoles = new Set<string>(englishRoles)
+  
+  for (const lang of languages) {
+    const langTranslations = roleTranslations[lang]
+    if (!langTranslations) continue
+    
+    for (const englishRole of englishRoles) {
+      const translations = langTranslations[englishRole]
+      if (translations) {
+        translations.forEach(t => allRoles.add(t))
+      }
+    }
+  }
+  
+  return Array.from(allRoles)
+}
+// ============ End Role Title Translations ============
+
 interface WorkExperience {
   company: string
   title: string
@@ -144,10 +381,19 @@ Deno.serve(async (req) => {
       'Hiring Manager', 'Head of Talent', 'People Operations', 'HR Director',
       'Talent Partner', 'HR Business Partner'
     ]
-    const targetRoles = preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
+    const baseTargetRoles = preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
 
     // Get locations from preferences (all prefs share the same locations)
     const searchLocations = preferences[0]?.locations || []
+    
+    // Expand target roles with native language translations based on selected locations
+    const targetRoles = expandRolesWithTranslations(baseTargetRoles, searchLocations)
+    const detectedLanguages = getLanguagesForLocations(searchLocations)
+    
+    if (detectedLanguages.length > 0) {
+      console.log(`Detected languages from locations: ${detectedLanguages.join(', ')}`)
+      console.log(`Expanded ${baseTargetRoles.length} base roles to ${targetRoles.length} total (including translations)`)
+    }
     
     // Map location values to human-readable names for Apollo
     const locationLabels: Record<string, string> = {
@@ -170,20 +416,56 @@ Deno.serve(async (req) => {
       'paris': 'Paris, France',
       'berlin': 'Berlin, Germany',
       'frankfurt': 'Frankfurt, Germany',
+      'munich': 'Munich, Germany',
+      'hamburg': 'Hamburg, Germany',
+      'dusseldorf': 'Dusseldorf, Germany',
       'amsterdam': 'Amsterdam, Netherlands',
+      'rotterdam': 'Rotterdam, Netherlands',
       'zurich': 'Zurich, Switzerland',
+      'geneva': 'Geneva, Switzerland',
+      'basel': 'Basel, Switzerland',
       'dublin': 'Dublin, Ireland',
+      'cork': 'Cork, Ireland',
       'madrid': 'Madrid, Spain',
+      'barcelona': 'Barcelona, Spain',
       'milan': 'Milan, Italy',
+      'rome': 'Rome, Italy',
+      'lisbon': 'Lisbon, Portugal',
+      'porto': 'Porto, Portugal',
+      'vienna': 'Vienna, Austria',
+      'brussels': 'Brussels, Belgium',
+      'antwerp': 'Antwerp, Belgium',
+      'luxembourg-city': 'Luxembourg City, Luxembourg',
+      'stockholm': 'Stockholm, Sweden',
+      'gothenburg': 'Gothenburg, Sweden',
+      'copenhagen': 'Copenhagen, Denmark',
+      'oslo': 'Oslo, Norway',
+      'helsinki': 'Helsinki, Finland',
+      'warsaw': 'Warsaw, Poland',
+      'krakow': 'Krakow, Poland',
       'singapore': 'Singapore',
       'hong-kong': 'Hong Kong',
       'tokyo': 'Tokyo, Japan',
+      'osaka': 'Osaka, Japan',
       'sydney': 'Sydney, Australia',
       'melbourne': 'Melbourne, Australia',
+      'mumbai': 'Mumbai, India',
+      'bangalore': 'Bangalore, India',
+      'delhi': 'Delhi, India',
+      'shanghai': 'Shanghai, China',
+      'beijing': 'Beijing, China',
+      'shenzhen': 'Shenzhen, China',
+      'seoul': 'Seoul, South Korea',
       'dubai': 'Dubai, UAE',
+      'abu-dhabi': 'Abu Dhabi, UAE',
+      'riyadh': 'Riyadh, Saudi Arabia',
+      'tel-aviv': 'Tel Aviv, Israel',
       'toronto': 'Toronto, Canada',
       'vancouver': 'Vancouver, Canada',
       'montreal': 'Montreal, Canada',
+      'mexico-city': 'Mexico City, Mexico',
+      'sao-paulo': 'São Paulo, Brazil',
+      'rio': 'Rio de Janeiro, Brazil',
     }
     
     const apolloLocations = searchLocations.map(loc => locationLabels[loc] || loc)
