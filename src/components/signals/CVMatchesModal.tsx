@@ -38,7 +38,7 @@ interface CVMatchesModalProps {
 export function CVMatchesModal({ open, onOpenChange, signal, profileName, onSelectCV }: CVMatchesModalProps) {
   const [candidates, setCandidates] = useState<CandidateProfile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [matchedCandidates, setMatchedCandidates] = useState<Array<CandidateProfile & { matchScore: number; matchReasons: string[] }>>([]);
+  const [matchedCandidates, setMatchedCandidates] = useState<Array<CandidateProfile & { matchScore: number; matchRating: number; matchReasons: string[] }>>([]);
 
   useEffect(() => {
     if (open && profileName) {
@@ -64,6 +64,13 @@ export function CVMatchesModal({ open, onOpenChange, signal, profileName, onSele
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Convert raw score to 1-10 rating
+  const scoreToRating = (score: number): number => {
+    // Max theoretical score is about 100-110, scale to 1-10
+    const rating = Math.ceil((score / 100) * 10);
+    return Math.max(1, Math.min(10, rating));
   };
 
   const calculateMatches = () => {
@@ -93,11 +100,11 @@ export function CVMatchesModal({ open, onOpenChange, signal, profileName, onSele
         ...(candidate.work_history || []).map(w => `${w.company} ${w.title}`.toLowerCase()),
       ].join(" ");
 
-      // Check for PE/VC/Finance experience
+      // Check for PE/VC/Finance experience (high weight)
       const financeKeywords = ["private equity", "pe", "venture", "vc", "investment", "fund", "m&a", "buyout", "portfolio", "asset management", "capital", "finance", "banking"];
       const hasFinanceExp = financeKeywords.some(kw => candidateData.includes(kw));
       if (hasFinanceExp) {
-        score += 30;
+        score += 35;
         reasons.push("PE/Finance background");
       }
 
@@ -134,7 +141,7 @@ export function CVMatchesModal({ open, onOpenChange, signal, profileName, onSele
         reasons.push(`Based in ${signal.region.replace("_", " ").toUpperCase()}`);
       }
 
-      // Keyword overlap
+      // Keyword overlap (company name, signal keywords)
       const keywordMatches = signalKeywords.filter(kw => 
         kw.length > 3 && candidateData.includes(kw.toLowerCase())
       );
@@ -154,12 +161,13 @@ export function CVMatchesModal({ open, onOpenChange, signal, profileName, onSele
         }
       }
 
-      return { ...candidate, matchScore: score, matchReasons: reasons };
+      const rating = scoreToRating(score);
+      return { ...candidate, matchScore: score, matchRating: rating, matchReasons: reasons };
     });
 
-    // Sort by score and filter those with at least some match
+    // Sort by score and filter those with rating >= 3 (score >= 20)
     const filtered = matches
-      .filter(m => m.matchScore >= 20)
+      .filter(m => m.matchRating >= 3)
       .sort((a, b) => b.matchScore - a.matchScore);
 
     setMatchedCandidates(filtered);
@@ -211,8 +219,15 @@ export function CVMatchesModal({ open, onOpenChange, signal, profileName, onSele
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <h3 className="font-medium truncate">{candidate.name}</h3>
-                          <Badge variant="secondary" className="text-xs">
-                            {candidate.matchScore}% match
+                          <Badge 
+                            variant="secondary" 
+                            className={`text-xs font-bold ${
+                              candidate.matchRating >= 8 ? "bg-green-500/20 text-green-600" :
+                              candidate.matchRating >= 6 ? "bg-yellow-500/20 text-yellow-600" :
+                              "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {candidate.matchRating}/10 fit
                           </Badge>
                         </div>
                         
