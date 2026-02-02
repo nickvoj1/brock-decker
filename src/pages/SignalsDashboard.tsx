@@ -234,7 +234,7 @@ export default function SignalsDashboard() {
       const response = await runSignalAutoSearch(signal.id, profileName);
       
       if (response.success && response.data) {
-        const { contacts, targetCompany, industries } = response.data;
+        const { contacts, targetCompany, categoriesWithResults } = response.data;
         
         // Update local signal with contacts count
         setSignals(prev => prev.map(s => 
@@ -242,13 +242,13 @@ export default function SignalsDashboard() {
         ));
         
         if (contacts.length > 0) {
-          toast.success(`Found ${contacts.length} contacts at ${targetCompany}`, {
+          toast.success(`Found ${contacts.length} contacts at ${targetCompany} (${categoriesWithResults.length} categories)`, {
             id: `ta-search-${signal.id}`,
           });
           setTaSearchResults(response.data);
           setTaResultsModalOpen(true);
         } else {
-          toast.warning(`No contacts found at ${targetCompany}. Tried industries: ${industries.join(", ")}`, {
+          toast.warning(`No contacts found at ${targetCompany}. Tried all role categories.`, {
             id: `ta-search-${signal.id}`,
           });
         }
@@ -497,9 +497,9 @@ export default function SignalsDashboard() {
                 <Badge variant="outline">
                   Strategy: {taSearchResults.strategy}
                 </Badge>
-                {taSearchResults.industries.map(ind => (
-                  <Badge key={ind} variant="outline" className="bg-primary/5">
-                    {ind}
+                {taSearchResults.categoriesWithResults.map(cat => (
+                  <Badge key={cat} variant="outline" className="bg-primary/5">
+                    {cat}
                   </Badge>
                 ))}
               </div>
@@ -510,6 +510,7 @@ export default function SignalsDashboard() {
                     <tr>
                       <th className="text-left p-3 font-medium">Name</th>
                       <th className="text-left p-3 font-medium">Title</th>
+                      <th className="text-left p-3 font-medium">Category</th>
                       <th className="text-left p-3 font-medium">Company</th>
                       <th className="text-left p-3 font-medium">Location</th>
                       <th className="text-left p-3 font-medium">Email</th>
@@ -520,6 +521,11 @@ export default function SignalsDashboard() {
                       <tr key={idx} className="border-t hover:bg-muted/30">
                         <td className="p-3 font-medium">{contact.name}</td>
                         <td className="p-3 text-muted-foreground">{contact.title}</td>
+                        <td className="p-3">
+                          <Badge variant="outline" className="text-xs">
+                            {contact.category}
+                          </Badge>
+                        </td>
                         <td className="p-3">{contact.company}</td>
                         <td className="p-3 text-muted-foreground">{contact.location}</td>
                         <td className="p-3">
@@ -541,9 +547,9 @@ export default function SignalsDashboard() {
                   variant="outline" 
                   onClick={() => {
                     const csvContent = [
-                      "Name,Title,Company,Location,Email",
+                      "Name,Title,Category,Company,Location,Email",
                       ...taSearchResults.contacts.map(c => 
-                        `"${c.name}","${c.title}","${c.company}","${c.location}","${c.email}"`
+                        `"${c.name}","${c.title}","${c.category}","${c.company}","${c.location}","${c.email}"`
                       )
                     ].join("\n");
                     

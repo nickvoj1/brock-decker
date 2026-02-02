@@ -2,53 +2,46 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.91.1'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
-// ============ Company Industry Detection ============
-// Mapping of company name keywords to likely industries
-const INDUSTRY_KEYWORDS: Record<string, string[]> = {
-  'Private Equity': [
-    'capital', 'partners', 'equity', 'investments', 'fund', 'holdings',
-    'private equity', 'buyout', 'lbo', 'leveraged'
+// ============ All Role Categories ============
+const ROLE_CATEGORIES: Record<string, string[]> = {
+  'HR & Recruiting': [
+    'Recruiter', 'Talent Acquisition', 'HR Manager', 'Human Resources',
+    'Hiring Manager', 'Head of Talent', 'People Operations', 'HR Director',
+    'Talent Partner', 'HR Business Partner'
   ],
-  'Venture Capital': [
-    'ventures', 'vc', 'venture', 'seed', 'series', 'startup'
+  'Senior Leadership': [
+    'CEO', 'CTO', 'CFO', 'COO', 'Managing Director', 'Managing Partner',
+    'Senior Partner', 'Equity Partner', 'Partner', 'SVP', 'EVP', 
+    'Founder', 'Co-Founder', 'President', 'Vice President'
   ],
-  'Investment Banking': [
-    'bank', 'banking', 'securities', 'advisory', 'm&a', 'mergers'
+  'Finance & Investment': [
+    'Investor Relations', 'Fundraising', 'Finance Director', 
+    'Head of Finance', 'Investment Director', 'Portfolio Manager',
+    'Fund Manager', 'Chief Investment Officer'
   ],
-  'Asset Management': [
-    'asset management', 'wealth', 'investment management', 'portfolio'
+  'Legal & Compliance': [
+    'General Counsel', 'CLO', 'Legal Director', 'Head of Legal',
+    'Attorney', 'Lawyer', 'Legal Partner', 'Compliance Officer',
+    'Regulatory Affairs', 'Chief Legal Officer'
   ],
-  'Technology': [
-    'tech', 'software', 'digital', 'data', 'cloud', 'ai', 'saas', 'platform',
-    'fintech', 'proptech', 'healthtech', 'edtech', 'insurtech'
-  ],
-  'Financial Services': [
-    'financial', 'finance', 'credit', 'lending', 'insurance'
-  ],
-  'Consulting': [
-    'consulting', 'consultants', 'advisory', 'advisors'
-  ],
-  'Real Estate': [
-    'real estate', 'property', 'properties', 'realty', 'reit'
-  ],
-  'Healthcare': [
-    'health', 'medical', 'pharma', 'biotech', 'life sciences'
+  'Strategy & Operations': [
+    'Corporate Development', 'Business Development', 'Strategy Director',
+    'Head of Strategy', 'Operations Director', 'Chief Strategy Officer',
+    'Head of Operations', 'COO'
   ],
 }
 
-// Signal type to industry mapping
-const SIGNAL_TYPE_INDUSTRIES: Record<string, string[]> = {
-  fund_close: ['Private Equity', 'Venture Capital', 'Asset Management'],
-  new_fund: ['Private Equity', 'Venture Capital', 'Asset Management'],
-  deal: ['Private Equity', 'Investment Banking', 'Corporate Finance'],
-  exit: ['Private Equity', 'Venture Capital'],
-  expansion: ['Financial Services', 'Technology'],
-  senior_hire: ['Financial Services', 'Private Equity', 'Technology'],
-  funding: ['Venture Capital', 'Technology', 'Private Equity'],
-}
+// All categories in priority order for TA search
+const CATEGORY_PRIORITY = [
+  'HR & Recruiting',
+  'Senior Leadership', 
+  'Finance & Investment',
+  'Legal & Compliance',
+  'Strategy & Operations',
+]
 
 // Region to locations mapping
 const REGION_LOCATIONS: Record<string, string[]> = {
@@ -66,13 +59,6 @@ const REGION_COUNTRY_LOCATIONS: Record<string, string[]> = {
   west_usa: ['California', 'Washington', 'Oregon', 'Colorado', 'Texas'],
 }
 
-// Default target roles for TA searches
-const DEFAULT_ROLES = [
-  'Recruiter', 'Talent Acquisition', 'HR Manager', 'Human Resources',
-  'Hiring Manager', 'Head of Talent', 'People Operations', 'HR Director',
-  'Talent Partner', 'HR Business Partner'
-]
-
 // Company name normalization
 const COMPANY_SUFFIXES = [
   'ltd', 'limited', 'llc', 'inc', 'incorporated', 'corp', 'corporation',
@@ -87,16 +73,16 @@ function normalizeCompanyName(name: string): string {
   return name
     .toLowerCase()
     .trim()
-    .replace(/['`]/g, "'")
-    .replace(/[^\\w\\s'-]/g, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/[''`]/g, "'")
+    .replace(/[^\w\s'-]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim()
 }
 
 function stripCompanySuffixes(name: string): string {
   let stripped = normalizeCompanyName(name)
   for (const suffix of COMPANY_SUFFIXES) {
-    const pattern = new RegExp(`\\\\s+${suffix}$`, 'i')
+    const pattern = new RegExp(`\\s+${suffix}$`, 'i')
     stripped = stripped.replace(pattern, '').trim()
   }
   return stripped
@@ -123,22 +109,22 @@ function extractCompanyFromTitle(title: string): string {
   if (!title) return ''
   
   let cleanTitle = title
-    .replace(/^(breaking|exclusive|update|report|news|watch):\\s*/i, "")
-    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\\s+/i, "")
-    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\\s+/i, "")
-    .replace(/^(it\\s+)?scale-up\\s+/i, "")
-    .replace(/^startup\\s+/i, "")
-    .replace(/^bootstrapped\\s+for\\s+\\w+\\s+years?,?\\s*/i, "")
+    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
+    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\s+/i, "")
+    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\s+/i, "")
+    .replace(/^(it\s+)?scale-up\s+/i, "")
+    .replace(/^startup\s+/i, "")
+    .replace(/^bootstrapped\s+for\s+\w+\s+years?,?\s*/i, "")
     .trim()
   
-  const verbPattern = /^([A-Z][A-Za-z0-9''\\-\\.\\s]{1,40}?)\\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i
+  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i
   
   const match = cleanTitle.match(verbPattern)
   if (match) {
     let company = match[1]
       .trim()
       .replace(/['']s$/i, "")
-      .replace(/\\s+/g, " ")
+      .replace(/\s+/g, " ")
     
     const skipPhrases = [
       "the", "a", "an", "new", "report", "update", "breaking", "exclusive",
@@ -158,48 +144,126 @@ function extractCompanyFromTitle(title: string): string {
   return ''
 }
 
-// Detect industry from company name and signal context
-function detectIndustry(companyName: string, signalType: string | null, signalTitle: string): string[] {
-  const industries: Set<string> = new Set()
-  
-  // First, check signal type mapping
-  if (signalType && SIGNAL_TYPE_INDUSTRIES[signalType]) {
-    SIGNAL_TYPE_INDUSTRIES[signalType].forEach(ind => industries.add(ind))
-  }
-  
-  // Then check company name keywords
-  const lowerCompany = (companyName + ' ' + signalTitle).toLowerCase()
-  for (const [industry, keywords] of Object.entries(INDUSTRY_KEYWORDS)) {
-    for (const keyword of keywords) {
-      if (lowerCompany.includes(keyword)) {
-        industries.add(industry)
-        break
-      }
-    }
-  }
-  
-  // Default to Private Equity + Financial Services if nothing detected
-  if (industries.size === 0) {
-    industries.add('Private Equity')
-    industries.add('Financial Services')
-  }
-  
-  return Array.from(industries).slice(0, 3) // Max 3 industries
-}
-
 interface ApolloContact {
   name: string
   title: string
   location: string
   email: string
   company: string
+  category: string
 }
 
 interface SearchResult {
   contacts: ApolloContact[]
   strategy: string
   targetCompany: string
-  industries: string[]
+  categoriesTried: string[]
+  categoriesWithResults: string[]
+}
+
+interface SearchStrategy {
+  name: string
+  company: string
+  locations: string[]
+}
+
+async function searchWithStrategy(
+  apolloApiKey: string,
+  strategy: SearchStrategy,
+  roles: string[],
+  categoryName: string,
+  seenEmails: Set<string>,
+  targetCompany: string,
+  maxPerCompany: number
+): Promise<ApolloContact[]> {
+  const contacts: ApolloContact[] = []
+  
+  const searchPayload: Record<string, unknown> = {
+    person_titles: roles,
+    q_organization_name: strategy.company,
+    per_page: 25,
+    page: 1,
+  }
+
+  if (strategy.locations.length > 0) {
+    searchPayload.person_locations = strategy.locations
+  }
+
+  // Search up to 3 pages per strategy
+  for (let page = 1; page <= 3; page++) {
+    searchPayload.page = page
+
+    try {
+      const apolloResponse = await fetch('https://api.apollo.io/api/v1/mixed_people/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': apolloApiKey,
+        },
+        body: JSON.stringify(searchPayload),
+      })
+
+      if (!apolloResponse.ok) {
+        const errorText = await apolloResponse.text()
+        console.error(`Apollo API error: ${apolloResponse.status} - ${errorText}`)
+        break
+      }
+
+      const apolloData = await apolloResponse.json()
+      const people = apolloData.people || []
+
+      if (people.length === 0) {
+        break
+      }
+
+      for (const person of people) {
+        const email = person.email?.toLowerCase()
+        if (!email || seenEmails.has(email)) continue
+
+        const personCompany = person.organization?.name || ''
+        
+        // Strict company match
+        if (!companiesMatch(strategy.company, personCompany)) {
+          continue
+        }
+
+        // Check max per company
+        const companyKey = normalizeCompanyName(personCompany)
+        const companyCount = contacts.filter(c => 
+          normalizeCompanyName(c.company) === companyKey
+        ).length
+        if (companyCount >= maxPerCompany) continue
+
+        const firstName = person.first_name || ''
+        const lastName = person.last_name || ''
+        const fullName = `${firstName} ${lastName}`.trim()
+        if (!fullName || fullName.length < 2) continue
+
+        const locationParts = [
+          person.city,
+          person.state,
+          person.country
+        ].filter(Boolean)
+        const location = locationParts.join(', ') || 'Unknown'
+
+        contacts.push({
+          name: fullName,
+          title: person.title || 'Unknown',
+          location,
+          email,
+          company: personCompany,
+          category: categoryName,
+        })
+        seenEmails.add(email)
+      }
+
+    } catch (err) {
+      console.error(`Apollo request failed:`, err)
+      break
+    }
+  }
+
+  return contacts
 }
 
 Deno.serve(async (req) => {
@@ -264,10 +328,6 @@ Deno.serve(async (req) => {
 
     console.log(`Target company: "${targetCompany}"`)
 
-    // Auto-detect industries
-    const industries = detectIndustry(targetCompany, signal.signal_type, signal.title)
-    console.log(`Detected industries: ${industries.join(', ')}`)
-
     // Get locations for the signal's region
     const region = signal.region || 'europe'
     const cityLocations = REGION_LOCATIONS[region] || REGION_LOCATIONS.europe
@@ -275,138 +335,77 @@ Deno.serve(async (req) => {
 
     console.log(`Region: ${region}, Locations: ${cityLocations.join(', ')}`)
 
-    // Build search strategies
-    const strategies = [
-      { name: 'exact_cities', company: targetCompany, locations: cityLocations },
-      { name: 'stripped_cities', company: stripCompanySuffixes(targetCompany), locations: cityLocations },
-      { name: 'exact_countries', company: targetCompany, locations: countryLocations },
-      { name: 'stripped_countries', company: stripCompanySuffixes(targetCompany), locations: countryLocations },
-      { name: 'no_location', company: targetCompany, locations: [] },
-    ]
-
-    // Also try title-derived company if different
+    // Build company name variants
+    const companyVariants = [targetCompany]
+    const strippedCompany = stripCompanySuffixes(targetCompany)
+    if (strippedCompany !== normalizeCompanyName(targetCompany)) {
+      companyVariants.push(strippedCompany)
+    }
     const titleCompany = extractCompanyFromTitle(signal.title)
     if (titleCompany && normalizeCompanyName(titleCompany) !== normalizeCompanyName(targetCompany)) {
-      strategies.splice(2, 0, { 
-        name: 'title_derived_cities', 
-        company: titleCompany, 
-        locations: cityLocations 
-      })
+      companyVariants.push(titleCompany)
     }
 
+    // Build search strategies (company variant × location level)
+    const strategies: SearchStrategy[] = []
+    for (const company of companyVariants) {
+      strategies.push({ name: `${company}_cities`, company, locations: cityLocations })
+      strategies.push({ name: `${company}_countries`, company, locations: countryLocations })
+    }
+    // Final fallback: no location filter
+    strategies.push({ name: 'no_location', company: targetCompany, locations: [] })
+
     const TARGET_MIN_CONTACTS = 10
-    const MAX_PER_COMPANY = 4
+    const MAX_PER_COMPANY = 10 // Allow more contacts per company for exhaustive search
     const allContacts: ApolloContact[] = []
     const seenEmails = new Set<string>()
+    const categoriesTried: string[] = []
+    const categoriesWithResults: string[] = []
     let usedStrategy = 'none'
 
-    // Try each strategy until we get enough contacts
-    for (const strategy of strategies) {
-      if (allContacts.length >= TARGET_MIN_CONTACTS) {
-        console.log(`Found ${allContacts.length} contacts, stopping search`)
-        break
-      }
+    console.log(`Will try ${CATEGORY_PRIORITY.length} role categories across ${strategies.length} strategies`)
 
-      console.log(`Trying strategy: ${strategy.name} with company "${strategy.company}"`)
+    // Try EVERY category, not just until we have enough
+    for (const categoryName of CATEGORY_PRIORITY) {
+      const roles = ROLE_CATEGORIES[categoryName]
+      categoriesTried.push(categoryName)
+      let categoryFoundContacts = false
 
-      // Build Apollo search payload
-      const searchPayload: Record<string, unknown> = {
-        person_titles: DEFAULT_ROLES,
-        q_organization_name: strategy.company,
-        per_page: 25,
-        page: 1,
-      }
+      console.log(`\n=== Trying category: ${categoryName} (${roles.length} roles) ===`)
 
-      if (strategy.locations.length > 0) {
-        searchPayload.person_locations = strategy.locations
-      }
+      // Try each strategy for this category
+      for (const strategy of strategies) {
+        console.log(`  Strategy: ${strategy.name}`)
 
-      // Search up to 5 pages
-      for (let page = 1; page <= 5; page++) {
-        if (allContacts.length >= TARGET_MIN_CONTACTS) break
+        const contacts = await searchWithStrategy(
+          apolloApiKey,
+          strategy,
+          roles,
+          categoryName,
+          seenEmails,
+          strategy.company,
+          MAX_PER_COMPANY
+        )
 
-        searchPayload.page = page
-
-        try {
-          const apolloResponse = await fetch('https://api.apollo.io/api/v1/mixed_people/search', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Api-Key': apolloApiKey,
-            },
-            body: JSON.stringify(searchPayload),
-          })
-
-          if (!apolloResponse.ok) {
-            console.error(`Apollo API error: ${apolloResponse.status}`)
-            continue
-          }
-
-          const apolloData = await apolloResponse.json()
-          const people = apolloData.people || []
-
-          if (people.length === 0) {
-            console.log(`No results on page ${page}`)
-            break
-          }
-
-          // Filter and process contacts
-          for (const person of people) {
-            const email = person.email?.toLowerCase()
-            if (!email || seenEmails.has(email)) continue
-
-            const personCompany = person.organization?.name || ''
-            
-            // Strict company match - only keep contacts at target company
-            if (!companiesMatch(strategy.company, personCompany)) {
-              continue
-            }
-
-            // Check max per company
-            const companyKey = normalizeCompanyName(personCompany)
-            const companyCount = allContacts.filter(c => 
-              normalizeCompanyName(c.company) === companyKey
-            ).length
-            if (companyCount >= MAX_PER_COMPANY) continue
-
-            const firstName = person.first_name || ''
-            const lastName = person.last_name || ''
-            const fullName = `${firstName} ${lastName}`.trim()
-            if (!fullName || fullName.length < 2) continue
-
-            // Build location string
-            const locationParts = [
-              person.city,
-              person.state,
-              person.country
-            ].filter(Boolean)
-            const location = locationParts.join(', ') || 'Unknown'
-
-            allContacts.push({
-              name: fullName,
-              title: person.title || 'Unknown',
-              location,
-              email,
-              company: personCompany,
-            })
-            seenEmails.add(email)
-
-            console.log(`Found: ${fullName} - ${person.title} at ${personCompany}`)
-          }
-
-          console.log(`Page ${page}: Found ${people.length} people, ${allContacts.length} total contacts`)
-
-        } catch (err) {
-          console.error(`Apollo request failed:`, err)
+        if (contacts.length > 0) {
+          console.log(`  Found ${contacts.length} contacts in ${categoryName} with ${strategy.name}`)
+          allContacts.push(...contacts)
+          categoryFoundContacts = true
+          usedStrategy = strategy.name
+          
+          // If we found contacts in this category, move to next category
+          // (we want breadth across categories, not depth in one strategy)
+          break
         }
       }
 
-      if (allContacts.length > 0) {
-        usedStrategy = strategy.name
+      if (categoryFoundContacts) {
+        categoriesWithResults.push(categoryName)
       }
     }
 
-    console.log(`Search complete: ${allContacts.length} contacts found using strategy "${usedStrategy}"`)
+    console.log(`\nSearch complete: ${allContacts.length} contacts found across ${categoriesWithResults.length} categories`)
+    console.log(`Categories with results: ${categoriesWithResults.join(', ')}`)
 
     // Update signal with contacts count
     await supabase
@@ -418,7 +417,8 @@ Deno.serve(async (req) => {
       contacts: allContacts,
       strategy: usedStrategy,
       targetCompany,
-      industries,
+      categoriesTried,
+      categoriesWithResults,
     }
 
     return new Response(
