@@ -116,10 +116,61 @@ export async function refreshSignals(profileName: string, region?: string) {
   }
 }
 
+// Extract company name from signal title if company field is empty
+function extractCompanyFromTitle(title: string): string {
+  // Common patterns in PE/VC news titles:
+  // "[Company] raises €X", "[Company] closes fund", "[Company] acquires..."
+  // "French IT scale-up Fleet enters first LBO..."
+  
+  const patterns = [
+    // "Company raises/closes/secures/announces..."
+    /^([A-Z][A-Za-z0-9\s&\-\.]+?)\s+(raises|closes|secures|announces|completes|launches|acquires|enters|targets)/i,
+    // "scale-up/startup Company..."
+    /(?:scale-up|startup|fintech|proptech|healthtech|edtech|insurtech|legaltech)\s+([A-Z][A-Za-z0-9\s&\-\.]+?)\s+(enters|raises|closes|secures|announces)/i,
+    // "Company's fund/deal..."
+    /^([A-Z][A-Za-z0-9\s&\-\.]+?)(?:'s|')\s+(fund|first|new|latest)/i,
+    // After colon pattern: "Type: Company announces..."
+    /:\s*([A-Z][A-Za-z0-9\s&\-\.]+?)\s+(raises|closes|announces|launches)/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = title.match(pattern);
+    if (match) {
+      // Clean up the extracted company name
+      let company = match[1].trim();
+      // Remove common prefixes
+      company = company.replace(/^(the|a|an)\s+/i, "");
+      // Don't return if it's too generic
+      if (company.length > 2 && company.length < 50) {
+        return company;
+      }
+    }
+  }
+  
+  // Fallback: look for capitalized proper nouns at the start
+  const words = title.split(/\s+/);
+  const properNouns: string[] = [];
+  for (const word of words) {
+    // Stop at common verbs/articles
+    if (/^(raises|closes|secures|announces|is|has|have|the|a|an|and|or|in|at|for|to|of|with)$/i.test(word)) {
+      break;
+    }
+    if (/^[A-Z]/.test(word) || /^[a-z]+tech$/i.test(word)) {
+      properNouns.push(word);
+    }
+  }
+  
+  if (properNouns.length > 0 && properNouns.length <= 4) {
+    return properNouns.join(" ");
+  }
+  
+  return "";
+}
+
 // Build Apollo search URL for a signal
 export function buildApolloSearchUrl(signal: Signal): string {
   const baseUrl = "https://app.apollo.io/";
-  const companyName = signal.company || "";
+  const companyName = signal.company || extractCompanyFromTitle(signal.title);
   
   // This creates a search query that would work in Apollo
   // In practice, we navigate to our own enrichment page
@@ -130,9 +181,10 @@ export function buildApolloSearchUrl(signal: Signal): string {
 // Build Bullhorn note text for a signal
 export function buildBullhornNote(signal: Signal): string {
   const parts: string[] = [];
+  const companyName = signal.company || extractCompanyFromTitle(signal.title);
   
-  if (signal.company) {
-    parts.push(`Company: ${signal.company}`);
+  if (companyName) {
+    parts.push(`Company: ${companyName}`);
   }
   
   parts.push(`Signal: ${signal.title}`);
@@ -167,8 +219,10 @@ export function buildBullhornNote(signal: Signal): string {
 export function getSignalEnrichmentParams(signal: Signal): Record<string, string> {
   const params: Record<string, string> = {};
   
-  if (signal.company) {
-    params.company = signal.company;
+  // Extract company name from signal.company or parse from title
+  const companyName = signal.company || extractCompanyFromTitle(signal.title);
+  if (companyName) {
+    params.company = companyName;
   }
   
   if (signal.region) {
@@ -196,8 +250,13 @@ export function getSignalEnrichmentParams(signal: Signal): Record<string, string
     params.industries = signalTypeIndustryMap[signal.signal_type];
   }
   
+  // Add additional signal context for display
   params.signalId = signal.id;
   params.signalTitle = signal.title;
+  params.signalRegion = signal.region;
+  if (signal.signal_type) params.signalType = signal.signal_type;
+  if (signal.amount) params.signalAmount = signal.amount.toString();
+  if (signal.currency) params.signalCurrency = signal.currency;
   
   return params;
 }
