@@ -76,7 +76,19 @@ export async function refreshSignals(profileName: string, region?: string) {
       return { success: false, error: error.message };
     }
 
-    return response as DataApiResponse<{ fetched: number; regionCounts: Record<string, number> }>;
+    // The edge function returns { success, fetched, regionCounts, message } directly
+    // Wrap it in a data property to match the expected DataApiResponse format
+    if (response && response.success) {
+      return { 
+        success: true, 
+        data: { 
+          fetched: response.fetched || 0, 
+          regionCounts: response.regionCounts || {} 
+        } 
+      };
+    }
+
+    return { success: false, error: response?.error || "Unknown error" };
   } catch (err) {
     console.error("Refresh signals failed:", err);
     return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
