@@ -24,6 +24,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<UploadRun />} />
+          <Route path="/upload" element={<UploadRun />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/team-dashboard" element={<TeamDashboard />} />
           <Route path="/signals" element={<SignalsDashboard />} />
