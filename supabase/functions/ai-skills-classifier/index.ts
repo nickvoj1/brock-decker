@@ -117,7 +117,7 @@ Important: Each contact needs at least 4 skills. Use relevant location, role, an
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "openai/gpt-5-mini", // Fast and accurate for classification
+      model: "openai/gpt-5.2", // Most advanced model for precise classification
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
