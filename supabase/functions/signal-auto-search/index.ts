@@ -167,16 +167,46 @@ interface SearchStrategy {
   locations: string[]
 }
 
+async function revealEmail(apolloApiKey: string, personId: string): Promise<string | null> {
+  try {
+    const response = await fetch('https://api.apollo.io/api/v1/people/bulk_reveal', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apolloApiKey,
+      },
+      body: JSON.stringify({ ids: [personId] }),
+    })
+
+    if (!response.ok) {
+      console.error(`Reveal API error: ${response.status}`)
+      return null
+    }
+
+    const data = await response.json()
+    const matches = data.matches || []
+    if (matches.length > 0 && matches[0].email) {
+      return matches[0].email.toLowerCase()
+    }
+    return null
+  } catch (err) {
+    console.error('Reveal email failed:', err)
+    return null
+  }
+}
+
 async function searchWithStrategy(
   apolloApiKey: string,
   strategy: SearchStrategy,
   roles: string[],
   categoryName: string,
   seenEmails: Set<string>,
+  seenPersonIds: Set<string>,
   targetCompany: string,
   maxPerCompany: number
 ): Promise<ApolloContact[]> {
   const contacts: ApolloContact[] = []
+  const pendingReveals: { person: Record<string, unknown>; categoryName: string }[] = []
   
   const searchPayload: Record<string, unknown> = {
     person_titles: roles,
@@ -217,8 +247,9 @@ async function searchWithStrategy(
       }
 
       for (const person of people) {
-        const email = person.email?.toLowerCase()
-        if (!email || seenEmails.has(email)) continue
+        const personId = person.id
+        if (!personId || seenPersonIds.has(personId)) continue
+        seenPersonIds.add(personId)
 
         const personCompany = person.organization?.name || ''
         
@@ -231,6 +262,8 @@ async function searchWithStrategy(
         const companyKey = normalizeCompanyName(personCompany)
         const companyCount = contacts.filter(c => 
           normalizeCompanyName(c.company) === companyKey
+        ).length + pendingReveals.filter(p => 
+          normalizeCompanyName((p.person.organization as Record<string, unknown>)?.name as string || '') === companyKey
         ).length
         if (companyCount >= maxPerCompany) continue
 
@@ -239,27 +272,98 @@ async function searchWithStrategy(
         const fullName = `${firstName} ${lastName}`.trim()
         if (!fullName || fullName.length < 2) continue
 
-        const locationParts = [
-          person.city,
-          person.state,
-          person.country
-        ].filter(Boolean)
-        const location = locationParts.join(', ') || 'Unknown'
+        // If email already available (already revealed), use it directly
+        if (person.email) {
+          const email = person.email.toLowerCase()
+          if (!seenEmails.has(email)) {
+            const locationParts = [
+              person.city,
+              person.state,
+              person.country
+            ].filter(Boolean)
+            const location = locationParts.join(', ') || 'Unknown'
 
-        contacts.push({
-          name: fullName,
-          title: person.title || 'Unknown',
-          location,
-          email,
-          company: personCompany,
-          category: categoryName,
-        })
-        seenEmails.add(email)
+            contacts.push({
+              name: fullName,
+              title: person.title || 'Unknown',
+              location,
+              email,
+              company: personCompany,
+              category: categoryName,
+            })
+            seenEmails.add(email)
+          }
+        } else {
+          // Queue for reveal
+          pendingReveals.push({ person, categoryName })
+        }
       }
 
     } catch (err) {
       console.error(`Apollo request failed:`, err)
       break
+    }
+  }
+
+  // Reveal emails for people without emails (using bulk reveal - costs 1 credit per email)
+  if (pendingReveals.length > 0) {
+    console.log(`  Revealing ${pendingReveals.length} emails...`)
+    
+    // Process in batches of 10 for bulk reveal
+    const batchSize = 10
+    for (let i = 0; i < pendingReveals.length; i += batchSize) {
+      const batch = pendingReveals.slice(i, i + batchSize)
+      const personIds = batch.map(p => p.person.id as string)
+      
+      try {
+        const response = await fetch('https://api.apollo.io/api/v1/people/bulk_reveal', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': apolloApiKey,
+          },
+          body: JSON.stringify({ ids: personIds }),
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const matches = data.matches || []
+          
+          for (const match of matches) {
+            const email = match.email?.toLowerCase()
+            if (!email || seenEmails.has(email)) continue
+            
+            // Find the original person data
+            const originalPending = batch.find(p => p.person.id === match.id)
+            if (!originalPending) continue
+            
+            const person = originalPending.person
+            const firstName = person.first_name || ''
+            const lastName = person.last_name || ''
+            const fullName = `${firstName} ${lastName}`.trim()
+            const personCompany = (person.organization as Record<string, unknown>)?.name as string || ''
+            
+            const locationParts = [
+              person.city,
+              person.state,
+              person.country
+            ].filter(Boolean)
+            const location = (locationParts as string[]).join(', ') || 'Unknown'
+
+            contacts.push({
+              name: fullName,
+              title: (person.title as string) || 'Unknown',
+              location,
+              email,
+              company: personCompany,
+              category: originalPending.categoryName,
+            })
+            seenEmails.add(email)
+          }
+        }
+      } catch (err) {
+        console.error('Bulk reveal failed:', err)
+      }
     }
   }
 
@@ -359,6 +463,7 @@ Deno.serve(async (req) => {
     const MAX_PER_COMPANY = 10 // Allow more contacts per company for exhaustive search
     const allContacts: ApolloContact[] = []
     const seenEmails = new Set<string>()
+    const seenPersonIds = new Set<string>()
     const categoriesTried: string[] = []
     const categoriesWithResults: string[] = []
     let usedStrategy = 'none'
@@ -383,6 +488,7 @@ Deno.serve(async (req) => {
           roles,
           categoryName,
           seenEmails,
+          seenPersonIds,
           strategy.company,
           MAX_PER_COMPANY
         )
