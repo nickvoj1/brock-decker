@@ -298,29 +298,35 @@ async function searchWithStrategy(
   const contacts: ApolloContact[] = []
   const pendingReveals: { person: Record<string, unknown>; categoryName: string }[] = []
   
-  const searchPayload: Record<string, unknown> = {
-    person_titles: roles,
-    q_organization_name: strategy.company,
-    per_page: 25,
-    page: 1,
-  }
-
+  // Build query params for Apollo api_search endpoint
+  const queryParams = new URLSearchParams()
+  
+  // Add target roles
+  roles.forEach(title => queryParams.append('person_titles[]', title))
+  
+  // Add locations
   if (strategy.locations.length > 0) {
-    searchPayload.person_locations = strategy.locations
+    strategy.locations.forEach(loc => queryParams.append('person_locations[]', loc))
   }
+  
+  // Add company filter
+  queryParams.append('q_organization_name', strategy.company)
 
   // Search up to 3 pages per strategy
   for (let page = 1; page <= 3; page++) {
-    searchPayload.page = page
+    queryParams.set('per_page', '25')
+    queryParams.set('page', String(page))
 
     try {
-      const apolloResponse = await fetch('https://api.apollo.io/api/v1/mixed_people/search', {
+      // Use the new api_search endpoint (POST with query params)
+      const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
+      
+      const apolloResponse = await fetch(searchUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Api-Key': apolloApiKey,
         },
-        body: JSON.stringify(searchPayload),
       })
 
       if (!apolloResponse.ok) {
