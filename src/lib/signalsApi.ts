@@ -118,50 +118,54 @@ export async function refreshSignals(profileName: string, region?: string) {
 
 // Extract company name from signal title if company field is empty
 function extractCompanyFromTitle(title: string): string {
-  // Common patterns in PE/VC news titles:
-  // "[Company] raises €X", "[Company] closes fund", "[Company] acquires..."
-  // "French IT scale-up Fleet enters first LBO..."
+  // Clean title - remove leading descriptors
+  let cleanTitle = title
+    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
+    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\s+/i, "")
+    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\s+/i, "")
+    .replace(/^(it\s+)?scale-up\s+/i, "")
+    .replace(/^startup\s+/i, "")
+    .trim();
   
-  const patterns = [
-    // "Company raises/closes/secures/announces..."
-    /^([A-Z][A-Za-z0-9\s&\-\.]+?)\s+(raises|closes|secures|announces|completes|launches|acquires|enters|targets)/i,
-    // "scale-up/startup Company..."
-    /(?:scale-up|startup|fintech|proptech|healthtech|edtech|insurtech|legaltech)\s+([A-Z][A-Za-z0-9\s&\-\.]+?)\s+(enters|raises|closes|secures|announces)/i,
-    // "Company's fund/deal..."
-    /^([A-Z][A-Za-z0-9\s&\-\.]+?)(?:'s|')\s+(fund|first|new|latest)/i,
-    // After colon pattern: "Type: Company announces..."
-    /:\s*([A-Z][A-Za-z0-9\s&\-\.]+?)\s+(raises|closes|announces|launches)/i,
+  // Extract company BEFORE common action verbs
+  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i;
+  
+  const match = cleanTitle.match(verbPattern);
+  if (match) {
+    let company = match[1]
+      .trim()
+      .replace(/['']s$/i, "") // Remove possessive
+      .replace(/\s+/g, " "); // Normalize spaces
+    
+    // Skip if it's a generic phrase
+    const skipPhrases = [
+      "the", "a", "an", "new", "report", "update", "breaking", "exclusive",
+      "bootstrapped for seven years", "backed by", "formerly known as",
+      "sources say", "according to", "report says", "rumor has it"
+    ];
+    
+    if (skipPhrases.some(phrase => company.toLowerCase() === phrase || company.toLowerCase().startsWith(phrase + " "))) {
+      return "";
+    }
+    
+    // Valid company name
+    if (company.length >= 2 && company.length <= 50) {
+      return company;
+    }
+  }
+  
+  // Fallback: Look for known PE/VC fund name patterns
+  const fundPatterns = [
+    /([A-Z][A-Za-z0-9\s&]{2,25}?(?:Capital|Partners|Ventures|Equity|Investment|Advisors|Management|Group|Holdings))\s+(?:closes|raises|launches|announces)/i,
+    /:\s*([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:raises|closes|announces|launches|acquires)/i,
+    /(?:backed|acquired|led|funded)\s+by\s+([A-Z][A-Za-z0-9\-\.&\s]{2,30})/i,
   ];
   
-  for (const pattern of patterns) {
-    const match = title.match(pattern);
-    if (match) {
-      // Clean up the extracted company name
-      let company = match[1].trim();
-      // Remove common prefixes
-      company = company.replace(/^(the|a|an)\s+/i, "");
-      // Don't return if it's too generic
-      if (company.length > 2 && company.length < 50) {
-        return company;
-      }
+  for (const pattern of fundPatterns) {
+    const fundMatch = title.match(pattern);
+    if (fundMatch) {
+      return fundMatch[1].trim();
     }
-  }
-  
-  // Fallback: look for capitalized proper nouns at the start
-  const words = title.split(/\s+/);
-  const properNouns: string[] = [];
-  for (const word of words) {
-    // Stop at common verbs/articles
-    if (/^(raises|closes|secures|announces|is|has|have|the|a|an|and|or|in|at|for|to|of|with)$/i.test(word)) {
-      break;
-    }
-    if (/^[A-Z]/.test(word) || /^[a-z]+tech$/i.test(word)) {
-      properNouns.push(word);
-    }
-  }
-  
-  if (properNouns.length > 0 && properNouns.length <= 4) {
-    return properNouns.join(" ");
   }
   
   return "";
