@@ -1077,12 +1077,14 @@ Deno.serve(async (req) => {
         bullhorn_exported: s.bullhorn_exported,
       }));
 
-      // Aggregate hourly data for TODAY only (not rolling 24h window)
+      // Aggregate hourly data for TODAY only (starting from 8 AM work hours)
       const hourlyMap: Record<string, number> = {};
       const currentHour = now.getHours();
+      const workStartHour = 8; // Don't show hours before 8 AM
 
-      // Initialize hours from 00:00 up to current hour with 0
-      for (let i = 0; i <= currentHour; i++) {
+      // Initialize hours from 08:00 up to current hour with 0
+      const startHour = Math.max(workStartHour, 8);
+      for (let i = startHour; i <= Math.max(currentHour, startHour); i++) {
         const hourKey = i.toString().padStart(2, '0') + ":00";
         hourlyMap[hourKey] = 0;
       }
