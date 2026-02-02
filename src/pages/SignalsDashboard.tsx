@@ -31,6 +31,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useProfileName } from "@/hooks/useProfileName";
 import { 
   getSignals, 
@@ -38,9 +44,9 @@ import {
   refreshSignals, 
   markSignalBullhornAdded,
   buildBullhornNote,
-  getSignalEnrichmentParams,
   Signal 
 } from "@/lib/signalsApi";
+import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
 import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -146,6 +152,12 @@ export default function SignalsDashboard() {
   
   // Bullhorn loading state per signal
   const [bullhornLoading, setBullhornLoading] = useState<Record<string, boolean>>({});
+  
+  // TA Contacts auto-search state
+  const [taSearchLoading, setTaSearchLoading] = useState<Record<string, boolean>>({});
+  const [taSearchResults, setTaSearchResults] = useState<SignalSearchResult | null>(null);
+  const [taResultsModalOpen, setTaResultsModalOpen] = useState(false);
+  const [taSearchSignal, setTaSearchSignal] = useState<Signal | null>(null);
 
   useEffect(() => {
     if (profileName) {
@@ -206,12 +218,53 @@ export default function SignalsDashboard() {
     }
   };
 
-  const handleTAContacts = (signal: Signal) => {
-    // Navigate to Upload & Run page with signal context as query params
-    const params = getSignalEnrichmentParams(signal);
-    const queryString = new URLSearchParams(params).toString();
-    navigate(`/upload?${queryString}`);
-    toast.success(`Opening enrichment for ${signal.company || "signal"}`);
+  const handleTAContacts = async (signal: Signal) => {
+    if (!profileName) return;
+    
+    // Start automatic search
+    setTaSearchLoading(prev => ({ ...prev, [signal.id]: true }));
+    setTaSearchSignal(signal);
+    
+    toast.info(`Searching for TA contacts at ${signal.company || "company"}...`, {
+      duration: 10000,
+      id: `ta-search-${signal.id}`,
+    });
+    
+    try {
+      const response = await runSignalAutoSearch(signal.id, profileName);
+      
+      if (response.success && response.data) {
+        const { contacts, targetCompany, industries } = response.data;
+        
+        // Update local signal with contacts count
+        setSignals(prev => prev.map(s => 
+          s.id === signal.id ? { ...s, contacts_found: contacts.length } : s
+        ));
+        
+        if (contacts.length > 0) {
+          toast.success(`Found ${contacts.length} contacts at ${targetCompany}`, {
+            id: `ta-search-${signal.id}`,
+          });
+          setTaSearchResults(response.data);
+          setTaResultsModalOpen(true);
+        } else {
+          toast.warning(`No contacts found at ${targetCompany}. Tried industries: ${industries.join(", ")}`, {
+            id: `ta-search-${signal.id}`,
+          });
+        }
+      } else {
+        toast.error(response.error || "Failed to search for contacts", {
+          id: `ta-search-${signal.id}`,
+        });
+      }
+    } catch (error) {
+      console.error("TA Contacts search error:", error);
+      toast.error("Failed to search for contacts", {
+        id: `ta-search-${signal.id}`,
+      });
+    } finally {
+      setTaSearchLoading(prev => ({ ...prev, [signal.id]: false }));
+    }
   };
 
   const handleCVMatches = (signal: Signal) => {
@@ -406,6 +459,7 @@ export default function SignalsDashboard() {
                       onCVMatches={handleCVMatches}
                       onBullhornNote={handleBullhornNote}
                       bullhornLoading={bullhornLoading[signal.id] || false}
+                      taSearchLoading={taSearchLoading[signal.id] || false}
                     />
                   ))}
                 </div>
@@ -423,6 +477,96 @@ export default function SignalsDashboard() {
         profileName={profileName || ""}
         onSelectCV={handleSelectCV}
       />
+      
+      {/* TA Search Results Modal */}
+      <Dialog open={taResultsModalOpen} onOpenChange={setTaResultsModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserSearch className="h-5 w-5 text-primary" />
+              TA Contacts Found at {taSearchResults?.targetCompany}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {taSearchResults && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  {taSearchResults.contacts.length} contacts
+                </Badge>
+                <Badge variant="outline">
+                  Strategy: {taSearchResults.strategy}
+                </Badge>
+                {taSearchResults.industries.map(ind => (
+                  <Badge key={ind} variant="outline" className="bg-primary/5">
+                    {ind}
+                  </Badge>
+                ))}
+              </div>
+              
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-medium">Name</th>
+                      <th className="text-left p-3 font-medium">Title</th>
+                      <th className="text-left p-3 font-medium">Company</th>
+                      <th className="text-left p-3 font-medium">Location</th>
+                      <th className="text-left p-3 font-medium">Email</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taSearchResults.contacts.map((contact, idx) => (
+                      <tr key={idx} className="border-t hover:bg-muted/30">
+                        <td className="p-3 font-medium">{contact.name}</td>
+                        <td className="p-3 text-muted-foreground">{contact.title}</td>
+                        <td className="p-3">{contact.company}</td>
+                        <td className="p-3 text-muted-foreground">{contact.location}</td>
+                        <td className="p-3">
+                          <a 
+                            href={`mailto:${contact.email}`} 
+                            className="text-primary hover:underline"
+                          >
+                            {contact.email}
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="flex justify-end gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    const csvContent = [
+                      "Name,Title,Company,Location,Email",
+                      ...taSearchResults.contacts.map(c => 
+                        `"${c.name}","${c.title}","${c.company}","${c.location}","${c.email}"`
+                      )
+                    ].join("\n");
+                    
+                    const blob = new Blob([csvContent], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `ta-contacts-${taSearchResults.targetCompany}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    toast.success("CSV downloaded");
+                  }}
+                >
+                  Download CSV
+                </Button>
+                <Button onClick={() => setTaResultsModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }
@@ -434,9 +578,10 @@ interface SignalCardProps {
   onCVMatches: (signal: Signal) => void;
   onBullhornNote: (signal: Signal) => void;
   bullhornLoading?: boolean;
+  taSearchLoading?: boolean;
 }
 
-function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNote, bullhornLoading }: SignalCardProps) {
+function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNote, bullhornLoading, taSearchLoading }: SignalCardProps) {
   const intentStars = getIntentStars(signal);
   const regionConfig = REGION_CONFIG[signal.region as Region];
   
@@ -519,12 +664,17 @@ function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNo
               <div className="flex flex-wrap items-center gap-2">
                 <Button 
                   size="sm" 
-                  variant="outline" 
-                  className="h-8 text-xs gap-1"
+                  variant={signal.contacts_found > 0 ? "default" : "outline"}
+                  className={`h-8 text-xs gap-1 ${signal.contacts_found > 0 ? "bg-primary" : ""}`}
                   onClick={() => onTAContacts(signal)}
+                  disabled={taSearchLoading}
                 >
-                  <UserSearch className="h-3 w-3" />
-                  TA Contacts
+                  {taSearchLoading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <UserSearch className="h-3 w-3" />
+                  )}
+                  {taSearchLoading ? "Searching..." : signal.contacts_found > 0 ? `${signal.contacts_found} Contacts` : "TA Contacts"}
                 </Button>
                 
                 <Button 
