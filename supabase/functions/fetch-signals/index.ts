@@ -6,37 +6,56 @@ const corsHeaders = {
 };
 
 // RSS Feed configurations by region - Focused on PE/VC/Fund news
+// Prioritized high-quality sources that reliably return PE/VC content
 const RSS_FEEDS = {
   europe: [
-    // PE-specific sources
+    // Primary PE-specific sources
     { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire EU" },
     { url: "https://www.altassets.net/feed", source: "AltAssets" },
     { url: "https://sifted.eu/feed", source: "Sifted" },
     { url: "https://www.eu-startups.com/feed/", source: "EU-Startups" },
-    // Alternative sources (replaced FinTech Futures which returns 403)
-    { url: "https://www.privateequityinternational.com/feed/", source: "PE International" },
-    { url: "https://www.penews.com/feed/", source: "PE News" },
+    // Real Deals - UK/Europe PE focused
+    { url: "https://realdeals.eu.com/feed/", source: "Real Deals" },
+    // Unquote - European PE news
+    { url: "https://www.unquote.com/feed/", source: "Unquote" },
+    // City AM - London finance
+    { url: "https://www.cityam.com/feed/", source: "City AM" },
+    // Reuters Business - European focus
+    { url: "https://feeds.reuters.com/reuters/UKBusinessNews", source: "Reuters UK" },
   ],
   uae: [
     { url: "https://gulfbusiness.com/feed/", source: "Gulf Business" },
-    // Replaced Arabian Business (403) and Zawya (404) with alternatives
+    // MENA PE focused sources
+    { url: "https://www.arabianbusiness.com/feed/", source: "Arabian Business" },
+    { url: "https://wam.ae/en/rss/economy", source: "WAM Economy" },
+    // Zawya alternatives - regional finance
     { url: "https://www.thenationalnews.com/business/rss", source: "The National" },
-    { url: "https://www.khaleejtimes.com/rss/business", source: "Khaleej Times" },
     { url: "https://gulfnews.com/rss/business", source: "Gulf News" },
+    // Entrepreneur Middle East
+    { url: "https://www.entrepreneur.com/en-ae/rss", source: "Entrepreneur ME" },
   ],
   east_usa: [
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
-    // Replaced PitchBook (404) and Institutional Investor (404) with alternatives
     { url: "https://www.buyoutsinsider.com/feed/", source: "Buyouts Insider" },
-    { url: "https://www.axios.com/pro/deals/feed", source: "Axios Pro Deals" },
-    { url: "https://fortune.com/section/finance/feed", source: "Fortune Finance" },
-    { url: "https://feeds.feedburner.com/WSJPrivateEquity", source: "WSJ PE" },
+    // Bloomberg PE/M&A
+    { url: "https://feeds.bloomberg.com/markets/news.rss", source: "Bloomberg" },
+    // Axios Pro Rata (deals newsletter)
+    { url: "https://www.axios.com/newsletters/axios-pro-rata/feed.xml", source: "Axios Pro Rata" },
+    // WSJ PE coverage
+    { url: "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml", source: "WSJ Business" },
+    // Fortune PE/VC
+    { url: "https://fortune.com/feed/fortune-feeds/?id=3230629", source: "Fortune" },
   ],
   west_usa: [
     { url: "https://news.crunchbase.com/feed/", source: "Crunchbase News" },
     { url: "https://techcrunch.com/category/venture/feed/", source: "TechCrunch VC" },
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
-    { url: "https://www.businesswire.com/rss/home/?rss=G1QFDERJXkJeGVtXWg==", source: "BusinessWire PE" },
+    // StrictlyVC - daily VC news
+    { url: "https://www.strictlyvc.com/feed/", source: "StrictlyVC" },
+    // Term Sheet - Fortune's deal newsletter
+    { url: "https://fortune.com/feed/fortune-feeds/?id=3230630", source: "Term Sheet" },
+    // Pitchbook alternatives
+    { url: "https://venturebeat.com/category/deals/feed/", source: "VentureBeat" },
   ],
 };
 
@@ -59,12 +78,16 @@ const PE_SIGNAL_KEYWORDS = {
     "closes at", "closes oversubscribed", "hard cap", "exceeds target",
     "closes €", "closes $", "closes £", "committed capital",
     "fund iii", "fund iv", "fund v", "fund vi", "fund vii", "fund viii",
+    "billion fund", "raises €", "raises $", "raises £", "secures €", "secures $",
+    "commitments of", "capital commitments", "lp commitments",
   ],
   // New fund launches
   new_fund: [
     "launches fund", "launching fund", "new fund", "debut fund", "inaugural fund",
     "announces fund", "raising fund", "begins fundraising", "seeks to raise",
     "targets €", "targets $", "targeting", "fundraising for",
+    "first-time fund", "successor fund", "follow-on fund",
+    "fund launch", "launched a", "launching a",
   ],
   // Deal activity - indicates deployment = need for deal team
   deal: [
@@ -72,24 +95,34 @@ const PE_SIGNAL_KEYWORDS = {
     "invests in", "investment in", "backs", "backed by", "leads round",
     "co-invest", "platform investment", "add-on", "bolt-on",
     "majority stake", "minority stake", "growth investment",
+    "buyout of", "lbo", "leveraged buyout", "management buyout", "mbo",
+    "takes private", "going private", "take-private",
+    "series a", "series b", "series c", "series d", "series e",
+    "funding round", "raises funding", "secures funding",
   ],
   // Exits - indicates capital return = new fund coming
   exit: [
     "exits", "exit from", "sells stake", "sale of", "divests", "divestiture",
     "ipo", "goes public", "secondary sale", "trade sale",
     "returns", "multiple", "realized", "distributions",
+    "exits investment", "portfolio exit", "successful exit",
+    "acquired by", "sold to", "merger with",
   ],
   // Office/Team expansion - direct hiring signal
   expansion: [
     "opens office", "new office", "expands to", "expands into", "enters market",
     "hires", "appoints", "names", "promotes", "joins as", "recruits",
     "builds team", "growing team", "headcount",
+    "opens in", "launching in", "expanding to", "expansion into",
+    "new presence", "establishes presence",
   ],
   // Senior hires at funds - indicates growth
   senior_hire: [
     "partner", "managing director", "md joins", "principal", "operating partner",
     "head of", "chief", "ceo", "cfo", "coo", "cio",
     "investment director", "portfolio director",
+    "joins as partner", "named partner", "promoted to partner",
+    "hires managing director", "appoints head",
   ],
 };
 
@@ -319,7 +352,7 @@ Deno.serve(async (req) => {
     const regionsToFetch = region ? [region] : Object.keys(RSS_FEEDS);
     const allSignals: any[] = [];
     const now = new Date();
-    const cutoffDate = new Date(now.getTime() - 72 * 60 * 60 * 1000); // 72 hours ago (3 days)
+    const cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago for better coverage
 
     for (const reg of regionsToFetch) {
       const feeds = RSS_FEEDS[reg as keyof typeof RSS_FEEDS] || [];
