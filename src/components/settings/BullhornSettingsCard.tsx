@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, Shield, RefreshCw } from "lucide-react";
+import { Settings2, CheckCircle2, XCircle, Loader2, Eye, EyeOff, ExternalLink, Shield, RefreshCw, Brain, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
-import { getApiSettings, saveApiSetting, getBullhornStatus, refreshBullhornTokens } from "@/lib/dataApi";
+import { getApiSettings, saveApiSetting, getBullhornStatus, refreshBullhornTokens, getSkillPatternsStats, clearSkillPatterns } from "@/lib/dataApi";
 
 interface DistListTestResult {
   test: string;
@@ -55,6 +55,12 @@ export function BullhornSettingsCard() {
   const [distListResults, setDistListResults] = useState<DistListTestResponse | null>(null);
   const [showDistListModal, setShowDistListModal] = useState(false);
   const [refreshingToken, setRefreshingToken] = useState(false);
+  
+  // Skills analysis state
+  const [analyzingSkills, setAnalyzingSkills] = useState(false);
+  const [showSkillsModal, setShowSkillsModal] = useState(false);
+  const [skillsAnalysisResult, setSkillsAnalysisResult] = useState<any>(null);
+  const [clearingPatterns, setClearingPatterns] = useState(false);
 
   // Auto-refresh guards (avoid infinite loops)
   const lastAutoRefreshExpiresAtRef = useRef<string | null>(null);
@@ -105,6 +111,18 @@ export function BullhornSettingsCard() {
     // Refetch more frequently to catch auto-refreshes
     refetchInterval: 30000, // Check every 30 seconds
     staleTime: 10000, // Consider data stale after 10 seconds
+  });
+
+  // Skill patterns stats query
+  const { data: skillPatternsStats, refetch: refetchSkillPatterns } = useQuery({
+    queryKey: ['skill-patterns-stats', profileName],
+    queryFn: async () => {
+      if (!profileName) return null;
+      const response = await getSkillPatternsStats(profileName);
+      if (!response.success) return null;
+      return response.data;
+    },
+    enabled: !!profileName,
   });
 
   // Note: We don't load setting values from the API for security
@@ -261,6 +279,74 @@ export function BullhornSettingsCard() {
       });
     } finally {
       setRefreshingToken(false);
+    }
+  };
+
+  const handleAnalyzeSkills = async () => {
+    setAnalyzingSkills(true);
+    setSkillsAnalysisResult(null);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('analyze-bullhorn-skills', {
+        body: { maxContacts: 1000 },
+      });
+      
+      if (error) throw error;
+      
+      setSkillsAnalysisResult(data);
+      setShowSkillsModal(true);
+      refetchSkillPatterns();
+      
+      if (data.success) {
+        toast({
+          title: "Skills Analysis Complete!",
+          description: `Analyzed ${data.data?.contactsAnalyzed || 0} contacts, found ${data.data?.patternsFound || 0} patterns.`,
+        });
+      } else {
+        toast({
+          title: "Analysis Failed",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Analysis Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setAnalyzingSkills(false);
+    }
+  };
+
+  const handleClearPatterns = async () => {
+    if (!profileName) return;
+    setClearingPatterns(true);
+    
+    try {
+      const response = await clearSkillPatterns(profileName);
+      if (response.success) {
+        toast({
+          title: "Patterns Cleared",
+          description: "All learned skill patterns have been removed.",
+        });
+        refetchSkillPatterns();
+      } else {
+        toast({
+          title: "Clear Failed",
+          description: response.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Clear Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setClearingPatterns(false);
     }
   };
 
@@ -444,7 +530,56 @@ export function BullhornSettingsCard() {
             )}
             Test DistList Access
           </Button>
+          <Button
+            variant="outline"
+            onClick={handleAnalyzeSkills}
+            disabled={analyzingSkills || !isConnected}
+            title={!isConnected ? "Connect to Bullhorn first" : "Analyze existing contacts to learn skill patterns"}
+          >
+            {analyzingSkills ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Brain className="mr-2 h-4 w-4" />
+            )}
+            Analyze Skills
+          </Button>
         </div>
+
+        {/* Learned Skill Patterns Info */}
+        {skillPatternsStats && skillPatternsStats.totalPatterns > 0 && (
+          <div className="rounded-lg border bg-primary/5 p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-primary">
+                <Brain className="h-4 w-4" />
+                <span className="font-medium">Learned Skill Patterns</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearPatterns}
+                disabled={clearingPatterns}
+                className="h-7 text-xs text-muted-foreground hover:text-destructive"
+              >
+                {clearingPatterns ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1 h-3 w-3" />
+                )}
+                Clear
+              </Button>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+              <div>Companies: <span className="font-medium text-foreground">{skillPatternsStats.companyPatterns}</span></div>
+              <div>Titles: <span className="font-medium text-foreground">{skillPatternsStats.titlePatterns}</span></div>
+              <div>Locations: <span className="font-medium text-foreground">{skillPatternsStats.locationPatterns}</span></div>
+            </div>
+            {skillPatternsStats.lastAnalyzedAt && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Last analyzed: {new Date(skillPatternsStats.lastAnalyzedAt).toLocaleString()}
+              </div>
+            )}
+          </div>
+        )}
 
         {(bullhornStatusData?.connected || isExpired) && restUrl && (
           <div className={`rounded-lg border p-3 text-sm ${isExpired ? 'bg-destructive/10 border-destructive/30' : 'bg-muted/50'}`}>
@@ -551,6 +686,102 @@ export function BullhornSettingsCard() {
                   {distListResults.accessLevel}
                 </span>
               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Skills Analysis Results Modal */}
+      <Dialog open={showSkillsModal} onOpenChange={setShowSkillsModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Bullhorn Skills Analysis</DialogTitle>
+            <DialogDescription>
+              Analysis of existing contacts to learn skill patterns
+            </DialogDescription>
+          </DialogHeader>
+          
+          {skillsAnalysisResult && (
+            <div className="space-y-4">
+              {/* Summary */}
+              <div className={`rounded-lg border p-4 ${
+                skillsAnalysisResult.success 
+                  ? 'bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800' 
+                  : 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {skillsAnalysisResult.success ? (
+                    <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-red-600" />
+                  )}
+                  <span className="text-lg font-semibold">
+                    {skillsAnalysisResult.success ? 'Analysis Complete' : 'Analysis Failed'}
+                  </span>
+                </div>
+                {skillsAnalysisResult.error && (
+                  <div className="mt-2 text-sm text-red-600">{skillsAnalysisResult.error}</div>
+                )}
+              </div>
+
+              {skillsAnalysisResult.success && skillsAnalysisResult.data && (
+                <>
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-lg border p-3">
+                      <div className="text-2xl font-bold">{skillsAnalysisResult.data.contactsAnalyzed}</div>
+                      <div className="text-sm text-muted-foreground">Contacts Analyzed</div>
+                    </div>
+                    <div className="rounded-lg border p-3">
+                      <div className="text-2xl font-bold">{skillsAnalysisResult.data.patternsFound}</div>
+                      <div className="text-sm text-muted-foreground">Patterns Found</div>
+                    </div>
+                  </div>
+
+                  {/* Pattern Breakdown */}
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div className="rounded border p-2 text-center">
+                      <div className="font-semibold">{skillsAnalysisResult.data.companyPatterns}</div>
+                      <div className="text-xs text-muted-foreground">Company</div>
+                    </div>
+                    <div className="rounded border p-2 text-center">
+                      <div className="font-semibold">{skillsAnalysisResult.data.titlePatterns}</div>
+                      <div className="text-xs text-muted-foreground">Title</div>
+                    </div>
+                    <div className="rounded border p-2 text-center">
+                      <div className="font-semibold">{skillsAnalysisResult.data.locationPatterns}</div>
+                      <div className="text-xs text-muted-foreground">Location</div>
+                    </div>
+                  </div>
+
+                  {/* Top Patterns */}
+                  {skillsAnalysisResult.data.topPatterns && skillsAnalysisResult.data.topPatterns.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="font-medium">Top Patterns</h4>
+                      <div className="space-y-1">
+                        {skillsAnalysisResult.data.topPatterns.map((pattern: any, index: number) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between rounded border p-2 text-sm"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="px-1.5 py-0.5 rounded bg-muted text-xs font-medium">
+                                {pattern.type}
+                              </span>
+                              <span className="font-medium">{pattern.value}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                              <span>{pattern.skillCount} skills</span>
+                              <span>freq: {pattern.frequency}</span>
+                              <span className="text-primary">{Math.round(pattern.confidence * 100)}%</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </DialogContent>

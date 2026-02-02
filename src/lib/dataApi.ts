@@ -182,3 +182,34 @@ export interface TeamDashboardData {
 export async function getTeamDashboardStats(profileName: string) {
   return callDataApi<TeamDashboardData>("get-team-dashboard-stats", profileName);
 }
+
+// === Skill Patterns ===
+export interface SkillPattern {
+  id: string;
+  pattern_type: 'company' | 'title' | 'location';
+  pattern_value: string;
+  skills: string[];
+  frequency: number;
+  confidence: number;
+  last_analyzed_at: string;
+}
+
+export interface SkillPatternsStats {
+  totalPatterns: number;
+  companyPatterns: number;
+  titlePatterns: number;
+  locationPatterns: number;
+  lastAnalyzedAt: string | null;
+}
+
+export async function getSkillPatterns(profileName: string) {
+  return callDataApi<SkillPattern[]>("get-skill-patterns", profileName);
+}
+
+export async function getSkillPatternsStats(profileName: string) {
+  return callDataApi<SkillPatternsStats>("get-skill-patterns-stats", profileName);
+}
+
+export async function clearSkillPatterns(profileName: string) {
+  return callDataApi("clear-skill-patterns", profileName);
+}
