@@ -846,7 +846,8 @@ Deno.serve(async (req) => {
               break
             }
             
-            // Collect person IDs to enrich (get emails)
+            // Process contacts - use email from search if available, otherwise mark for enrichment
+            const contactsWithEmail: ApolloContact[] = []
             const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
             
             // Determine quota limit for this combination's industry
@@ -858,11 +859,11 @@ Deno.serve(async (req) => {
               : 0
             
             for (const person of people) {
-              if (allContacts.length + peopleToEnrich.length >= maxContacts) break
+              if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= maxContacts) break
               
               // For equal distribution: check industry-specific quota
               if (useEqualDistribution && comboIndustry) {
-                if (currentIndustryCount + peopleToEnrich.length >= comboIndustryQuota) {
+                if (currentIndustryCount + contactsWithEmail.length + peopleToEnrich.length >= comboIndustryQuota) {
                   console.log(`Industry ${comboIndustry} quota reached, stopping collection`)
                   break
                 }
@@ -901,106 +902,163 @@ Deno.serve(async (req) => {
               
               if (isDuplicate) continue
               
-              if (person.id) {
+              const personName = person.name || 'Unknown'
+              const personTitle = person.title || 'Unknown'
+              
+              // Build location from search data
+              const locationParts = [person.city, person.state, person.country].filter(Boolean)
+              const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personLocation
+              
+              // Check if email is already available from search results (SAVES 1 CREDIT!)
+              if (person.email) {
+                const emailLower = person.email.toLowerCase()
+                
+                // Check for duplicates and recently used
+                if (usedEmails.has(emailLower)) {
+                  console.log(`Skipping recently used contact: ${personName} (${person.email})`)
+                  continue
+                }
+                if (seenEmails.has(emailLower)) {
+                  console.log(`Skipping duplicate: ${personName} (${person.email})`)
+                  continue
+                }
+                
+                // Add directly without enrichment call
+                const newContact: ApolloContact = {
+                  name: personName,
+                  title: personTitle,
+                  location: fullLocation,
+                  email: person.email,
+                  company: companyName,
+                }
+                
+                contactsWithEmail.push(newContact)
+                seenEmails.add(emailLower)
+                companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+                console.log(`[Direct] Adding contact: ${personName} at ${companyName} (email from search)`)
+              } else if (person.id) {
+                // No email in search results - need to enrich
                 peopleToEnrich.push({
                   id: person.id,
-                  name: person.name || 'Unknown',
-                  title: person.title || 'Unknown',
+                  name: personName,
+                  title: personTitle,
                   company: companyName,
-                  location: personLocation,
+                  location: fullLocation,
                 })
                 companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
               }
             }
-          
-          // Enrich people to get emails using people/match endpoint
-          for (let i = 0; i < peopleToEnrich.length; i += 10) {
-            const batch = peopleToEnrich.slice(i, i + 10)
             
-            for (const personData of batch) {
-              try {
-                const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': apolloApiKey,
-                  },
-                  body: JSON.stringify({ id: personData.id }),
-                })
-                
-                if (enrichResponse.ok) {
-                  const enriched = await enrichResponse.json()
-                  const person = enriched.person || {}
-                  
-                  // Get full details from enrichment response
-                  const email = person.email || ''
-                  const fullName = person.name || (person.first_name && person.last_name 
-                    ? `${person.first_name} ${person.last_name}`.trim() 
-                    : personData.name)
-                  
-                  // Build location from enrichment data
-                  const locationParts = [
-                    person.city,
-                    person.state,
-                    person.country
-                  ].filter(Boolean)
-                  const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
-                  
-                  // Get company from enrichment if available
-                  const companyName = person.organization?.name || personData.company
-                  
-                  // Get job title from enrichment
-                  const jobTitle = person.title || personData.title || 'Unknown'
-                  
-                  // Only add if we got an email and a valid name
-                  if (email && fullName && fullName !== 'Unknown') {
-                    const emailLower = email.toLowerCase()
-                    // Check if this contact was recently used
-                    if (usedEmails.has(emailLower)) {
-                      console.log(`Skipping recently used contact: ${fullName} (${email})`)
-                    } else if (seenEmails.has(emailLower)) {
-                      // Skip duplicates from other search combinations
-                      console.log(`Skipping duplicate from other search: ${fullName} (${email})`)
-                    } else {
-                      const newContact: ApolloContact = {
-                        name: fullName,
-                        title: jobTitle,
-                        location: fullLocation,
-                        email: email,
-                        company: companyName,
-                      }
-                      
-                      // Track per-industry for equal distribution
-                      if (useEqualDistribution && comboIndustry) {
-                        const quota = industryQuotas[comboIndustry] || 0
-                        const currentCount = industryContacts[comboIndustry]?.length || 0
-                        if (currentCount >= quota) {
-                          console.log(`Skipping - industry ${comboIndustry} quota full (${currentCount}/${quota})`)
-                          continue
-                        }
-                        industryContacts[comboIndustry].push(newContact)
-                        console.log(`Adding contact for ${comboIndustry}: ${fullName} at ${companyName} (${currentCount + 1}/${quota})`)
-                      } else {
-                        console.log(`Adding contact: ${fullName} at ${companyName}`)
-                      }
-                      
-                      seenEmails.add(emailLower)
-                      allContacts.push(newContact)
-                    }
-                  } else {
-                    console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
-                  }
-                } else {
-                  console.log('Enrichment failed for', personData.name)
+            // Add contacts that had emails directly from search
+            for (const contact of contactsWithEmail) {
+              // Track per-industry for equal distribution
+              if (useEqualDistribution && comboIndustry) {
+                const quota = industryQuotas[comboIndustry] || 0
+                const currentCount = industryContacts[comboIndustry]?.length || 0
+                if (currentCount >= quota) {
+                  console.log(`Skipping - industry ${comboIndustry} quota full (${currentCount}/${quota})`)
+                  continue
                 }
+                industryContacts[comboIndustry].push(contact)
+                console.log(`Adding contact for ${comboIndustry}: ${contact.name} at ${contact.company} (${currentCount + 1}/${quota})`)
+              }
+              allContacts.push(contact)
+            }
+            
+            console.log(`Found ${contactsWithEmail.length} contacts with email from search, ${peopleToEnrich.length} need enrichment`)
+          
+            // Only enrich people who didn't have emails in search results (FALLBACK)
+            if (peopleToEnrich.length > 0) {
+              console.log(`Enriching ${peopleToEnrich.length} contacts to get emails...`)
+              
+              for (let i = 0; i < peopleToEnrich.length; i += 10) {
+                const batch = peopleToEnrich.slice(i, i + 10)
                 
-                // Small delay between enrichment calls
-                await new Promise(resolve => setTimeout(resolve, 100))
-              } catch (enrichError) {
-                console.error('Enrichment error for', personData.name, enrichError)
+                for (const personData of batch) {
+                  try {
+                    const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apolloApiKey,
+                      },
+                      body: JSON.stringify({ id: personData.id }),
+                    })
+                    
+                    if (enrichResponse.ok) {
+                      const enriched = await enrichResponse.json()
+                      const person = enriched.person || {}
+                      
+                      // Get full details from enrichment response
+                      const email = person.email || ''
+                      const fullName = person.name || (person.first_name && person.last_name 
+                        ? `${person.first_name} ${person.last_name}`.trim() 
+                        : personData.name)
+                      
+                      // Build location from enrichment data
+                      const locationParts = [
+                        person.city,
+                        person.state,
+                        person.country
+                      ].filter(Boolean)
+                      const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+                      
+                      // Get company from enrichment if available
+                      const companyName = person.organization?.name || personData.company
+                      
+                      // Get job title from enrichment
+                      const jobTitle = person.title || personData.title || 'Unknown'
+                      
+                      // Only add if we got an email and a valid name
+                      if (email && fullName && fullName !== 'Unknown') {
+                        const emailLower = email.toLowerCase()
+                        // Check if this contact was recently used
+                        if (usedEmails.has(emailLower)) {
+                          console.log(`Skipping recently used contact: ${fullName} (${email})`)
+                        } else if (seenEmails.has(emailLower)) {
+                          // Skip duplicates from other search combinations
+                          console.log(`Skipping duplicate from other search: ${fullName} (${email})`)
+                        } else {
+                          const newContact: ApolloContact = {
+                            name: fullName,
+                            title: jobTitle,
+                            location: fullLocation,
+                            email: email,
+                            company: companyName,
+                          }
+                          
+                          // Track per-industry for equal distribution
+                          if (useEqualDistribution && comboIndustry) {
+                            const quota = industryQuotas[comboIndustry] || 0
+                            const currentCount = industryContacts[comboIndustry]?.length || 0
+                            if (currentCount >= quota) {
+                              console.log(`Skipping - industry ${comboIndustry} quota full (${currentCount}/${quota})`)
+                              continue
+                            }
+                            industryContacts[comboIndustry].push(newContact)
+                            console.log(`[Enriched] Adding contact for ${comboIndustry}: ${fullName} at ${companyName} (${currentCount + 1}/${quota})`)
+                          } else {
+                            console.log(`[Enriched] Adding contact: ${fullName} at ${companyName}`)
+                          }
+                          
+                          seenEmails.add(emailLower)
+                          allContacts.push(newContact)
+                        }
+                      } else {
+                        console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
+                      }
+                    } else {
+                      console.log('Enrichment failed for', personData.name)
+                    }
+                    
+                    // Small delay between enrichment calls
+                    await new Promise(resolve => setTimeout(resolve, 100))
+                  } catch (enrichError) {
+                    console.error('Enrichment error for', personData.name, enrichError)
+                  }
+                }
               }
             }
-          }
           } else {
             const errorText = await apolloResponse.text()
             console.error('Apollo API error:', apolloResponse.status, errorText)
@@ -1091,11 +1149,12 @@ Deno.serve(async (req) => {
                 break
               }
               
-              // Process people with strict company matching
+              // Process people with strict company matching - use email from search if available
+              const contactsWithEmail: ApolloContact[] = []
               const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
               
               for (const person of people) {
-                if (allContacts.length + peopleToEnrich.length >= maxContacts) break
+                if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= maxContacts) break
                 
                 const personCompanyName = person.organization?.name || person.organization_name || 'Unknown'
                 const personLocation = person.city || person.state || person.country || 'Unknown'
@@ -1116,68 +1175,95 @@ Deno.serve(async (req) => {
                                    seenEmails.has((person.email || '').toLowerCase())
                 if (isDuplicate) continue
                 
-                if (person.id) {
+                const personName = person.name || 'Unknown'
+                const personTitle = person.title || 'Unknown'
+                const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personLocation
+                
+                // Check if email is already available from search results (SAVES 1 CREDIT!)
+                if (person.email) {
+                  const emailLower = person.email.toLowerCase()
+                  if (!usedEmails.has(emailLower) && !seenEmails.has(emailLower)) {
+                    contactsWithEmail.push({
+                      name: personName,
+                      title: personTitle,
+                      location: fullLocation,
+                      email: person.email,
+                      company: personCompanyName,
+                    })
+                    seenEmails.add(emailLower)
+                    console.log(`[Retry Direct] Adding: ${personName} at ${personCompanyName} (email from search)`)
+                  }
+                } else if (person.id) {
                   peopleToEnrich.push({
                     id: person.id,
-                    name: person.name || 'Unknown',
-                    title: person.title || 'Unknown',
+                    name: personName,
+                    title: personTitle,
                     company: personCompanyName,
-                    location: personLocation,
+                    location: fullLocation,
                   })
                 }
               }
               
-              console.log(`Found ${peopleToEnrich.length} new candidates from target company`)
-              
-              // Enrich people to get emails
-              for (let i = 0; i < peopleToEnrich.length; i += 10) {
+              // Add contacts that had emails directly from search
+              for (const contact of contactsWithEmail) {
                 if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
-                
-                const batch = peopleToEnrich.slice(i, i + 10)
-                
-                for (const personData of batch) {
+                allContacts.push(contact)
+              }
+              
+              console.log(`[Retry] Found ${contactsWithEmail.length} with email from search, ${peopleToEnrich.length} need enrichment`)
+              
+              // Only enrich people who didn't have emails in search results (FALLBACK)
+              if (peopleToEnrich.length > 0 && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
+                for (let i = 0; i < peopleToEnrich.length; i += 10) {
                   if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
                   
-                  try {
-                    const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': apolloApiKey,
-                      },
-                      body: JSON.stringify({ id: personData.id }),
-                    })
+                  const batch = peopleToEnrich.slice(i, i + 10)
+                  
+                  for (const personData of batch) {
+                    if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
                     
-                    if (enrichResponse.ok) {
-                      const enriched = await enrichResponse.json()
-                      const person = enriched.person || {}
+                    try {
+                      const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'x-api-key': apolloApiKey,
+                        },
+                        body: JSON.stringify({ id: personData.id }),
+                      })
                       
-                      const email = person.email || ''
-                      const fullName = person.name || personData.name
-                      const companyName = person.organization?.name || personData.company
-                      const jobTitle = person.title || personData.title || 'Unknown'
-                      const locationParts = [person.city, person.state, person.country].filter(Boolean)
-                      const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
-                      
-                      if (email && fullName && fullName !== 'Unknown') {
-                        const emailLower = email.toLowerCase()
-                        if (!usedEmails.has(emailLower) && !seenEmails.has(emailLower)) {
-                          seenEmails.add(emailLower)
-                          allContacts.push({
-                            name: fullName,
-                            title: jobTitle,
-                            location: fullLocation,
-                            email: email,
-                            company: companyName,
-                          })
-                          console.log(`[Retry] Added: ${fullName} at ${companyName} (total: ${allContacts.length})`)
+                      if (enrichResponse.ok) {
+                        const enriched = await enrichResponse.json()
+                        const person = enriched.person || {}
+                        
+                        const email = person.email || ''
+                        const fullName = person.name || personData.name
+                        const companyName = person.organization?.name || personData.company
+                        const jobTitle = person.title || personData.title || 'Unknown'
+                        const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                        const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+                        
+                        if (email && fullName && fullName !== 'Unknown') {
+                          const emailLower = email.toLowerCase()
+                          if (!usedEmails.has(emailLower) && !seenEmails.has(emailLower)) {
+                            seenEmails.add(emailLower)
+                            allContacts.push({
+                              name: fullName,
+                              title: jobTitle,
+                              location: fullLocation,
+                              email: email,
+                              company: companyName,
+                            })
+                            console.log(`[Retry Enriched] Added: ${fullName} at ${companyName} (total: ${allContacts.length})`)
+                          }
                         }
                       }
+                      
+                      await new Promise(resolve => setTimeout(resolve, 100))
+                    } catch (enrichError) {
+                      console.error('Retry enrichment error:', enrichError)
                     }
-                    
-                    await new Promise(resolve => setTimeout(resolve, 100))
-                  } catch (enrichError) {
-                    console.error('Retry enrichment error:', enrichError)
                   }
                 }
               }
