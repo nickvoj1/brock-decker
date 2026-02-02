@@ -5,6 +5,96 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 }
 
+// ============ AI-Powered Signal Analysis ============
+interface AISignalAnalysis {
+  companyName: string
+  companyVariants: string[]  // Alternative names, abbreviations
+  industry: string
+  prioritizedCategories: string[]  // Ordered by relevance
+  searchKeywords: string[]  // Industry/context keywords for Apollo
+  confidence: number
+}
+
+async function analyzeSignalWithAI(signal: {
+  title: string
+  description?: string | null
+  company?: string | null
+  signal_type?: string | null
+  region?: string | null
+  amount?: number | null
+}): Promise<AISignalAnalysis | null> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')
+  if (!lovableApiKey) {
+    console.log('LOVABLE_API_KEY not set, skipping AI analysis')
+    return null
+  }
+
+  const prompt = `Analyze this business signal and extract information for finding hiring contacts at the company.
+
+SIGNAL:
+Title: ${signal.title}
+${signal.description ? `Description: ${signal.description}` : ''}
+${signal.company ? `Company (from source): ${signal.company}` : ''}
+${signal.signal_type ? `Signal Type: ${signal.signal_type}` : ''}
+${signal.region ? `Region: ${signal.region}` : ''}
+${signal.amount ? `Amount: ${signal.amount}` : ''}
+
+TASK: Return a JSON object with:
+1. "companyName": The exact company name mentioned (clean, no suffixes like Ltd/Inc unless part of brand)
+2. "companyVariants": Array of alternative names people might use (abbreviations, common names, parent company). Example: ["McKinsey", "McKinsey & Company", "McKinsey & Co"]
+3. "industry": The company's industry (e.g., "Private Equity", "Technology", "Healthcare", "Financial Services")
+4. "prioritizedCategories": Order these 5 categories by relevance to the signal type (most likely to hire first):
+   - "HR & Recruiting" (always relevant for hiring)
+   - "Senior Leadership" (for major expansions, fundraises)
+   - "Finance & Investment" (for funding rounds, M&A)
+   - "Legal & Compliance" (for acquisitions, regulatory news)
+   - "Strategy & Operations" (for expansions, new markets)
+5. "searchKeywords": 2-3 industry keywords to help find the company on Apollo (e.g., ["private equity", "investment management"])
+6. "confidence": 0-1 score for how confident you are in the company identification
+
+For a fund close or fundraise, prioritize: Finance → Leadership → HR
+For hiring/expansion news, prioritize: HR → Leadership → Strategy
+For M&A or acquisition, prioritize: Legal → Leadership → Finance
+
+Return ONLY valid JSON, no markdown or explanation.`
+
+  try {
+    const response = await fetch('https://api.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+      }),
+    })
+
+    if (!response.ok) {
+      console.error('AI analysis failed:', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content || ''
+    
+    // Parse JSON from response (handle markdown code blocks)
+    let jsonStr = content.trim()
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```$/g, '').trim()
+    }
+    
+    const analysis = JSON.parse(jsonStr) as AISignalAnalysis
+    console.log('AI Signal Analysis:', JSON.stringify(analysis, null, 2))
+    return analysis
+  } catch (err) {
+    console.error('AI analysis error:', err)
+    return null
+  }
+}
+
 // ============ All Role Categories ============
 const ROLE_CATEGORIES: Record<string, string[]> = {
   'HR & Recruiting': [
@@ -34,8 +124,8 @@ const ROLE_CATEGORIES: Record<string, string[]> = {
   ],
 }
 
-// All categories in priority order for TA search
-const CATEGORY_PRIORITY = [
+// Default category priority (used if AI analysis fails)
+const DEFAULT_CATEGORY_PRIORITY = [
   'HR & Recruiting',
   'Senior Leadership', 
   'Finance & Investment',
@@ -414,10 +504,41 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Extract company name - try signal.company first, then parse from title
-    let targetCompany = signal.company || ''
-    if (!targetCompany) {
-      targetCompany = extractCompanyFromTitle(signal.title)
+    // ============ AI-Powered Signal Analysis ============
+    console.log('Running AI analysis on signal...')
+    const aiAnalysis = await analyzeSignalWithAI({
+      title: signal.title,
+      description: signal.description,
+      company: signal.company,
+      signal_type: signal.signal_type,
+      region: signal.region,
+      amount: signal.amount,
+    })
+
+    // Determine target company - prefer AI analysis, fallback to regex extraction
+    let targetCompany = ''
+    let companyVariants: string[] = []
+    let categoryPriority = DEFAULT_CATEGORY_PRIORITY
+    let searchKeywords: string[] = []
+
+    if (aiAnalysis && aiAnalysis.confidence >= 0.5) {
+      targetCompany = aiAnalysis.companyName
+      companyVariants = aiAnalysis.companyVariants || []
+      categoryPriority = aiAnalysis.prioritizedCategories?.length > 0 
+        ? aiAnalysis.prioritizedCategories 
+        : DEFAULT_CATEGORY_PRIORITY
+      searchKeywords = aiAnalysis.searchKeywords || []
+      console.log(`AI identified company: "${targetCompany}" (confidence: ${aiAnalysis.confidence})`)
+      console.log(`AI company variants: ${companyVariants.join(', ')}`)
+      console.log(`AI prioritized categories: ${categoryPriority.join(' → ')}`)
+      console.log(`AI search keywords: ${searchKeywords.join(', ')}`)
+    } else {
+      // Fallback to regex-based extraction
+      targetCompany = signal.company || ''
+      if (!targetCompany) {
+        targetCompany = extractCompanyFromTitle(signal.title)
+      }
+      console.log(`Regex extracted company: "${targetCompany}"`)
     }
     
     if (!targetCompany) {
@@ -439,20 +560,32 @@ Deno.serve(async (req) => {
 
     console.log(`Region: ${region}, Locations: ${cityLocations.join(', ')}`)
 
-    // Build company name variants
-    const companyVariants = [targetCompany]
+    // Build company name variants (combine AI variants + regex variants)
+    const allCompanyVariants = new Set<string>([targetCompany])
+    
+    // Add AI-suggested variants
+    for (const variant of companyVariants) {
+      if (variant && variant.trim()) {
+        allCompanyVariants.add(variant.trim())
+      }
+    }
+    
+    // Add regex-derived variants
     const strippedCompany = stripCompanySuffixes(targetCompany)
     if (strippedCompany !== normalizeCompanyName(targetCompany)) {
-      companyVariants.push(strippedCompany)
+      allCompanyVariants.add(strippedCompany)
     }
     const titleCompany = extractCompanyFromTitle(signal.title)
     if (titleCompany && normalizeCompanyName(titleCompany) !== normalizeCompanyName(targetCompany)) {
-      companyVariants.push(titleCompany)
+      allCompanyVariants.add(titleCompany)
     }
+
+    const uniqueVariants = Array.from(allCompanyVariants)
+    console.log(`All company variants to try: ${uniqueVariants.join(', ')}`)
 
     // Build search strategies (company variant × location level)
     const strategies: SearchStrategy[] = []
-    for (const company of companyVariants) {
+    for (const company of uniqueVariants) {
       strategies.push({ name: `${company}_cities`, company, locations: cityLocations })
       strategies.push({ name: `${company}_countries`, company, locations: countryLocations })
     }
@@ -468,11 +601,15 @@ Deno.serve(async (req) => {
     const categoriesWithResults: string[] = []
     let usedStrategy = 'none'
 
-    console.log(`Will try ${CATEGORY_PRIORITY.length} role categories across ${strategies.length} strategies`)
+    console.log(`Will try ${categoryPriority.length} role categories across ${strategies.length} strategies`)
 
     // Try EVERY category, not just until we have enough
-    for (const categoryName of CATEGORY_PRIORITY) {
+    for (const categoryName of categoryPriority) {
       const roles = ROLE_CATEGORIES[categoryName]
+      if (!roles) {
+        console.log(`Skipping unknown category: ${categoryName}`)
+        continue
+      }
       categoriesTried.push(categoryName)
       let categoryFoundContacts = false
 
