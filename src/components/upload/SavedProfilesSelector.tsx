@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { User, Clock, ChevronDown, Trash2, Search } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { getCandidateProfiles, deleteCandidateProfile } from "@/lib/dataApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -41,24 +41,16 @@ export function SavedProfilesSelector({
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchProfiles = async () => {
+    if (!profileName) return;
+    
     setIsLoading(true);
     try {
-      let query = supabase
-        .from("candidate_profiles")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const result = await getCandidateProfiles(profileName);
       
-      // Filter by current user profile
-      if (profileName) {
-        query = query.eq("profile_name", profileName);
-      }
-      
-      const { data, error } = await query;
-
-      if (error) throw error;
+      if (!result.success) throw new Error(result.error);
       
       // Transform data to match our interface
-      const transformedData: SavedProfile[] = (data || []).map((p) => ({
+      const transformedData: SavedProfile[] = (result.data || []).map((p: any) => ({
         id: p.id,
         profile_name: p.profile_name,
         candidate_id: p.candidate_id,
@@ -82,19 +74,18 @@ export function SavedProfilesSelector({
     }
   };
 
+  // Fetch on mount and when profile changes
   useEffect(() => {
     fetchProfiles();
   }, [profileName]);
 
   const handleDelete = async (e: React.MouseEvent, profileId: string) => {
     e.stopPropagation();
+    if (!profileName) return;
+    
     try {
-      const { error } = await supabase
-        .from("candidate_profiles")
-        .delete()
-        .eq("id", profileId);
-
-      if (error) throw error;
+      const result = await deleteCandidateProfile(profileName, profileId);
+      if (!result.success) throw new Error(result.error);
       setProfiles((prev) => prev.filter((p) => p.id !== profileId));
     } catch (error) {
       console.error("Error deleting profile:", error);
