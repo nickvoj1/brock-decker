@@ -44,19 +44,44 @@ const REGION_CONFIG = {
 };
 
 const SIGNAL_TYPE_ICONS: Record<string, React.ReactNode> = {
+  fund_close: <DollarSign className="h-4 w-4" />,
+  new_fund: <TrendingUp className="h-4 w-4" />,
+  deal: <Briefcase className="h-4 w-4" />,
+  exit: <TrendingUp className="h-4 w-4" />,
+  expansion: <Globe className="h-4 w-4" />,
+  senior_hire: <Users className="h-4 w-4" />,
+  // Legacy types for backward compatibility
   funding: <DollarSign className="h-4 w-4" />,
   hiring: <Users className="h-4 w-4" />,
-  expansion: <Globe className="h-4 w-4" />,
   c_suite: <Briefcase className="h-4 w-4" />,
   team_growth: <TrendingUp className="h-4 w-4" />,
 };
 
 const SIGNAL_TYPE_COLORS: Record<string, string> = {
+  fund_close: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  new_fund: "bg-blue-500/10 text-blue-600 border-blue-500/20",
+  deal: "bg-purple-500/10 text-purple-600 border-purple-500/20",
+  exit: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+  expansion: "bg-cyan-500/10 text-cyan-600 border-cyan-500/20",
+  senior_hire: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+  // Legacy
   funding: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
   hiring: "bg-blue-500/10 text-blue-600 border-blue-500/20",
-  expansion: "bg-purple-500/10 text-purple-600 border-purple-500/20",
   c_suite: "bg-amber-500/10 text-amber-600 border-amber-500/20",
   team_growth: "bg-cyan-500/10 text-cyan-600 border-cyan-500/20",
+};
+
+const SIGNAL_TYPE_LABELS: Record<string, string> = {
+  fund_close: "Fund Close",
+  new_fund: "New Fund",
+  deal: "Deal/Investment",
+  exit: "Exit",
+  expansion: "Expansion",
+  senior_hire: "Senior Hire",
+  funding: "Funding",
+  hiring: "Hiring",
+  c_suite: "C-Suite",
+  team_growth: "Team Growth",
 };
 
 function formatAmount(amount: number | null, currency: string | null): string {
@@ -73,7 +98,9 @@ function getIntentStars(signal: Signal): number {
   if (signal.is_high_intent) stars += 2;
   if (signal.amount && signal.amount >= 100) stars += 1;
   if (signal.amount && signal.amount >= 500) stars += 1;
-  if (signal.signal_type === "c_suite") stars += 1;
+  // Fund closes and new funds get extra star
+  if (signal.signal_type === "fund_close" || signal.signal_type === "new_fund") stars += 1;
+  if (signal.signal_type === "senior_hire" || signal.signal_type === "expansion") stars += 1;
   return Math.min(stars, 5);
 }
 
@@ -355,7 +382,7 @@ function SignalCard({ signal, onDismiss, onTAContacts, onCVMatches, onBullhornNo
                   
                   {signal.signal_type && (
                     <Badge className={`text-xs ${SIGNAL_TYPE_COLORS[signal.signal_type]}`}>
-                      {signal.signal_type.replace("_", " ")}
+                      {SIGNAL_TYPE_LABELS[signal.signal_type] || signal.signal_type.replace("_", " ")}
                     </Badge>
                   )}
                   
