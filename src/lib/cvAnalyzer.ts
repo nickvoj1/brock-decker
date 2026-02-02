@@ -417,144 +417,124 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
   const locationScores = new Map<string, number>();
   const countryScores = new Map<string, number>();
   const reasoning: string[] = [];
-  
-  // Track primary locations (from recent work history) separately
   const primaryLocations = new Set<string>();
-  let foundWorkHistoryLocations = false;
   
-  // 1. HIGHEST PRIORITY: Extract from recent work history (top 3 jobs)
-  // These are the PRIMARY suggestions based on where the candidate actually worked
+  // 1. HIGHEST PRIORITY: Candidate's current location from CV
+  // This is the PRIMARY suggestion - where the candidate is actually based
+  let foundPrimaryLocation = false;
+  
+  if (candidate.location) {
+    const locLower = candidate.location.toLowerCase();
+    
+    // Check for US state patterns (city, state like "Chelsea, MA" or "Boston, Massachusetts")
+    const usStateMatch = locLower.match(/,?\s*(ma|ny|ca|tx|fl|il|pa|oh|ga|nc|nj|va|wa|az|co|mi|tn|md|wi|mn|mo|sc|al|la|ky|or|ok|ct|ut|ia|nv|ar|ms|ks|nm|ne|wv|id|hi|nh|me|ri|mt|de|sd|nd|ak|vt|dc|wy|massachusetts|california|texas|florida|illinois|pennsylvania|ohio|georgia|virginia|washington|arizona|colorado|michigan|tennessee|maryland|wisconsin|minnesota|missouri|oregon|connecticut|utah|iowa|nevada|arkansas|mississippi|kansas|nebraska|idaho|hawaii|maine|montana|delaware|wyoming|vermont)\b/i);
+    
+    if (usStateMatch) {
+      countryScores.set("United States", 15);
+      const state = usStateMatch[1].toLowerCase();
+      
+      // Map states to nearest major city hubs
+      const stateToCity: Record<string, { city: string; value: string }> = {
+        "ma": { city: "Boston", value: "boston" },
+        "massachusetts": { city: "Boston", value: "boston" },
+        "ny": { city: "New York", value: "new-york" },
+        "ca": { city: "San Francisco", value: "san-francisco" },
+        "california": { city: "San Francisco", value: "san-francisco" },
+        "tx": { city: "Houston", value: "houston" },
+        "texas": { city: "Houston", value: "houston" },
+        "fl": { city: "Miami", value: "miami" },
+        "florida": { city: "Miami", value: "miami" },
+        "il": { city: "Chicago", value: "chicago" },
+        "illinois": { city: "Chicago", value: "chicago" },
+        "ga": { city: "Atlanta", value: "atlanta" },
+        "georgia": { city: "Atlanta", value: "atlanta" },
+        "co": { city: "Denver", value: "denver" },
+        "colorado": { city: "Denver", value: "denver" },
+        "wa": { city: "Seattle", value: "seattle" },
+        "washington": { city: "Seattle", value: "seattle" },
+        "dc": { city: "Washington DC", value: "washington-dc" },
+        "az": { city: "Phoenix", value: "phoenix" },
+        "arizona": { city: "Phoenix", value: "phoenix" },
+        "pa": { city: "Philadelphia", value: "philadelphia" },
+        "pennsylvania": { city: "Philadelphia", value: "philadelphia" },
+        "mi": { city: "Detroit", value: "detroit" },
+        "michigan": { city: "Detroit", value: "detroit" },
+        "mn": { city: "Minneapolis", value: "minneapolis" },
+        "minnesota": { city: "Minneapolis", value: "minneapolis" },
+        "nc": { city: "Charlotte", value: "charlotte" },
+      };
+      
+      const mapping = stateToCity[state];
+      if (mapping) {
+        locationScores.set(mapping.value, 15);
+        primaryLocations.add(mapping.value);
+        reasoning.push(`${mapping.city} area (${candidate.location})`);
+        foundPrimaryLocation = true;
+      } else {
+        // Unknown US state - suggest major US hubs
+        ["new-york", "boston", "chicago", "san-francisco", "los-angeles"].forEach((city, i) => {
+          locationScores.set(city, 10 - i);
+        });
+        primaryLocations.add("new-york");
+        reasoning.push(`US-based (${candidate.location})`);
+        foundPrimaryLocation = true;
+      }
+    } else {
+      // Try standard location extraction for non-US locations
+      const { locations, countries } = extractLocationsFromText(candidate.location);
+      if (locations.length > 0) {
+        locations.forEach(loc => {
+          locationScores.set(loc, 15); // Highest weight for CV location
+          primaryLocations.add(loc);
+        });
+        countries.forEach(country => {
+          countryScores.set(country, 15);
+        });
+        reasoning.push(`Based in ${candidate.location}`);
+        foundPrimaryLocation = true;
+      } else if (countries.length > 0) {
+        countries.forEach(country => {
+          countryScores.set(country, 15);
+        });
+      }
+    }
+  }
+  
+  // 2. SECONDARY: Extract from work history (only if no primary location found, or as supplement)
   const recentJobs = (candidate.work_history || []).slice(0, 3);
   recentJobs.forEach((job, index) => {
-    // Very high recency weight: most recent = 10x, second = 8x, third = 6x
-    const recencyWeight = 10 - index * 2;
-    
-    // Check company name for location hints
-    const companyLocations = extractLocationsFromText(job.company);
-    companyLocations.locations.forEach(loc => {
-      locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
-      primaryLocations.add(loc);
-      foundWorkHistoryLocations = true;
-    });
-    companyLocations.countries.forEach(country => {
-      countryScores.set(country, (countryScores.get(country) || 0) + recencyWeight);
-    });
+    const recencyWeight = foundPrimaryLocation ? (3 - index) : (8 - index * 2);
     
     // Check title for regional hints (e.g., "EMEA Director", "APAC Head")
     const titleLower = job.title.toLowerCase();
     if (titleLower.includes("emea") || titleLower.includes("europe")) {
       ["london", "frankfurt", "paris", "amsterdam"].forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
-        primaryLocations.add(loc);
-        foundWorkHistoryLocations = true;
+        if (!primaryLocations.has(loc)) {
+          locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+        }
       });
-      if (index === 0) reasoning.push(`${job.title} suggests European market focus`);
+      if (index === 0) reasoning.push(`${job.title} suggests European focus`);
     }
     if (titleLower.includes("apac") || titleLower.includes("asia")) {
       ["hong-kong", "singapore", "tokyo", "sydney"].forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
-        primaryLocations.add(loc);
-        foundWorkHistoryLocations = true;
+        if (!primaryLocations.has(loc)) {
+          locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+        }
       });
-      if (index === 0) reasoning.push(`${job.title} suggests Asia Pacific market focus`);
+      if (index === 0) reasoning.push(`${job.title} suggests APAC focus`);
     }
     if (titleLower.includes("americas") || titleLower.includes("latam")) {
       ["new-york", "sao-paulo", "mexico-city"].forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
-        primaryLocations.add(loc);
-        foundWorkHistoryLocations = true;
+        if (!primaryLocations.has(loc)) {
+          locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+        }
       });
-      if (index === 0) reasoning.push(`${job.title} suggests Americas market focus`);
-    }
-    
-    if (companyLocations.locations.length > 0 && index < 2) {
-      reasoning.push(`Recent role at ${job.company}`);
+      if (index === 0) reasoning.push(`${job.title} suggests Americas focus`);
     }
   });
-  
-  // 2. Extract from current location field - THIS IS PRIMARY when work history doesn't have locations
-  let detectedUSState = false;
-  if (candidate.location) {
-    const { locations, countries } = extractLocationsFromText(candidate.location);
-    
-    // Check for US state abbreviations FIRST (city, state pattern like "Chelsea, MA" or "Boston, MA")
-    const usStatePattern = /,?\s*(ma|ny|ca|tx|fl|il|pa|oh|ga|nc|nj|va|wa|az|co|mi|tn|md|wi|mn|mo|sc|al|la|ky|or|ok|ct|ut|ia|nv|ar|ms|ks|nm|ne|wv|id|hi|nh|me|ri|mt|de|sd|nd|ak|vt|dc|wy|massachusetts|california|texas|florida|illinois|pennsylvania|ohio|georgia|virginia|washington|arizona|colorado|michigan|tennessee|maryland|wisconsin|minnesota|missouri|oregon|connecticut|utah|iowa|nevada|arkansas|mississippi|kansas|nebraska|idaho|hawaii|maine|montana|delaware|wyoming|vermont)\b/i;
-    
-    if (usStatePattern.test(candidate.location)) {
-      detectedUSState = true;
-      // Add high weight for United States
-      countryScores.set("United States", (countryScores.get("United States") || 0) + 10);
-      
-      // Check which specific state/city to suggest appropriate nearby hubs
-      const locLower = candidate.location.toLowerCase();
-      if (/\b(ma|massachusetts|boston)\b/.test(locLower)) {
-        locationScores.set("boston", (locationScores.get("boston") || 0) + 10);
-        primaryLocations.add("boston");
-        reasoning.push(`Boston area based on location: ${candidate.location}`);
-      } else if (/\b(ny|new york)\b/.test(locLower)) {
-        locationScores.set("new-york", (locationScores.get("new-york") || 0) + 10);
-        primaryLocations.add("new-york");
-        reasoning.push(`New York area based on location: ${candidate.location}`);
-      } else if (/\b(ca|california|sf|san francisco|la|los angeles)\b/.test(locLower)) {
-        locationScores.set("san-francisco", (locationScores.get("san-francisco") || 0) + 8);
-        locationScores.set("los-angeles", (locationScores.get("los-angeles") || 0) + 7);
-        primaryLocations.add("san-francisco");
-        primaryLocations.add("los-angeles");
-        reasoning.push(`California based on location: ${candidate.location}`);
-      } else if (/\b(tx|texas|houston|dallas|austin)\b/.test(locLower)) {
-        locationScores.set("houston", (locationScores.get("houston") || 0) + 8);
-        locationScores.set("dallas", (locationScores.get("dallas") || 0) + 7);
-        locationScores.set("austin", (locationScores.get("austin") || 0) + 6);
-        primaryLocations.add("houston");
-        reasoning.push(`Texas based on location: ${candidate.location}`);
-      } else if (/\b(il|illinois|chicago)\b/.test(locLower)) {
-        locationScores.set("chicago", (locationScores.get("chicago") || 0) + 10);
-        primaryLocations.add("chicago");
-        reasoning.push(`Chicago area based on location: ${candidate.location}`);
-      } else if (/\b(dc|washington)\b/.test(locLower)) {
-        locationScores.set("washington-dc", (locationScores.get("washington-dc") || 0) + 10);
-        primaryLocations.add("washington-dc");
-        reasoning.push(`DC area based on location: ${candidate.location}`);
-      } else if (/\b(fl|florida|miami)\b/.test(locLower)) {
-        locationScores.set("miami", (locationScores.get("miami") || 0) + 10);
-        primaryLocations.add("miami");
-        reasoning.push(`Florida based on location: ${candidate.location}`);
-      } else if (/\b(ga|georgia|atlanta)\b/.test(locLower)) {
-        locationScores.set("atlanta", (locationScores.get("atlanta") || 0) + 10);
-        primaryLocations.add("atlanta");
-        reasoning.push(`Atlanta area based on location: ${candidate.location}`);
-      } else if (/\b(co|colorado|denver)\b/.test(locLower)) {
-        locationScores.set("denver", (locationScores.get("denver") || 0) + 10);
-        primaryLocations.add("denver");
-        reasoning.push(`Denver area based on location: ${candidate.location}`);
-      } else if (/\b(wa|seattle)\b/.test(locLower)) {
-        locationScores.set("seattle", (locationScores.get("seattle") || 0) + 10);
-        primaryLocations.add("seattle");
-        reasoning.push(`Seattle area based on location: ${candidate.location}`);
-      } else {
-        // Generic US - suggest major hubs
-        reasoning.push(`US-based candidate (${candidate.location})`);
-      }
-      
-      foundWorkHistoryLocations = true; // Treat as primary
-    } else {
-      // Standard location extraction
-      const locationWeight = foundWorkHistoryLocations ? 3 : 10;
-      locations.forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + locationWeight);
-        if (!foundWorkHistoryLocations) primaryLocations.add(loc);
-      });
-      countries.forEach(country => {
-        countryScores.set(country, (countryScores.get(country) || 0) + locationWeight);
-      });
-      if (locations.length > 0) {
-        reasoning.push(`Current location: ${candidate.location}`);
-      }
-    }
-  }
-  
-  // 3. Extract from candidate summary (lower weight) - skip if we already have strong US signal
-  if (candidate.summary && !detectedUSState) {
+
+  // 3. Extract from candidate summary (lower weight, supplementary)
+  if (candidate.summary && !foundPrimaryLocation) {
     const { locations, countries } = extractLocationsFromText(candidate.summary);
     locations.forEach((loc) => {
       locationScores.set(loc, (locationScores.get(loc) || 0) + 2);
