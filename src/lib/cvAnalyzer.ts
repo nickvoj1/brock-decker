@@ -418,89 +418,98 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
   const countryScores = new Map<string, number>();
   const reasoning: string[] = [];
   
-  // 1. Extract from current location (highest weight)
+  // Track primary locations (from recent work history) separately
+  const primaryLocations = new Set<string>();
+  
+  // 1. HIGHEST PRIORITY: Extract from recent work history (top 3 jobs)
+  // These are the PRIMARY suggestions based on where the candidate actually worked
+  const recentJobs = (candidate.work_history || []).slice(0, 3);
+  recentJobs.forEach((job, index) => {
+    // Very high recency weight: most recent = 10x, second = 8x, third = 6x
+    const recencyWeight = 10 - index * 2;
+    
+    // Check company name for location hints
+    const companyLocations = extractLocationsFromText(job.company);
+    companyLocations.locations.forEach(loc => {
+      locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+      primaryLocations.add(loc);
+    });
+    companyLocations.countries.forEach(country => {
+      countryScores.set(country, (countryScores.get(country) || 0) + recencyWeight);
+    });
+    
+    // Check title for regional hints (e.g., "EMEA Director", "APAC Head")
+    const titleLower = job.title.toLowerCase();
+    if (titleLower.includes("emea") || titleLower.includes("europe")) {
+      ["london", "frankfurt", "paris", "amsterdam"].forEach(loc => {
+        locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+        primaryLocations.add(loc);
+      });
+      if (index === 0) reasoning.push(`${job.title} suggests European market focus`);
+    }
+    if (titleLower.includes("apac") || titleLower.includes("asia")) {
+      ["hong-kong", "singapore", "tokyo", "sydney"].forEach(loc => {
+        locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+        primaryLocations.add(loc);
+      });
+      if (index === 0) reasoning.push(`${job.title} suggests Asia Pacific market focus`);
+    }
+    if (titleLower.includes("americas") || titleLower.includes("latam")) {
+      ["new-york", "sao-paulo", "mexico-city"].forEach(loc => {
+        locationScores.set(loc, (locationScores.get(loc) || 0) + recencyWeight);
+        primaryLocations.add(loc);
+      });
+      if (index === 0) reasoning.push(`${job.title} suggests Americas market focus`);
+    }
+    
+    if (companyLocations.locations.length > 0 && index < 2) {
+      reasoning.push(`Recent role at ${job.company}`);
+    }
+  });
+  
+  // 2. Extract from current location field (secondary, lower weight now)
   if (candidate.location) {
     const { locations, countries } = extractLocationsFromText(candidate.location);
     locations.forEach(loc => {
-      locationScores.set(loc, (locationScores.get(loc) || 0) + 5);
+      locationScores.set(loc, (locationScores.get(loc) || 0) + 3);
     });
     countries.forEach(country => {
-      countryScores.set(country, (countryScores.get(country) || 0) + 5);
+      countryScores.set(country, (countryScores.get(country) || 0) + 3);
     });
     if (locations.length > 0) {
       reasoning.push(`Current location: ${candidate.location}`);
     }
   }
   
-  // 2. Extract from work history (weighted by recency)
-  (candidate.work_history || []).forEach((job, index) => {
-    const recencyWeight = Math.max(1, 4 - index); // First job = 4x, decreasing
-    
-    // Check company name for location hints
-    const companyLocations = extractLocationsFromText(job.company);
-    companyLocations.locations.forEach(loc => {
-      locationScores.set(loc, (locationScores.get(loc) || 0) + 2 * recencyWeight);
-    });
-    companyLocations.countries.forEach(country => {
-      countryScores.set(country, (countryScores.get(country) || 0) + 2 * recencyWeight);
-    });
-    
-    // Check title for location hints (e.g., "EMEA Director", "APAC Head")
-    const titleLower = job.title.toLowerCase();
-    if (titleLower.includes("emea") || titleLower.includes("europe")) {
-      ["london", "frankfurt", "paris", "amsterdam"].forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 2 * recencyWeight);
-      });
-      reasoning.push(`${job.title} suggests European market focus`);
-    }
-    if (titleLower.includes("apac") || titleLower.includes("asia")) {
-      ["hong-kong", "singapore", "tokyo", "sydney"].forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 2 * recencyWeight);
-      });
-      reasoning.push(`${job.title} suggests Asia Pacific market focus`);
-    }
-    if (titleLower.includes("americas") || titleLower.includes("latam")) {
-      ["new-york", "sao-paulo", "mexico-city"].forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 2 * recencyWeight);
-      });
-      reasoning.push(`${job.title} suggests Americas market focus`);
-    }
-  });
-
-  // 2b. Extract from candidate summary (if present)
-  // Useful when CV parsing captures a narrative like "Based in London" or "Relocating to Dubai"
+  // 3. Extract from candidate summary (lower weight)
   if (candidate.summary) {
     const { locations, countries } = extractLocationsFromText(candidate.summary);
     locations.forEach((loc) => {
-      locationScores.set(loc, (locationScores.get(loc) || 0) + 3);
+      locationScores.set(loc, (locationScores.get(loc) || 0) + 2);
     });
     countries.forEach((country) => {
-      countryScores.set(country, (countryScores.get(country) || 0) + 3);
+      countryScores.set(country, (countryScores.get(country) || 0) + 2);
     });
     if (locations.length > 0 || countries.length > 0) {
       reasoning.push("Location hints found in CV summary");
     }
   }
 
-  // 2c. Extract from education institutions (often includes country/city or well-known hubs)
+  // 4. Extract from education institutions (lowest weight - just supplementary)
   if (candidate.education && Array.isArray(candidate.education)) {
     candidate.education.forEach((edu) => {
       const eduText = [edu.institution, edu.degree, edu.year].filter(Boolean).join(" ");
       const { locations, countries } = extractLocationsFromText(eduText);
       locations.forEach((loc) => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 2);
+        locationScores.set(loc, (locationScores.get(loc) || 0) + 1);
       });
       countries.forEach((country) => {
-        countryScores.set(country, (countryScores.get(country) || 0) + 2);
+        countryScores.set(country, (countryScores.get(country) || 0) + 1);
       });
     });
-    // Don't add noisy reasoning entries per school; keep it compact
-    if (candidate.education.length > 0) {
-      reasoning.push("Considered education locations");
-    }
   }
   
-  // 3. Add financial hub suggestions based on industry
+  // 5. Add financial hub suggestions based on industry (supplementary only)
   const isFinanceRelated = industries.some(ind => 
     INDUSTRY_TO_SECTOR[ind]?.includes("Financial Services")
   );
@@ -512,9 +521,11 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     
     if (isEuropean) {
       FINANCIAL_HUBS.europe.forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 1);
+        // Only add if not already a primary location
+        if (!primaryLocations.has(loc)) {
+          locationScores.set(loc, (locationScores.get(loc) || 0) + 0.5);
+        }
       });
-      reasoning.push("Added major European financial centers");
     }
     
     // If candidate is in APAC, suggest APAC financial hubs
@@ -523,9 +534,10 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     
     if (isApac) {
       FINANCIAL_HUBS.apac.forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 1);
+        if (!primaryLocations.has(loc)) {
+          locationScores.set(loc, (locationScores.get(loc) || 0) + 0.5);
+        }
       });
-      reasoning.push("Added major APAC financial centers");
     }
     
     // If candidate is in Americas, suggest Americas financial hubs
@@ -534,13 +546,14 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     
     if (isAmericas) {
       FINANCIAL_HUBS.americas.forEach(loc => {
-        locationScores.set(loc, (locationScores.get(loc) || 0) + 1);
+        if (!primaryLocations.has(loc)) {
+          locationScores.set(loc, (locationScores.get(loc) || 0) + 0.5);
+        }
       });
-      reasoning.push("Added major Americas financial centers");
     }
   }
   
-  // Sort and return top locations
+  // Sort locations - primary ones (from work history) will naturally rank higher
   const sortedLocations = Array.from(locationScores.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
@@ -551,11 +564,11 @@ export function analyzeLocations(candidate: ParsedCandidate, industries: string[
     .slice(0, 4)
     .map(([country]) => country);
   
-  // Determine confidence
+  // Determine confidence based on whether we found primary locations
   const maxScore = Math.max(...Array.from(locationScores.values()), 0);
   let confidence: "high" | "medium" | "low" = "low";
-  if (maxScore >= 5) confidence = "high";
-  else if (maxScore >= 2) confidence = "medium";
+  if (primaryLocations.size > 0 && maxScore >= 6) confidence = "high";
+  else if (maxScore >= 3) confidence = "medium";
   
   return {
     locations: sortedLocations,
