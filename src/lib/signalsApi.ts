@@ -124,6 +124,25 @@ export async function refreshSignals(profileName: string, region?: string) {
   }
 }
 
+// Scrape job postings from PE/VC career pages
+export async function scrapeJobSignals(region?: string) {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("fetch-job-signals", {
+      body: { region },
+    });
+
+    if (error) {
+      console.error("Scrape job signals error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Scrape job signals failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // Enrich signals with AI-powered qualitative insights
 export async function enrichSignalsWithAI(signalIds?: string[]) {
   try {
