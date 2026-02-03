@@ -538,8 +538,10 @@ Deno.serve(async (req) => {
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
     const seenEmails = new Set<string>() // Track unique contacts by email
+    const seenPersonIds = new Set<string>() // Track unique Apollo person IDs to prevent double-enrichment
     const companyContactCount: Record<string, number> = {}
     let processedCount = 0
+    let creditsUsed = 0 // Track people/match calls for logging
 
     // Get target roles from preferences (all prefs share the same roles)
     // Fall back to default HR/Recruiting roles if not specified
@@ -936,8 +938,9 @@ Deno.serve(async (req) => {
                 seenEmails.add(emailLower)
                 companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
                 console.log(`[Direct] Adding contact: ${personName} at ${companyName} (email from search)`)
-              } else if (person.id) {
-                // No email in search results - need to enrich
+              } else if (person.id && !seenPersonIds.has(person.id)) {
+                // No email in search results - need to enrich (only if not already seen)
+                seenPersonIds.add(person.id) // Mark as seen to prevent duplicate enrichment
                 peopleToEnrich.push({
                   id: person.id,
                   name: personName,
@@ -968,13 +971,49 @@ Deno.serve(async (req) => {
             console.log(`Found ${contactsWithEmail.length} contacts with email from search, ${peopleToEnrich.length} need enrichment`)
           
             // Only enrich people who didn't have emails in search results (FALLBACK)
+            // CREDIT OPTIMIZATION: Only enrich as many as we need to reach quota
             if (peopleToEnrich.length > 0) {
-              console.log(`Enriching ${peopleToEnrich.length} contacts to get emails...`)
+              // Calculate how many more contacts we actually need
+              const contactsStillNeeded = useEqualDistribution && comboIndustry
+                ? Math.max(0, (industryQuotas[comboIndustry] || 0) - (industryContacts[comboIndustry]?.length || 0))
+                : Math.max(0, maxContacts - allContacts.length)
               
-              for (let i = 0; i < peopleToEnrich.length; i += 10) {
-                const batch = peopleToEnrich.slice(i, i + 10)
+              // Only enrich up to what we need (saves credits!)
+              const enrichLimit = Math.min(peopleToEnrich.length, contactsStillNeeded)
+              const limitedPeopleToEnrich = peopleToEnrich.slice(0, enrichLimit)
+              
+              if (limitedPeopleToEnrich.length < peopleToEnrich.length) {
+                console.log(`CREDIT SAVER: Only enriching ${limitedPeopleToEnrich.length}/${peopleToEnrich.length} (quota limit reached)`)
+              } else {
+                console.log(`Enriching ${limitedPeopleToEnrich.length} contacts to get emails...`)
+              }
+              
+              for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
+                // Double-check we still need contacts before each batch
+                if (allContacts.length >= maxContacts) {
+                  console.log('CREDIT SAVER: Stopping enrichment - global quota reached')
+                  break
+                }
+                if (useEqualDistribution && comboIndustry) {
+                  const currentCount = industryContacts[comboIndustry]?.length || 0
+                  const quota = industryQuotas[comboIndustry] || 0
+                  if (currentCount >= quota) {
+                    console.log(`CREDIT SAVER: Stopping enrichment - industry ${comboIndustry} quota reached`)
+                    break
+                  }
+                }
+                
+                const batch = limitedPeopleToEnrich.slice(i, i + 10)
                 
                 for (const personData of batch) {
+                  // Final check before each individual enrichment call
+                  if (allContacts.length >= maxContacts) break
+                  if (useEqualDistribution && comboIndustry) {
+                    const currentCount = industryContacts[comboIndustry]?.length || 0
+                    const quota = industryQuotas[comboIndustry] || 0
+                    if (currentCount >= quota) break
+                  }
+                  
                   try {
                     const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
                       method: 'POST',
@@ -984,6 +1023,7 @@ Deno.serve(async (req) => {
                       },
                       body: JSON.stringify({ id: personData.id }),
                     })
+                    creditsUsed++ // Track credit usage
                     
                     if (enrichResponse.ok) {
                       const enriched = await enrichResponse.json()
@@ -1194,7 +1234,8 @@ Deno.serve(async (req) => {
                     seenEmails.add(emailLower)
                     console.log(`[Retry Direct] Adding: ${personName} at ${personCompanyName} (email from search)`)
                   }
-                } else if (person.id) {
+                } else if (person.id && !seenPersonIds.has(person.id)) {
+                  seenPersonIds.add(person.id) // Mark as seen to prevent double enrichment
                   peopleToEnrich.push({
                     id: person.id,
                     name: personName,
@@ -1213,12 +1254,19 @@ Deno.serve(async (req) => {
               
               console.log(`[Retry] Found ${contactsWithEmail.length} with email from search, ${peopleToEnrich.length} need enrichment`)
               
-              // Only enrich people who didn't have emails in search results (FALLBACK)
+              // CREDIT OPTIMIZATION: Only enrich people we actually need
               if (peopleToEnrich.length > 0 && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
-                for (let i = 0; i < peopleToEnrich.length; i += 10) {
+                const contactsStillNeeded = TARGET_COMPANY_MIN_CONTACTS - allContacts.length
+                const limitedPeopleToEnrich = peopleToEnrich.slice(0, contactsStillNeeded)
+                
+                if (limitedPeopleToEnrich.length < peopleToEnrich.length) {
+                  console.log(`CREDIT SAVER: Only enriching ${limitedPeopleToEnrich.length}/${peopleToEnrich.length} for retry`)
+                }
+                
+                for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
                   if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
                   
-                  const batch = peopleToEnrich.slice(i, i + 10)
+                  const batch = limitedPeopleToEnrich.slice(i, i + 10)
                   
                   for (const personData of batch) {
                     if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
@@ -1232,6 +1280,7 @@ Deno.serve(async (req) => {
                         },
                         body: JSON.stringify({ id: personData.id }),
                       })
+                      creditsUsed++ // Track credit usage
                       
                       if (enrichResponse.ok) {
                         const enriched = await enrichResponse.json()
@@ -1357,6 +1406,15 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Log credit usage summary
+    const directContacts = allContacts.length - creditsUsed
+    console.log(`\n=== CREDIT USAGE SUMMARY ===`)
+    console.log(`Total contacts saved: ${allContacts.length}`)
+    console.log(`Direct (free): ${Math.max(0, directContacts)} contacts`)
+    console.log(`Enriched (paid): ${creditsUsed} credits used`)
+    console.log(`Efficiency: ${allContacts.length > 0 ? ((directContacts / allContacts.length) * 100).toFixed(1) : 0}% free`)
+    console.log(`============================\n`)
+
     return new Response(
       JSON.stringify({ 
         success: true, 
@@ -1364,6 +1422,12 @@ Deno.serve(async (req) => {
         contacts: allContacts, // Return actual contacts for immediate use
         status,
         bullhornExport: bullhornResult,
+        creditUsage: {
+          totalContacts: allContacts.length,
+          directContacts: Math.max(0, directContacts),
+          enrichedContacts: creditsUsed,
+          creditsUsed: creditsUsed,
+        }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
