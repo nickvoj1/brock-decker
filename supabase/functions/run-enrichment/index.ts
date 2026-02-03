@@ -407,6 +407,79 @@ function isLawFirm(companyName: string, industry?: string | null, skipExclusion 
   return false
 }
 
+// ============ Recruitment Company Detection ============
+// Recruitment/headhunting firms should not appear in results (we're looking for clients, not competitors)
+const RECRUITMENT_SUFFIXES = [
+  'recruitment', 'recruiting', 'staffing', 'headhunters', 'headhunting',
+  'executive search', 'talent solutions', 'talent acquisition', 'personnel',
+  'search partners', 'search consultants', 'search firm', 'search group',
+  'hr solutions', 'hr consulting', 'workforce solutions', 'employment agency',
+  'employment services', 'placement', 'job agency'
+]
+
+const RECRUITMENT_KEYWORDS = [
+  'recruitment', 'recruiting', 'headhunt', 'headhunting', 'executive search',
+  'talent acquisition', 'staffing agency', 'staffing firm', 'employment agency',
+  'personnel agency', 'search firm', 'job placement', 'hiring solutions',
+  'hr consulting', 'workforce solutions', 'temp agency', 'contract staffing'
+]
+
+// Known major recruitment companies (case-insensitive matching)
+const KNOWN_RECRUITMENT_COMPANIES = [
+  'cornell search', 'heidrick & struggles', 'heidrick and struggles', 'korn ferry',
+  'spencer stuart', 'russell reynolds', 'egon zehnder', 'boyden', 'stanton chase',
+  'odgers berndtson', 'michael page', 'page executive', 'robert half', 'robert walters',
+  'randstad', 'manpower', 'manpowergroup', 'adecco', 'kelly services', 'hays',
+  'harvey nash', 'la fosse', 'phaidon international', 'sthree', 'signium',
+  'alexander mann', 'cielo', 'hudson', 'talent works', 'reed', 'reed specialist',
+  'charterhouse', 'alumni global', 'beaumont bailey', 'norman broadbent', 'ward howell',
+  'jm search', 'whitney partners', 'dhillon consulting', 'amrop', 'ims group',
+  'hanover search', 'stone executive', 'praxis partners'
+]
+
+function isRecruitmentCompany(companyName: string, industry?: string | null): boolean {
+  if (!companyName) return false
+  
+  const nameLower = companyName.toLowerCase().trim()
+  
+  // Check against known recruitment companies
+  for (const known of KNOWN_RECRUITMENT_COMPANIES) {
+    if (nameLower.includes(known) || known.includes(nameLower)) {
+      console.log(`[RECRUITMENT EXCLUDED] "${companyName}" - known recruitment company: ${known}`)
+      return true
+    }
+  }
+  
+  // Check for recruitment suffixes in company name
+  for (const suffix of RECRUITMENT_SUFFIXES) {
+    if (nameLower.endsWith(` ${suffix}`) || nameLower === suffix || nameLower.includes(` ${suffix} `)) {
+      console.log(`[RECRUITMENT EXCLUDED] "${companyName}" - matched suffix: ${suffix}`)
+      return true
+    }
+  }
+  
+  // Check for recruitment keywords in company name
+  for (const keyword of RECRUITMENT_KEYWORDS) {
+    if (nameLower.includes(keyword)) {
+      console.log(`[RECRUITMENT EXCLUDED] "${companyName}" - matched keyword: ${keyword}`)
+      return true
+    }
+  }
+  
+  // Check industry field from Apollo
+  if (industry) {
+    const industryLower = industry.toLowerCase()
+    if (industryLower.includes('staffing') || industryLower.includes('recruiting') ||
+        industryLower.includes('recruitment') || industryLower.includes('employment services') ||
+        industryLower.includes('human resources') || industryLower.includes('hr services')) {
+      console.log(`[RECRUITMENT EXCLUDED] "${companyName}" - industry: ${industry}`)
+      return true
+    }
+  }
+  
+  return false
+}
+
 // Extract company from signal title (fallback when signal.company fails)
 function extractCompanyFromSignalTitle(title: string): string {
   if (!title) return ''
@@ -961,6 +1034,11 @@ Deno.serve(async (req) => {
               // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
               // Skip exclusion if user is targeting legal sector
               if (isLawFirm(companyName, personIndustry, includeLawFirms)) {
+                continue
+              }
+              
+              // Exclude recruitment/headhunting companies (competitors, not clients)
+              if (isRecruitmentCompany(companyName, personIndustry)) {
                 continue
               }
               
