@@ -1553,7 +1553,7 @@ async function findOrCreateClientContact(
   clientCorporationId: number,
   skillsString: string,
   skillsFieldName: string
-): Promise<{ contactId: number; skillsString: string }> {
+): Promise<{ contactId: number; skillsString: string; isExisting: boolean }> {
   const nameParts = (contact.name || 'Unknown').trim().split(/\s+/)
   const firstName = nameParts[0] || 'Unknown'
   const lastName = nameParts.slice(1).join(' ') || '-'
@@ -1575,40 +1575,57 @@ async function findOrCreateClientContact(
   const skillsArray = skillsString ? skillsString.split(' ; ').map(s => s.trim()).filter(Boolean) : []
   const skillsCount = skillsArray.length
 
-  // Check if contact with this email already exists - if so, DELETE it first
+  // Check if contact with this email already exists
+  // NEW LOGIC: If exists, KEEP the existing contact (preserve notes/history) and just add to distribution list
   const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${contact.email}"&fields=id,firstName,lastName`
   const searchResponse = await bullhornFetch(searchUrl)
   
   if (searchResponse.ok) {
     const searchData = await searchResponse.json()
     if (searchData.data && searchData.data.length > 0) {
-      // Delete ALL existing contacts with this email (there could be duplicates)
-      for (const existing of searchData.data) {
-        const existingId = existing.id
-        console.log(`Deleting existing contact ID ${existingId} (${existing.firstName} ${existing.lastName}) to recreate from CV`)
+      // Contact already exists - KEEP IT (don't delete) to preserve notes and history
+      const existingContact = searchData.data[0]
+      const existingId = existingContact.id
+      console.log(`Contact already exists in Bullhorn: ${existingContact.firstName} ${existingContact.lastName} (ID: ${existingId}) - KEEPING existing contact to preserve notes/history`)
+      
+      // Optionally update skills on the existing contact (without deleting it)
+      // This ensures the contact has the latest skills from the new search
+      try {
+        const updateUrl = `${restUrl}entity/ClientContact/${existingId}?BhRestToken=${bhRestToken}`
+        const updatePayload: Record<string, any> = {
+          [skillsFieldName]: skillsString,
+          customText1: skillsString.substring(0, 100),
+          customInt1: skillsCount,
+        }
+        if (skillsFieldName !== 'desiredSkills' && cachedHasDesiredSkillsField) {
+          updatePayload.desiredSkills = skillsString
+        }
+        updatePayload.categorySkills = skillsString
         
-        const deleteUrl = `${restUrl}entity/ClientContact/${existingId}?BhRestToken=${bhRestToken}`
-        const deleteResponse = await bullhornFetch(deleteUrl, {
-          method: 'DELETE',
+        const updateResponse = await bullhornFetch(updateUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload),
         })
         
-        if (!deleteResponse.ok) {
-          const errorText = await deleteResponse.text()
-          console.error(`Failed to delete contact ${existingId}: ${errorText}`)
-          // Continue anyway - we'll try to create the new one
+        if (updateResponse.ok) {
+          await updateResponse.text()
+          console.log(`Updated skills on existing contact ${existingId}`)
         } else {
-          await deleteResponse.text() // Consume body
-          console.log(`Deleted existing contact ${existingId}`)
+          await updateResponse.text()
+          console.warn(`Failed to update skills on existing contact ${existingId} - continuing anyway`)
         }
-        
-        // Small delay after delete to let Bullhorn index update
-        await sleep(100)
+      } catch (err: any) {
+        console.warn(`Error updating existing contact ${existingId}: ${err.message}`)
       }
+      
+      return { contactId: existingId, skillsString, isExisting: true }
     }
   } else {
     await searchResponse.text() // Consume body
   }
 
+  // Contact doesn't exist - create new one
   console.log(`Creating new contact: ${fullName}`)
   
   const createUrl = `${restUrl}entity/ClientContact?BhRestToken=${bhRestToken}`
@@ -1640,7 +1657,7 @@ async function findOrCreateClientContact(
   const createResponse = await bullhornFetch(createUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(createPayload),
+    body: JSON.stringify(createPayload),
   })
 
   if (!createResponse.ok) {
@@ -1650,7 +1667,7 @@ async function findOrCreateClientContact(
 
   const createData = await createResponse.json()
   console.log(`Created contact ID ${createData.changedEntityId}: ${fullName} (skills count: ${skillsCount})`)
-  return { contactId: createData.changedEntityId, skillsString }
+  return { contactId: createData.changedEntityId, skillsString, isExisting: false }
 }
 
 async function createDistributionList(
@@ -1951,6 +1968,8 @@ Deno.serve(async (req) => {
 
     console.log(`Creating/updating ${contactsToExport.length} ClientContacts...`)
     const contactIds: number[] = []
+    const newContactIds: number[] = []
+    const existingContactIds: number[] = []
     const errors: string[] = []
     
     const companyCache: Record<string, number> = {}
@@ -1981,7 +2000,7 @@ Deno.serve(async (req) => {
           
           const skillsString = generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
           
-          const { contactId, skillsString: generatedSkills } = await findOrCreateClientContact(
+          const { contactId, skillsString: generatedSkills, isExisting } = await findOrCreateClientContact(
             tokens.restUrl,
             tokens.bhRestToken,
             contact,
@@ -1998,8 +2017,8 @@ Deno.serve(async (req) => {
             generatedSkills
           )
           
-          console.log(`Created/updated contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
-          return contactId
+          console.log(`${isExisting ? 'Reused existing' : 'Created new'} contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
+          return { contactId, isExisting }
         })
       )
       
@@ -2007,7 +2026,12 @@ Deno.serve(async (req) => {
       for (let j = 0; j < batchResults.length; j++) {
         const result = batchResults[j]
         if (result.status === 'fulfilled') {
-          contactIds.push(result.value)
+          contactIds.push(result.value.contactId)
+          if (result.value.isExisting) {
+            existingContactIds.push(result.value.contactId)
+          } else {
+            newContactIds.push(result.value.contactId)
+          }
         } else {
           const contact = batch[j]
           console.error(`Error creating contact ${contact.email}:`, result.reason?.message || result.reason)
@@ -2021,7 +2045,7 @@ Deno.serve(async (req) => {
       }
     }
     
-    console.log(`Export complete: ${contactIds.length}/${contactsToExport.length} contacts processed (${skippedContacts.length} skipped due to recent notes)`)
+    console.log(`Export complete: ${contactIds.length}/${contactsToExport.length} contacts processed (${newContactIds.length} new, ${existingContactIds.length} existing, ${skippedContacts.length} skipped due to recent notes)`)
 
     if (contactIds.length === 0) {
       throw new Error('Failed to create any contacts in Bullhorn')
@@ -2053,6 +2077,8 @@ Deno.serve(async (req) => {
         listName,
         listId,
         contactsExported: contactIds.length,
+        newContacts: newContactIds.length,
+        existingContacts: existingContactIds.length,
         contactsSkipped: skippedContacts.length,
         skippedDetails: skippedContacts.length > 0 ? skippedContacts : undefined,
         errors: errors.length > 0 ? errors : undefined,
