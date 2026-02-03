@@ -70,23 +70,29 @@ const TIER_TAXONOMY = {
 // REGION CONFIGURATION
 // ============================================================================
 const REGIONS = {
+  london: { 
+    label: "London", 
+    adzunaCountries: ["gb"],
+    cities: ["London", "City of London", "Canary Wharf", "Westminster"],
+    locationFilter: "London",
+  },
   europe: { 
     label: "Europe", 
-    adzunaCountries: ["gb", "de", "fr", "nl", "be", "at", "ch"],
-    cities: ["London", "Berlin", "Paris", "Amsterdam", "Frankfurt", "Munich", "Zurich"],
-    includesLondon: true,
+    adzunaCountries: ["de", "fr", "nl", "be", "at", "ch", "it", "es", "se", "dk", "no", "pl"],
+    cities: ["Berlin", "Paris", "Amsterdam", "Frankfurt", "Munich", "Zurich", "Milan", "Madrid", "Stockholm", "Copenhagen"],
+    locationFilter: null,
   },
   uae: { 
     label: "UAE", 
     adzunaCountries: [],
-    cities: ["Dubai", "Abu Dhabi", "Sharjah"],
-    includesLondon: false,
+    cities: ["Dubai", "Abu Dhabi", "Sharjah", "DIFC"],
+    locationFilter: null,
   },
   usa: { 
     label: "USA", 
     adzunaCountries: ["us"],
-    cities: ["New York", "Boston", "Chicago", "San Francisco", "Los Angeles", "Miami"],
-    includesLondon: false,
+    cities: ["New York", "Boston", "Chicago", "San Francisco", "Los Angeles", "Miami", "Dallas", "Houston", "Atlanta", "Denver"],
+    locationFilter: null,
   },
 };
 
@@ -94,20 +100,39 @@ const REGIONS = {
 // RSS FEEDS BY REGION
 // ============================================================================
 const RSS_FEEDS = {
-  europe: [
-    { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire EU" },
-    { url: "https://www.altassets.net/feed", source: "AltAssets" },
-    { url: "https://sifted.eu/feed", source: "Sifted" },
-    { url: "https://www.eu-startups.com/feed/", source: "EU-Startups" },
-    { url: "https://realdeals.eu.com/feed/", source: "Real Deals" },
+  london: [
+    { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire UK" },
     { url: "https://www.cityam.com/feed/", source: "City AM" },
     { url: "https://feeds.reuters.com/reuters/UKBusinessNews", source: "Reuters UK" },
+    { url: "https://www.ft.com/rss/home/uk", source: "FT UK" },
+    { url: "https://www.theguardian.com/business/rss", source: "Guardian Business" },
+    { url: "https://www.standard.co.uk/business/rss", source: "Evening Standard" },
+    { url: "https://realdeals.eu.com/feed/", source: "Real Deals" },
+    { url: "https://www.altassets.net/feed", source: "AltAssets" },
+    { url: "https://www.investmentweek.co.uk/rss", source: "Investment Week" },
+    { url: "https://www.penews.com/rss", source: "PE News" },
+  ],
+  europe: [
+    { url: "https://sifted.eu/feed", source: "Sifted" },
+    { url: "https://www.eu-startups.com/feed/", source: "EU-Startups" },
+    { url: "https://tech.eu/feed", source: "Tech.eu" },
+    { url: "https://www.dealroom.co/blog/feed", source: "Dealroom" },
+    { url: "https://www.handelsblatt.com/rss/finance", source: "Handelsblatt" },
+    { url: "https://www.manager-magazin.de/rss/", source: "Manager Magazin" },
+    { url: "https://www.lesechos.fr/rss/finance.xml", source: "Les Echos" },
+    { url: "https://fd.nl/rss/financien", source: "FD Netherlands" },
+    { url: "https://www.swissinfo.ch/eng/business/rss", source: "SwissInfo" },
+    { url: "https://www.thelocal.de/rss/business", source: "The Local DE" },
   ],
   uae: [
     { url: "https://gulfbusiness.com/feed/", source: "Gulf Business" },
     { url: "https://www.arabianbusiness.com/feed/", source: "Arabian Business" },
     { url: "https://gulfnews.com/rss/business", source: "Gulf News" },
     { url: "https://www.thenationalnews.com/business/rss", source: "The National" },
+    { url: "https://www.zawya.com/rss/", source: "Zawya" },
+    { url: "https://www.khaleejtimes.com/rss/business", source: "Khaleej Times" },
+    { url: "https://www.middleeastmonitor.com/feed/", source: "ME Monitor" },
+    { url: "https://wam.ae/en/rss/economy", source: "WAM Economy" },
   ],
   usa: [
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
@@ -116,6 +141,10 @@ const RSS_FEEDS = {
     { url: "https://news.crunchbase.com/feed/", source: "Crunchbase News" },
     { url: "https://techcrunch.com/category/venture/feed/", source: "TechCrunch VC" },
     { url: "https://fortune.com/feed/fortune-feeds/?id=3230629", source: "Fortune" },
+    { url: "https://pitchbook.com/rss/news", source: "PitchBook" },
+    { url: "https://www.wsj.com/xml/rss/3_7014.xml", source: "WSJ PE" },
+    { url: "https://www.axios.com/pro/deal-feed.rss", source: "Axios Pro Deals" },
+    { url: "https://www.institutionalinvestor.com/rss", source: "Institutional Investor" },
   ],
 };
 
@@ -259,12 +288,13 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
   }
   
   const allJobs: any[] = [];
-  const keywords = "private equity OR venture capital OR recruiter OR talent acquisition";
+  const keywords = "private equity OR venture capital OR recruiter OR talent acquisition OR investment OR fund OR portfolio OR M&A OR mergers";
   
   for (const country of regionConfig.adzunaCountries) {
     try {
-      const cities = regionConfig.cities.slice(0, 3).join(" OR ");
-      const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${adzunaAppId}&app_key=${adzunaAppKey}&what=${encodeURIComponent(keywords)}&where=${encodeURIComponent(cities)}&results_per_page=50&max_days_old=30`;
+      // Use location filter if specified (for London), otherwise use cities
+      const locationQuery = regionConfig.locationFilter || regionConfig.cities.slice(0, 5).join(" OR ");
+      const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${adzunaAppId}&app_key=${adzunaAppKey}&what=${encodeURIComponent(keywords)}&where=${encodeURIComponent(locationQuery)}&results_per_page=100&max_days_old=30`;
       
       console.log(`Fetching Adzuna jobs for ${country}...`);
       const response = await fetch(url);

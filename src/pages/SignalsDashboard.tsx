@@ -44,14 +44,15 @@ import { SignalsRegionMap } from "@/components/signals/SignalsRegionMap";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
-type Region = "europe" | "uae" | "usa";
+type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
 type SortOption = "score" | "newest" | "amount";
 
 const REGION_CONFIG = {
-  europe: { label: "Europe", emoji: "🇪🇺", description: "UK, DACH, FR, NL" },
-  uae: { label: "UAE", emoji: "🇦🇪", description: "Dubai, Abu Dhabi" },
-  usa: { label: "USA", emoji: "🇺🇸", description: "East & West Coast" },
+  london: { label: "London", emoji: "🇬🇧", description: "City, Mayfair, Canary Wharf" },
+  europe: { label: "Europe", emoji: "🇪🇺", description: "DACH, FR, NL, Nordics" },
+  uae: { label: "UAE", emoji: "🇦🇪", description: "Dubai, Abu Dhabi, DIFC" },
+  usa: { label: "USA", emoji: "🇺🇸", description: "NYC, Boston, SF, LA" },
 };
 
 const TIER_FILTERS: { value: TierFilter; label: string }[] = [
@@ -69,7 +70,7 @@ export default function SignalsDashboard() {
   const [tierCounts, setTierCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeRegion, setActiveRegion] = useState<Region>("europe");
+  const [activeRegion, setActiveRegion] = useState<Region>("london");
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("score");
   const [minScore, setMinScore] = useState<number>(0);
@@ -402,7 +403,7 @@ export default function SignalsDashboard() {
 
         {/* Region Tabs */}
         <Tabs value={activeRegion} onValueChange={(v) => setActiveRegion(v as Region)}>
-          <TabsList className="grid w-full grid-cols-3 h-auto">
+          <TabsList className="grid w-full grid-cols-4 h-auto">
             {(Object.entries(REGION_CONFIG) as [Region, typeof REGION_CONFIG.europe][]).map(
               ([key, config]) => (
                 <TabsTrigger key={key} value={key} className="flex items-center gap-2 py-3">
