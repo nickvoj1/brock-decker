@@ -455,16 +455,16 @@ export default function SignalsDashboard() {
 
   return (
     <AppLayout title="Signals Dashboard" description="Recruitment Intel">
-      <div className="space-y-4">
-        {/* Header */}
+      <div className="space-y-6">
+        {/* Header - Streamlined */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Sparkles className="h-6 w-6 text-primary" />
-              Signals Dashboard
+              <Sparkles className="h-5 w-5 text-primary" />
+              Signals
             </h1>
             <p className="text-sm text-muted-foreground">
-              Real-time hiring intelligence across PE/VC markets
+              PE/VC hiring intelligence • {signals.filter(s => !s.is_dismissed).length} active signals
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -474,146 +474,150 @@ export default function SignalsDashboard() {
               onClick={handleExportCSV}
               disabled={filteredSignals.length === 0}
             >
-              <Download className="h-4 w-4 mr-1" />
-              Export CSV
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">Export</span>
             </Button>
             <Button
               variant="outline"
+              size="sm"
               onClick={handleScrapeJobs}
               disabled={isScraping || isRefreshing}
             >
-              <Search className={`h-4 w-4 mr-2 ${isScraping ? "animate-pulse" : ""}`} />
-              {isScraping ? "Scraping..." : "Scrape Jobs"}
+              <Search className={`h-4 w-4 ${isScraping ? "animate-pulse" : ""}`} />
+              <span className="hidden sm:inline ml-1">{isScraping ? "Scraping..." : "Jobs"}</span>
             </Button>
             <Button
               variant="outline"
+              size="sm"
               onClick={handleEnrichWithAI}
               disabled={isRefreshing || isScraping}
             >
-              <Wand2 className="h-4 w-4 mr-2" />
-              AI Enrich
+              <Wand2 className="h-4 w-4" />
+              <span className="hidden sm:inline ml-1">AI</span>
             </Button>
-            <Button onClick={handleRefresh} disabled={isRefreshing || isScraping}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-              Refresh
+            <Button size="sm" onClick={handleRefresh} disabled={isRefreshing || isScraping}>
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline ml-1">Refresh</span>
             </Button>
           </div>
         </div>
 
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <SignalsTierChart tierCounts={tierCounts} />
-          <SignalsRegionMap
-            regionCounts={regionCounts}
-            activeRegion={activeRegion}
-            onRegionClick={handleRegionClick}
-          />
+        {/* Region Selector - Compact Cards */}
+        <div className="grid grid-cols-4 gap-2">
+          {(Object.entries(REGION_CONFIG) as [Region, typeof REGION_CONFIG.europe][]).map(
+            ([key, config]) => (
+              <button
+                key={key}
+                onClick={() => setActiveRegion(key)}
+                className={`p-3 rounded-lg border text-center transition-all ${
+                  activeRegion === key
+                    ? "border-primary bg-primary/5 shadow-sm"
+                    : "border-border/50 hover:border-border bg-card"
+                }`}
+              >
+                <span className="text-xl">{config.emoji}</span>
+                <p className={`text-sm font-medium mt-1 ${activeRegion === key ? "text-primary" : "text-foreground"}`}>
+                  {config.label}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {regionCounts[key] || 0} signals
+                </p>
+              </button>
+            )
+          )}
         </div>
 
-        {/* Region Tabs */}
-        <Tabs value={activeRegion} onValueChange={(v) => setActiveRegion(v as Region)}>
-          <TabsList className="grid w-full grid-cols-4 h-auto">
-            {(Object.entries(REGION_CONFIG) as [Region, typeof REGION_CONFIG.europe][]).map(
-              ([key, config]) => (
-                <TabsTrigger key={key} value={key} className="flex items-center gap-2 py-3">
-                  <span>{config.emoji}</span>
-                  <span className="hidden sm:inline">{config.label}</span>
-                  <Badge variant="secondary" className="ml-1">
-                    {regionCounts[key] || 0}
-                  </Badge>
-                </TabsTrigger>
-              )
-            )}
-          </TabsList>
+        {/* Filters Row - Simplified */}
+        <div className="flex flex-wrap items-center gap-3 py-2 px-1">
+          <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
+            <SelectTrigger className="w-[160px] h-9">
+              <SelectValue placeholder="Tier" />
+            </SelectTrigger>
+            <SelectContent className="bg-background border">
+              {TIER_FILTERS.map((filter) => (
+                <SelectItem key={filter.value} value={filter.value}>
+                  {filter.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-3 mt-4">
-            <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by Tier" />
-              </SelectTrigger>
-              <SelectContent className="bg-background border">
-                {TIER_FILTERS.map((filter) => (
-                  <SelectItem key={filter.value} value={filter.value}>
-                    {filter.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+            <SelectTrigger className="w-[130px] h-9">
+              <SelectValue placeholder="Sort" />
+            </SelectTrigger>
+            <SelectContent className="bg-background border">
+              <SelectItem value="score">By Score</SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="amount">By Amount</SelectItem>
+            </SelectContent>
+          </Select>
 
-            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent className="bg-background border">
-                <SelectItem value="score">Highest Score</SelectItem>
-                <SelectItem value="newest">Newest</SelectItem>
-                <SelectItem value="amount">Largest Amount</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5">
+            <span className="text-xs text-muted-foreground">
+              Score ≥ {minScore}
+            </span>
+            <Slider
+              value={[minScore]}
+              onValueChange={(v) => setMinScore(v[0])}
+              max={100}
+              step={10}
+              className="w-20"
+            />
+          </div>
 
-            <div className="flex items-center gap-2 min-w-[200px]">
-              <span className="text-sm text-muted-foreground whitespace-nowrap">
-                Min Score: {minScore}
-              </span>
-              <Slider
-                value={[minScore]}
-                onValueChange={(v) => setMinScore(v[0])}
-                max={100}
-                step={10}
-                className="w-24"
+          <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
+            <Filter className="h-3 w-3" />
+            {filteredSignals.length} results
+          </span>
+        </div>
+
+        {/* Signal List */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : filteredSignals.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                <Sparkles className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <h3 className="text-lg font-medium mb-1">No signals in {REGION_CONFIG[activeRegion].label}</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Fetch new signals or adjust your filters
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={handleScrapeJobs} disabled={isScraping}>
+                  <Search className="h-4 w-4 mr-1" />
+                  Scrape Jobs
+                </Button>
+                <Button onClick={handleRefresh} disabled={isRefreshing}>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Fetch News
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {filteredSignals.map((signal) => (
+              <SignalCard
+                key={signal.id}
+                signal={signal}
+                onDismiss={handleDismiss}
+                onTAContacts={handleTAContacts}
+                onCVMatches={handleCVMatches}
+                taSearchLoading={taSearchLoading[signal.id] || false}
+                onSignalUpdated={(updated) => {
+                  setSignals((prev) =>
+                    prev.map((s) => (s.id === updated.id ? updated : s))
+                  );
+                }}
               />
-            </div>
-
-            <div className="ml-auto text-sm text-muted-foreground">
-              <Filter className="h-4 w-4 inline mr-1" />
-              {filteredSignals.length} signals
-            </div>
+            ))}
           </div>
-
-          {/* Signal Cards */}
-          {(Object.keys(REGION_CONFIG) as Region[]).map((region) => (
-            <TabsContent key={region} value={region} className="mt-4">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-16">
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                </div>
-              ) : filteredSignals.length === 0 ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-16">
-                    <Sparkles className="h-12 w-12 text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-medium">No signals found</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Click refresh to fetch the latest signals
-                    </p>
-                    <Button onClick={handleRefresh} disabled={isRefreshing}>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Fetch Signals
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="grid gap-4">
-                  {filteredSignals.map((signal) => (
-                    <SignalCard
-                      key={signal.id}
-                      signal={signal}
-                      onDismiss={handleDismiss}
-                      onTAContacts={handleTAContacts}
-                      onCVMatches={handleCVMatches}
-                      taSearchLoading={taSearchLoading[signal.id] || false}
-                      onSignalUpdated={(updated) => {
-                        setSignals((prev) =>
-                          prev.map((s) => (s.id === updated.id ? updated : s))
-                        );
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          ))}
-        </Tabs>
+        )}
       </div>
 
       {/* CV Matches Modal */}
