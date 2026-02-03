@@ -566,6 +566,11 @@ export default function SignalsDashboard() {
                       onTAContacts={handleTAContacts}
                       onCVMatches={handleCVMatches}
                       taSearchLoading={taSearchLoading[signal.id] || false}
+                      onSignalUpdated={(updated) => {
+                        setSignals((prev) =>
+                          prev.map((s) => (s.id === updated.id ? updated : s))
+                        );
+                      }}
                     />
                   ))}
                 </div>

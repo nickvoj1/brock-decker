@@ -305,6 +305,15 @@ const EXCLUDED_TOPICS = [
   "white house", "downing street", "european commission", "nato", "un ",
   "immigration", "border", "tariff", "sanctions", "trade war", "political",
   "trump", "biden", "starmer", "sunak", "macron", "scholz", "putin", "zelensky",
+  // General Economy / Country-level news (not company-specific)
+  "economy grows", "economic growth", "gdp growth", "gdp forecast", "inflation rate",
+  "interest rate", "central bank", "federal reserve", "bank of england", "ecb ",
+  "monetary policy", "fiscal policy", "government spending", "national debt",
+  "unemployment rate", "job market", "labour market", "consumer spending",
+  "retail sales", "housing market", "property market", "stock market", "markets today",
+  "economic outlook", "recession", "downturn", "economic crisis", "cost of living",
+  "budget", "treasury", "finance minister", "chancellor", "economic forecast",
+  "country economy", "national economy", "global economy", "world economy",
   // General news
   "weather", "climate crisis", "earthquake", "hurricane", "flood", "wildfire",
   "sports", "championship", "world cup", "olympics", "premier league", "nfl", "nba",
