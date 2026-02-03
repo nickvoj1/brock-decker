@@ -8,7 +8,8 @@ import {
   Loader2,
   Wand2,
   Briefcase,
-  Check
+  Check,
+  Search
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +39,7 @@ import {
   buildBullhornNote,
   exportSignalsToCSV,
   enrichSignalsWithAI,
+  scrapeJobSignals,
   Signal 
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
@@ -74,6 +76,7 @@ export default function SignalsDashboard() {
   const [tierCounts, setTierCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isScraping, setIsScraping] = useState(false);
   const [activeRegion, setActiveRegion] = useState<Region>("london");
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("score");
@@ -191,6 +194,31 @@ export default function SignalsDashboard() {
       toast.error("Failed to refresh signals");
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleScrapeJobs = async () => {
+    if (!profileName) return;
+    
+    setIsScraping(true);
+    toast.info(`Scraping career pages for ${activeRegion.toUpperCase()} region...`, { duration: 15000 });
+    
+    try {
+      const response = await scrapeJobSignals(activeRegion);
+      if (response.success) {
+        const { scrapedPages, signalsFound, signalsInserted } = response;
+        toast.success(`Scraped ${scrapedPages} career pages: ${signalsInserted} new job signals added`);
+        if (signalsInserted > 0) {
+          await fetchSignals();
+        }
+      } else {
+        toast.error(response.error || "Failed to scrape job signals");
+      }
+    } catch (error) {
+      console.error("Job scraping error:", error);
+      toast.error("Failed to scrape career pages");
+    } finally {
+      setIsScraping(false);
     }
   };
 
@@ -451,13 +479,21 @@ export default function SignalsDashboard() {
             </Button>
             <Button
               variant="outline"
+              onClick={handleScrapeJobs}
+              disabled={isScraping || isRefreshing}
+            >
+              <Search className={`h-4 w-4 mr-2 ${isScraping ? "animate-pulse" : ""}`} />
+              {isScraping ? "Scraping..." : "Scrape Jobs"}
+            </Button>
+            <Button
+              variant="outline"
               onClick={handleEnrichWithAI}
-              disabled={isRefreshing}
+              disabled={isRefreshing || isScraping}
             >
               <Wand2 className="h-4 w-4 mr-2" />
               AI Enrich
             </Button>
-            <Button onClick={handleRefresh} disabled={isRefreshing}>
+            <Button onClick={handleRefresh} disabled={isRefreshing || isScraping}>
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
               Refresh
             </Button>
