@@ -205,63 +205,97 @@ const EUROPE_KEYWORDS = [
   "france", "netherlands", "switzerland", "italy", "spain", "sweden", "norway", "denmark"
 ];
 
-function detectRegionFromContent(text: string, defaultRegion: string): string {
+// STRICT region detection - must match feed region OR clearly match content region
+// No cross-region pollution allowed (e.g., USA news cannot appear in London)
+function detectRegionFromContent(text: string, feedRegion: string): string | null {
   const lowerText = text.toLowerCase();
   
-  // Check London first (most specific for UK)
+  // Count matches for each region
   const londonMatches = LONDON_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
-  if (londonMatches >= 1) return "london";
-  
-  // Check USA
   const usaMatches = USA_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
-  if (usaMatches >= 1) return "usa";
-  
-  // Check UAE
   const uaeMatches = UAE_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
-  if (uaeMatches >= 1) return "uae";
-  
-  // Check Europe
   const europeMatches = EUROPE_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
-  if (europeMatches >= 1) return "europe";
   
-  return defaultRegion;
+  // Find the dominant region in content
+  const scores = [
+    { region: "london", score: londonMatches * 2 }, // London is more specific, higher weight
+    { region: "usa", score: usaMatches },
+    { region: "uae", score: uaeMatches },
+    { region: "europe", score: europeMatches },
+  ];
+  
+  const maxScore = Math.max(...scores.map(s => s.score));
+  const dominantRegion = maxScore > 0 ? scores.find(s => s.score === maxScore)!.region : null;
+  
+  // STRICT RULE: If content clearly mentions a different region, reject the signal
+  // This prevents USA news appearing in London feed, etc.
+  if (dominantRegion && dominantRegion !== feedRegion) {
+    // Check if the non-matching region has strong enough signal
+    if (maxScore >= 2) {
+      console.log(`Region mismatch: feed=${feedRegion}, content=${dominantRegion}, rejecting`);
+      return null; // Reject - wrong region
+    }
+  }
+  
+  // If content matches feed region or no strong region detected, use feed region
+  return feedRegion;
 }
 
-// STRICT: Only PE/VC relevant keywords - must match at least one
-const PE_VC_REQUIRED_KEYWORDS = [
-  // Fund/investment terms
-  "private equity", "venture capital", "pe fund", "vc fund", "growth equity",
-  "buyout", "lbo", "leveraged buyout", "fund close", "closes fund", "raises fund",
-  "portfolio company", "portco", "investment firm", "asset management",
-  // Deal terms
-  "acquisition", "acquires", "acquired", "merger", "m&a", "deal",
-  "investment", "invests", "invested", "backing", "backed by",
-  // PE/VC firm indicators
-  "capital partners", "equity partners", "ventures", "capital management",
-  "infrastructure fund", "credit fund", "debt fund", "real estate fund",
-  // Leadership moves at financial firms
-  "managing director", "partner", "principal", "vice president",
-  // Hiring signals at PE/VC
-  "talent acquisition", "chro", "head of hr", "head of talent",
-  "hiring manager", "recruiter", "people team",
+// ============================================================================
+// STRICT SECTOR WHITELIST - Only these financial sectors are relevant
+// ============================================================================
+const ALLOWED_SECTORS = [
+  // Private Equity
+  "private equity", "pe fund", "buyout", "lbo", "leveraged buyout", "growth equity",
+  "portco", "portfolio company", "mid-market", "lower middle market", "upper middle market",
+  // Venture Capital
+  "venture capital", "vc fund", "seed fund", "series a", "series b", "series c", 
+  "early stage", "growth stage", "startup fund", "tech investor",
+  // Banks / Investment Banking
+  "investment bank", "merchant bank", "bulge bracket", "boutique bank", 
+  "m&a advisory", "capital markets", "corporate finance", "leveraged finance",
+  "goldman sachs", "morgan stanley", "jpmorgan", "jp morgan", "barclays", "hsbc",
+  "deutsche bank", "ubs", "credit suisse", "lazard", "rothschild", "evercore",
+  "moelis", "centerview", "pjt partners", "perella weinberg", "greenhill",
+  // FinTech
+  "fintech", "financial technology", "payments", "neobank", "digital bank",
+  "insurtech", "wealthtech", "regtech", "proptech", "lending platform",
+  // Consultancies (Strategy/Big 4)
+  "mckinsey", "bain", "boston consulting", "bcg", "kearney", "oliver wyman",
+  "roland berger", "strategy&", "pwc", "deloitte", "kpmg", "ey ", "ernst & young",
+  "accenture", "alvarez & marsal", "fti consulting",
+  // Secondaries
+  "secondaries", "secondary fund", "secondary market", "gp-led", "lp-led",
+  "continuation fund", "continuation vehicle", "direct secondary", "preferred equity",
+  // Related Financial Terms
+  "fund close", "closes fund", "raises fund", "capital raise", "fund launch",
+  "aum", "assets under management", "dry powder", "carried interest", "co-invest",
+  "infrastructure fund", "credit fund", "debt fund", "real estate fund", "real assets",
+  "hedge fund", "asset management", "wealth management", "family office",
 ];
 
-// EXCLUDED: Companies/topics that are NOT relevant to PE/VC recruiting
+// EXCLUDED: Companies/topics that are NOT relevant
 const EXCLUDED_COMPANIES = [
   // Gaming/Entertainment
   "playstation", "xbox", "nintendo", "activision", "blizzard", "ea sports", "ubisoft",
   "netflix", "disney", "warner", "paramount", "sony pictures", "universal studios",
+  "spotify", "tiktok", "snapchat", "twitter", "reddit",
   // Consumer tech giants (not PE/VC focused)
   "apple", "google", "meta", "facebook", "amazon", "microsoft", "tesla", "spacex",
+  "uber", "lyft", "airbnb", "doordash", "instacart",
   // Retail/Consumer
   "nike", "adidas", "coca-cola", "pepsi", "mcdonalds", "starbucks", "walmart", "target",
-  "ikea", "zara", "h&m", "uniqlo", "costco", "home depot",
+  "ikea", "zara", "h&m", "uniqlo", "costco", "home depot", "lowes",
   // Automotive
   "ford", "gm", "general motors", "toyota", "honda", "bmw", "mercedes", "volkswagen",
-  // Pharma (unless PE-backed)
-  "pfizer", "moderna", "johnson & johnson", "merck", "novartis",
+  "rivian", "lucid", "nio", "ferrari", "porsche",
+  // Pharma/Healthcare (unless PE-backed)
+  "pfizer", "moderna", "johnson & johnson", "merck", "novartis", "roche", "astrazeneca",
   // Airlines/Travel
-  "delta", "united airlines", "american airlines", "lufthansa", "ryanair",
+  "delta", "united airlines", "american airlines", "lufthansa", "ryanair", "easyjet",
+  "marriott", "hilton", "hyatt",
+  // Telecom/Media
+  "at&t", "verizon", "t-mobile", "vodafone", "bt group", "comcast", "sky",
 ];
 
 // EXCLUDED: News topics that are NOT relevant
@@ -269,16 +303,19 @@ const EXCLUDED_TOPICS = [
   // Politics
   "customs union", "brexit", "parliament", "election", "senate", "congress",
   "white house", "downing street", "european commission", "nato", "un ",
-  "immigration", "border", "tariff", "sanctions",
+  "immigration", "border", "tariff", "sanctions", "trade war", "political",
+  "trump", "biden", "starmer", "sunak", "macron", "scholz", "putin", "zelensky",
   // General news
-  "weather", "climate change", "earthquake", "hurricane", "flood",
-  "sports", "championship", "world cup", "olympics", "premier league",
-  "celebrity", "entertainment", "movie", "film release", "album",
+  "weather", "climate crisis", "earthquake", "hurricane", "flood", "wildfire",
+  "sports", "championship", "world cup", "olympics", "premier league", "nfl", "nba",
+  "celebrity", "entertainment", "movie", "film release", "album", "concert",
+  "royal family", "prince", "princess", "king charles",
   // Crime/Accidents
-  "murder", "shooting", "crash", "accident", "arrested", "trial",
+  "murder", "shooting", "crash", "accident", "arrested", "trial", "prison",
+  "terror", "attack", "war ", "military",
 ];
 
-function isRelevantToPEVC(text: string): boolean {
+function isRelevantToFinancialSectors(text: string): boolean {
   const lowerText = text.toLowerCase();
   
   // Check for excluded companies
@@ -295,17 +332,17 @@ function isRelevantToPEVC(text: string): boolean {
     }
   }
   
-  // Must contain at least one PE/VC keyword
-  const hasPEVCKeyword = PE_VC_REQUIRED_KEYWORDS.some(kw => lowerText.includes(kw));
-  return hasPEVCKeyword;
+  // MUST match at least one allowed sector keyword
+  const matchesSector = ALLOWED_SECTORS.some(sector => lowerText.includes(sector));
+  return matchesSector;
 }
 
 function detectTierAndType(text: string): { tier: string; signalType: string; score: number } | null {
   const lowerText = text.toLowerCase();
   
-  // FIRST: Check if relevant to PE/VC at all
-  if (!isRelevantToPEVC(lowerText)) {
-    return null; // Skip entirely
+  // FIRST: Check if relevant to financial sectors
+  if (!isRelevantToFinancialSectors(lowerText)) {
+    return null; // Skip entirely - not in allowed sectors
   }
   
   // Check each tier in priority order - strict matching
@@ -321,7 +358,7 @@ function detectTierAndType(text: string): { tier: string; signalType: string; sc
     }
   }
   
-  // If passed PE/VC filter but no tier match, assign tier_3
+  // If passed sector filter but no tier match, assign tier_3
   return { tier: "tier_3", signalType: "industry_events", score: 35 };
 }
 
@@ -528,6 +565,13 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
       continue;
     }
     
+    // FILTER: Must match at least one allowed sector
+    const companyText = `${company} ${companyJobList.map((j: any) => j.title || "").join(" ")}`;
+    if (!isRelevantToFinancialSectors(companyText)) {
+      console.log(`Skipping non-financial company: ${company}`);
+      continue;
+    }
+    
     const jobCount = companyJobList.length;
     
     // Calculate quality score based on multiple factors
@@ -653,8 +697,12 @@ Deno.serve(async (req) => {
           const amountData = extractAmount(fullText);
           const company = extractCompany(item.title, item.description);
           
-          // Detect actual region from content (override feed region if content mentions specific location)
-          const detectedRegion = detectRegionFromContent(fullText, reg);
+          // STRICT: Detect region and reject if content belongs to different region
+          const validatedRegion = detectRegionFromContent(fullText, reg);
+          if (!validatedRegion) {
+            console.log(`Skipping signal due to region mismatch: ${item.title.slice(0, 50)}...`);
+            continue; // Skip - wrong region content
+          }
           
           // Boost score for fund closes with large amounts
           let score = tierResult.score;
@@ -667,7 +715,7 @@ Deno.serve(async (req) => {
           allSignals.push({
             title: item.title.slice(0, 255),
             company: company,
-            region: detectedRegion,
+            region: validatedRegion,
             tier: tierResult.tier,
             score: score,
             amount: amountData?.amount || null,
@@ -690,12 +738,38 @@ Deno.serve(async (req) => {
 
     console.log(`Total signals collected: ${allSignals.length}`);
 
-    // Deduplicate by URL and title
-    const uniqueSignals = allSignals.filter((signal, index, self) =>
-      index === self.findIndex(s => s.url === signal.url || s.title === signal.title)
-    );
+    // ENHANCED DEDUPLICATION: By URL, exact title, and normalized company+type combo
+    const seenUrls = new Set<string>();
+    const seenTitles = new Set<string>();
+    const seenCompanySignals = new Set<string>();
+    
+    const uniqueSignals = allSignals.filter((signal) => {
+      // Skip if URL already seen
+      if (signal.url && seenUrls.has(signal.url)) {
+        return false;
+      }
+      
+      // Skip if exact title already seen
+      const normalizedTitle = signal.title.toLowerCase().trim();
+      if (seenTitles.has(normalizedTitle)) {
+        return false;
+      }
+      
+      // Skip if same company + signal type already seen (prevents near-duplicates)
+      if (signal.company) {
+        const companyKey = `${signal.company.toLowerCase()}_${signal.signal_type}_${signal.region}`;
+        if (seenCompanySignals.has(companyKey)) {
+          return false;
+        }
+        seenCompanySignals.add(companyKey);
+      }
+      
+      if (signal.url) seenUrls.add(signal.url);
+      seenTitles.add(normalizedTitle);
+      return true;
+    });
 
-    console.log(`Unique signals after dedup: ${uniqueSignals.length}`);
+    console.log(`Unique signals after enhanced dedup: ${uniqueSignals.length}`);
 
     let insertedCount = 0;
     if (uniqueSignals.length > 0) {
