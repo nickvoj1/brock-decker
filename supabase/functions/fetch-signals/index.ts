@@ -151,10 +151,22 @@ const RSS_FEEDS = {
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
+
+// Additional broad keywords for more permissive matching
+const BROAD_BUSINESS_KEYWORDS = [
+  "investment", "investor", "fund", "capital", "equity", "venture", "startup",
+  "growth", "expansion", "funding", "series a", "series b", "series c", "ipo",
+  "merger", "deal", "financing", "raise", "million", "billion", "valuation",
+  "portfolio", "backed", "led by", "invest", "stake", "buyout", "exit",
+  "hire", "hiring", "recruit", "appoint", "join", "ceo", "cfo", "cto", "chro",
+  "partner", "managing director", "executive", "leadership", "team",
+  "office", "opens", "launch", "expand", "enter", "market", "growth"
+];
+
 function detectTierAndType(text: string): { tier: string; signalType: string; score: number } | null {
   const lowerText = text.toLowerCase();
   
-  // Check each tier in priority order
+  // Check each tier in priority order - strict matching
   for (const [tierKey, tierConfig] of Object.entries(TIER_TAXONOMY)) {
     for (const [signalType, keywords] of Object.entries(tierConfig.keywords)) {
       const matchCount = keywords.filter((kw: string) => lowerText.includes(kw)).length;
@@ -165,6 +177,16 @@ function detectTierAndType(text: string): { tier: string; signalType: string; sc
         return { tier: tierKey, signalType, score };
       }
     }
+  }
+  
+  // Fallback: broad business keyword matching for Tier 3
+  const broadMatchCount = BROAD_BUSINESS_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
+  if (broadMatchCount >= 2) {
+    // Multiple broad matches → tier_3 with moderate score
+    return { tier: "tier_3", signalType: "industry_events", score: 35 + Math.min(broadMatchCount * 3, 15) };
+  } else if (broadMatchCount === 1) {
+    // Single broad match → tier_3 with low score
+    return { tier: "tier_3", signalType: "industry_events", score: 30 };
   }
   
   return null;
