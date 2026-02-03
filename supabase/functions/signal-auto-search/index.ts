@@ -285,6 +285,9 @@ async function revealEmail(apolloApiKey: string, personId: string): Promise<stri
   }
 }
 
+// Track credit usage globally
+let globalCreditsUsed = 0
+
 async function searchWithStrategy(
   apolloApiKey: string,
   strategy: SearchStrategy,
@@ -293,7 +296,8 @@ async function searchWithStrategy(
   seenEmails: Set<string>,
   seenPersonIds: Set<string>,
   targetCompany: string,
-  maxPerCompany: number
+  maxPerCompany: number,
+  maxContactsNeeded: number = 50 // Limit how many contacts we actually need
 ): Promise<ApolloContact[]> {
   const contacts: ApolloContact[] = []
   const pendingReveals: { person: Record<string, unknown>; categoryName: string }[] = []
@@ -314,6 +318,12 @@ async function searchWithStrategy(
 
   // Search up to 3 pages per strategy
   for (let page = 1; page <= 3; page++) {
+    // CREDIT OPTIMIZATION: Stop if we already have enough contacts
+    if (contacts.length >= maxContactsNeeded) {
+      console.log(`  CREDIT SAVER: Already have ${contacts.length} contacts, skipping further pages`)
+      break
+    }
+    
     queryParams.set('per_page', '25')
     queryParams.set('page', String(page))
 
@@ -343,6 +353,9 @@ async function searchWithStrategy(
       }
 
       for (const person of people) {
+        // CREDIT OPTIMIZATION: Stop collecting if we have enough
+        if (contacts.length + pendingReveals.length >= maxContactsNeeded) break
+        
         const personId = person.id
         if (!personId || seenPersonIds.has(personId)) continue
         seenPersonIds.add(personId)
@@ -388,9 +401,10 @@ async function searchWithStrategy(
               category: categoryName,
             })
             seenEmails.add(email)
+            console.log(`  [Direct] ${fullName} at ${personCompany} (email from search)`)
           }
         } else {
-          // Queue for reveal
+          // Queue for reveal (only if we still need more contacts)
           pendingReveals.push({ person, categoryName })
         }
       }
@@ -401,11 +415,24 @@ async function searchWithStrategy(
     }
   }
 
-  // Enrich people to get emails using people/match endpoint
+  // CREDIT OPTIMIZATION: Only enrich as many as we actually need
   if (pendingReveals.length > 0) {
-    console.log(`  Enriching ${pendingReveals.length} contacts...`)
+    const contactsStillNeeded = maxContactsNeeded - contacts.length
+    const limitedPendingReveals = pendingReveals.slice(0, Math.max(0, contactsStillNeeded))
     
-    for (const pending of pendingReveals) {
+    if (limitedPendingReveals.length < pendingReveals.length) {
+      console.log(`  CREDIT SAVER: Only enriching ${limitedPendingReveals.length}/${pendingReveals.length} (have ${contacts.length} already)`)
+    } else if (limitedPendingReveals.length > 0) {
+      console.log(`  Enriching ${limitedPendingReveals.length} contacts...`)
+    }
+    
+    for (const pending of limitedPendingReveals) {
+      // Double-check we still need more contacts
+      if (contacts.length >= maxContactsNeeded) {
+        console.log(`  CREDIT SAVER: Stopping enrichment - reached ${contacts.length} contacts`)
+        break
+      }
+      
       const person = pending.person
       const personId = person.id as string
       
@@ -418,6 +445,7 @@ async function searchWithStrategy(
           },
           body: JSON.stringify({ id: personId }),
         })
+        globalCreditsUsed++ // Track credit usage
 
         if (enrichResponse.ok) {
           const enriched = await enrichResponse.json()
@@ -447,6 +475,7 @@ async function searchWithStrategy(
             category: pending.categoryName,
           })
           seenEmails.add(email)
+          console.log(`  [Enriched] ${fullName} at ${personCompany}`)
         }
         
         // Small delay between calls
@@ -619,6 +648,8 @@ Deno.serve(async (req) => {
       for (const strategy of strategies) {
         console.log(`  Strategy: ${strategy.name}`)
 
+        // Pass maxContactsNeeded to limit credit usage per category
+        const maxContactsPerCategory = 15 // Limit contacts per category to save credits
         const contacts = await searchWithStrategy(
           apolloApiKey,
           strategy,
@@ -627,7 +658,8 @@ Deno.serve(async (req) => {
           seenEmails,
           seenPersonIds,
           strategy.company,
-          MAX_PER_COMPANY
+          MAX_PER_COMPANY,
+          maxContactsPerCategory
         )
 
         if (contacts.length > 0) {
@@ -647,7 +679,15 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`\nSearch complete: ${allContacts.length} contacts found across ${categoriesWithResults.length} categories`)
+    // Log credit usage summary
+    const directContacts = allContacts.length - globalCreditsUsed
+    console.log(`\n=== CREDIT USAGE SUMMARY ===`)
+    console.log(`Total contacts: ${allContacts.length}`)
+    console.log(`Direct (free): ${Math.max(0, directContacts)}`)
+    console.log(`Enriched (paid): ${globalCreditsUsed} credits`)
+    console.log(`============================\n`)
+    
+    console.log(`Search complete: ${allContacts.length} contacts found across ${categoriesWithResults.length} categories`)
     console.log(`Categories with results: ${categoriesWithResults.join(', ')}`)
 
     // Update signal with contacts count
@@ -664,8 +704,20 @@ Deno.serve(async (req) => {
       categoriesWithResults,
     }
 
+    // Reset global counter for next request
+    const creditsUsedThisRun = globalCreditsUsed
+    globalCreditsUsed = 0
+
     return new Response(
-      JSON.stringify({ success: true, data: result }),
+      JSON.stringify({ 
+        success: true, 
+        data: result,
+        creditUsage: {
+          totalContacts: allContacts.length,
+          directContacts: Math.max(0, allContacts.length - creditsUsedThisRun),
+          creditsUsed: creditsUsedThisRun,
+        }
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
