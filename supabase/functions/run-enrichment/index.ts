@@ -338,6 +338,55 @@ function companiesMatch(target: string, candidate: string): boolean {
   return false
 }
 
+// ============ Law Firm Detection ============
+// Law firms often get mixed into PE/Buy Side results because they advise on deals
+// They're typically named after founding partners (multiple surnames)
+const LAW_FIRM_SUFFIXES = [
+  'llp', 'law', 'legal', 'solicitors', 'attorneys', 'barristers', 
+  'advocates', 'avocats', 'rechtsanwälte', 'abogados', 'advogados',
+  'notaries', 'notaires', 'law firm', 'law office', 'law offices',
+  'legal services', 'legal group', 'chambers'
+]
+
+const LAW_FIRM_KEYWORDS = [
+  'law firm', 'legal practice', 'legal counsel', 'solicitor', 
+  'barrister', 'attorney at law', 'attorneys at law'
+]
+
+function isLawFirm(companyName: string, industry?: string | null): boolean {
+  if (!companyName) return false
+  
+  const nameLower = companyName.toLowerCase().trim()
+  
+  // Check for law firm suffixes in company name
+  for (const suffix of LAW_FIRM_SUFFIXES) {
+    if (nameLower.endsWith(` ${suffix}`) || nameLower === suffix) {
+      console.log(`[LAW FIRM EXCLUDED] "${companyName}" - matched suffix: ${suffix}`)
+      return true
+    }
+  }
+  
+  // Check for law firm keywords in company name
+  for (const keyword of LAW_FIRM_KEYWORDS) {
+    if (nameLower.includes(keyword)) {
+      console.log(`[LAW FIRM EXCLUDED] "${companyName}" - matched keyword: ${keyword}`)
+      return true
+    }
+  }
+  
+  // Check industry field from Apollo
+  if (industry) {
+    const industryLower = industry.toLowerCase()
+    if (industryLower.includes('law') || industryLower.includes('legal services') || 
+        industryLower.includes('legal practice') || industryLower === 'legal') {
+      console.log(`[LAW FIRM EXCLUDED] "${companyName}" - industry: ${industry}`)
+      return true
+    }
+  }
+  
+  return false
+}
+
 // Extract company from signal title (fallback when signal.company fails)
 function extractCompanyFromSignalTitle(title: string): string {
   if (!title) return ''
@@ -872,6 +921,7 @@ Deno.serve(async (req) => {
               }
               
               const companyName = person.organization?.name || person.organization_name || 'Unknown'
+              const personIndustry = person.organization?.industry || null
               const personLocation = person.city || person.state || person.country || 'Unknown'
               
               // For signal-based searches: STRICT company matching
@@ -880,6 +930,11 @@ Deno.serve(async (req) => {
                   // Skip contacts not from target company
                   continue
                 }
+              }
+              
+              // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
+              if (isLawFirm(companyName, personIndustry)) {
+                continue
               }
               
               // Skip contacts from candidate's previous employers
@@ -1197,10 +1252,16 @@ Deno.serve(async (req) => {
                 if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= maxContacts) break
                 
                 const personCompanyName = person.organization?.name || person.organization_name || 'Unknown'
+                const personIndustry = person.organization?.industry || null
                 const personLocation = person.city || person.state || person.country || 'Unknown'
                 
                 // STRICT company matching - must match target
                 if (!companiesMatch(targetCompany, personCompanyName)) {
+                  continue
+                }
+                
+                // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
+                if (isLawFirm(personCompanyName, personIndustry)) {
                   continue
                 }
                 
