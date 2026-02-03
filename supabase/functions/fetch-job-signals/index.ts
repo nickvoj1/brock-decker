@@ -194,6 +194,52 @@ function isSeniorRole(text: string): boolean {
 }
 
 /**
+ * Extract actual job posting URLs from page links
+ */
+function extractJobUrls(links: string[], baseUrl: string): string[] {
+  const jobUrlPatterns = [
+    /\/job[s]?\//i,
+    /\/career[s]?\//i,
+    /\/position[s]?\//i,
+    /\/opening[s]?\//i,
+    /\/vacancies\//i,
+    /\/opportunity\//i,
+    /\/apply\//i,
+    /\/role[s]?\//i,
+    /jobid=/i,
+    /posting_id=/i,
+    /\/jid\//i,
+    /greenhouse\.io\/.*\/jobs\//i,
+    /lever\.co\/.*\//i,
+    /workday\.com\/.*\/job\//i,
+    /smartrecruiters\.com\/.*\//i,
+    /boards\.greenhouse\.io\//i,
+    /jobs\.lever\.co\//i,
+  ];
+  
+  const jobUrls: string[] = [];
+  
+  for (const link of links) {
+    // Skip generic pages
+    if (link.endsWith('/careers') || link.endsWith('/careers/') || 
+        link.endsWith('/jobs') || link.endsWith('/jobs/') ||
+        link.includes('#') || link.includes('?utm') ||
+        link.includes('/about') || link.includes('/contact') ||
+        link.includes('/login') || link.includes('/register')) {
+      continue;
+    }
+    
+    // Check if link looks like a job posting
+    const isJobUrl = jobUrlPatterns.some(pattern => pattern.test(link));
+    if (isJobUrl && !jobUrls.includes(link)) {
+      jobUrls.push(link);
+    }
+  }
+  
+  return jobUrls.slice(0, 10); // Max 10 job URLs
+}
+
+/**
  * Extract job positions from markdown content
  */
 function extractJobPositions(markdown: string): ExtractedJob[] {
@@ -300,6 +346,16 @@ async function scrapeCareerPage(
       return signals;
     }
     
+    // Extract actual job posting URLs from the page links
+    const jobUrls = extractJobUrls(links, pageConfig.url);
+    console.log(`Found ${jobUrls.length} job URLs from ${pageConfig.company}`);
+    
+    // If no specific job URLs found, skip this company (no real openings detected)
+    if (jobUrls.length === 0) {
+      console.log(`No specific job URLs found for ${pageConfig.company}, skipping (no verified openings)`);
+      return signals;
+    }
+    
     // Extract job positions (excluding junior roles)
     const extractedPositions = extractJobPositions(markdown);
     console.log(`Extracted ${extractedPositions.length} non-junior positions from ${pageConfig.company}`);
@@ -335,15 +391,18 @@ async function scrapeCareerPage(
       ? `${pageConfig.company} hiring: ${positionSummary} (+${extractedPositions.length - 2} more)`
       : `${pageConfig.company} hiring: ${positionSummary}`;
     
-    // Build description with location and positions
+    // Build description with location, positions, and job count
     const positionList = positionsToShow.join(" | ");
-    const description = `📍 ${finalLocation}\n\n**Open Positions:** ${positionList}`;
+    const description = `📍 ${finalLocation}\n\n**Open Positions (${jobUrls.length} verified):** ${positionList}`;
+    
+    // Use the FIRST actual job URL instead of generic career page
+    const primaryJobUrl = jobUrls[0];
     
     signals.push({
       title,
       company: pageConfig.company,
       description: description.substring(0, 500),
-      url: pageConfig.url,
+      url: primaryJobUrl, // Direct job posting URL, not career page
       region: pageConfig.region,
       signalType,
       tier,
@@ -352,7 +411,7 @@ async function scrapeCareerPage(
       position: positionsToShow.join(", "),
     });
     
-    console.log(`✓ ${pageConfig.company}: ${extractedPositions.length} roles at ${finalLocation}`);
+    console.log(`✓ ${pageConfig.company}: ${extractedPositions.length} roles at ${finalLocation}, URL: ${primaryJobUrl}`);
     return signals;
     
   } catch (error) {
