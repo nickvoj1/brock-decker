@@ -22,6 +22,10 @@ export interface Signal {
   contacts_url: string | null;
   details: Record<string, unknown> | null;
   created_at: string;
+  // AI-powered qualitative fields
+  ai_insight: string | null;
+  ai_pitch: string | null;
+  ai_enriched_at: string | null;
 }
 
 export interface SignalsResponse {
@@ -116,6 +120,25 @@ export async function refreshSignals(profileName: string, region?: string) {
     return { success: false, error: response?.error || "Unknown error" };
   } catch (err) {
     console.error("Refresh signals failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Enrich signals with AI-powered qualitative insights
+export async function enrichSignalsWithAI(signalIds?: string[]) {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("enrich-signal-ai", {
+      body: signalIds ? { signalIds } : { enrichAll: true },
+    });
+
+    if (error) {
+      console.error("AI enrichment error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("AI enrichment failed:", err);
     return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
 }

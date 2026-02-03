@@ -38,3 +38,21 @@ verify_jwt = false
 
 [functions.analyze-bullhorn-skills]
 verify_jwt = false
+
+[functions.ai-company-intel]
+verify_jwt = false
+
+[functions.ai-cv-analysis]
+verify_jwt = false
+
+[functions.ai-skills-classifier]
+verify_jwt = false
+
+[functions.fetch-signals]
+verify_jwt = false
+
+[functions.signal-auto-search]
+verify_jwt = false
+
+[functions.enrich-signal-ai]
+verify_jwt = false

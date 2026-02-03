@@ -5,7 +5,8 @@ import {
   RefreshCw,
   Filter,
   Download,
-  Loader2
+  Loader2,
+  Wand2
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,6 +35,7 @@ import {
   markSignalBullhornAdded,
   buildBullhornNote,
   exportSignalsToCSV,
+  enrichSignalsWithAI,
   Signal 
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
@@ -169,12 +171,46 @@ export default function SignalsDashboard() {
       if (response.success && "data" in response && response.data) {
         toast.success(`Refreshed: ${response.data.fetched || 0} new signals found`);
         await fetchSignals();
+        
+        // Trigger AI enrichment for new signals
+        toast.info("Enriching signals with AI insights...", { duration: 5000 });
+        const enrichResult = await enrichSignalsWithAI();
+        if (enrichResult.success && enrichResult.enriched > 0) {
+          toast.success(`AI enriched ${enrichResult.enriched} signals`);
+          await fetchSignals(); // Reload to show AI insights
+        }
       } else {
         toast.error("Failed to refresh signals");
       }
     } catch (error) {
       console.error("Error refreshing signals:", error);
       toast.error("Failed to refresh signals");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleEnrichWithAI = async () => {
+    const unenrichedSignals = signals.filter(s => !s.ai_enriched_at && s.region === activeRegion);
+    if (unenrichedSignals.length === 0) {
+      toast.info("All signals already enriched");
+      return;
+    }
+    
+    setIsRefreshing(true);
+    toast.info(`Enriching ${unenrichedSignals.length} signals with AI...`, { duration: 10000 });
+    
+    try {
+      const result = await enrichSignalsWithAI(unenrichedSignals.map(s => s.id));
+      if (result.success) {
+        toast.success(`AI enriched ${result.enriched} signals`);
+        await fetchSignals();
+      } else {
+        toast.error(result.error || "AI enrichment failed");
+      }
+    } catch (error) {
+      console.error("AI enrichment error:", error);
+      toast.error("Failed to enrich signals");
     } finally {
       setIsRefreshing(false);
     }
@@ -383,6 +419,14 @@ export default function SignalsDashboard() {
             >
               <Download className="h-4 w-4 mr-1" />
               Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleEnrichWithAI}
+              disabled={isRefreshing}
+            >
+              <Wand2 className="h-4 w-4 mr-2" />
+              AI Enrich
             </Button>
             <Button onClick={handleRefresh} disabled={isRefreshing}>
               <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
