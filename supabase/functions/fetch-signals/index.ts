@@ -6,6 +6,34 @@ const corsHeaders = {
 };
 
 // ============================================================================
+// VALID SIGNAL TYPES (must match database constraint)
+// Valid values: 'funding', 'hiring', 'expansion', 'c_suite', 'team_growth'
+// ============================================================================
+const SIGNAL_TYPE_MAP: Record<string, string> = {
+  // Tier 1 internal types -> DB types
+  pe_vc_investment: "funding",
+  fundraise_lbo: "funding",
+  acquisition: "expansion",
+  new_ceo_cfo_chro: "c_suite",
+  new_fund_launch: "funding",
+  portfolio_hiring: "hiring",
+  rapid_job_postings: "hiring",
+  // Tier 2 internal types -> DB types
+  new_recruiter: "team_growth",
+  office_expansion: "expansion",
+  senior_churn: "c_suite",
+  product_launch: "expansion",
+  // Tier 3 internal types -> DB types
+  linkedin_hiring_posts: "hiring",
+  careers_page_refresh: "hiring",
+  industry_events: "expansion",
+};
+
+function mapToValidSignalType(internalType: string): string {
+  return SIGNAL_TYPE_MAP[internalType] || "expansion";
+}
+
+// ============================================================================
 // TIER TAXONOMY - Hardcoded signal classification
 // ============================================================================
 const TIER_TAXONOMY = {
@@ -78,9 +106,9 @@ const REGIONS = {
   },
   europe: { 
     label: "Europe", 
-    // Expanded Adzuna countries for better coverage
-    adzunaCountries: ["de", "fr", "nl", "be", "at", "ch", "it", "es", "se", "pl", "ie", "pt", "cz", "hu", "fi", "no", "dk"],
-    cities: ["Berlin", "Paris", "Amsterdam", "Frankfurt", "Munich", "Zurich", "Milan", "Madrid", "Stockholm", "Copenhagen", "Vienna", "Brussels", "Luxembourg", "Dublin", "Barcelona", "Hamburg", "Düsseldorf"],
+    // Streamlined to key financial hubs (fewer countries = faster)
+    adzunaCountries: ["de", "fr", "nl", "ch"],
+    cities: ["Berlin", "Paris", "Amsterdam", "Frankfurt", "Munich", "Zurich"],
     locationFilter: null,
   },
   uae: { 
@@ -342,41 +370,16 @@ async function parseRSSFeed(url: string): Promise<any[]> {
 }
 
 // ============================================================================
-// ADZUNA JOB SIGNAL FETCHING - ENHANCED FOR QUALITY & VOLUME
+// ADZUNA JOB SIGNAL FETCHING - STREAMLINED FOR SPEED
 // ============================================================================
 
-// High-value job title keywords that indicate hiring intent
+// Consolidated search strategies (fewer API calls = faster response)
 const ADZUNA_SEARCH_STRATEGIES = [
-  // Strategy 1: PE/VC specific roles
-  { keywords: "private equity analyst OR private equity associate OR portfolio manager", weight: 1.5 },
-  { keywords: "venture capital associate OR VC analyst OR investment associate", weight: 1.5 },
-  { keywords: "fund accountant OR fund controller OR fund operations", weight: 1.3 },
-  { keywords: "investor relations OR IR manager OR capital raising", weight: 1.4 },
-  
-  // Strategy 2: C-suite and senior leadership (high intent)
-  { keywords: "chief executive officer OR CEO OR managing director", weight: 1.6 },
-  { keywords: "chief financial officer OR CFO OR finance director", weight: 1.6 },
-  { keywords: "chief operating officer OR COO OR operations director", weight: 1.5 },
-  { keywords: "chief human resources OR CHRO OR people director OR HR director", weight: 1.4 },
-  
-  // Strategy 3: Talent acquisition (very high intent - they're actively building)
-  { keywords: "talent acquisition OR recruiter OR recruiting manager", weight: 1.7 },
-  { keywords: "head of people OR VP people OR HR business partner", weight: 1.5 },
-  
-  // Strategy 4: M&A and deals (high intent signals)
-  { keywords: "M&A analyst OR mergers acquisitions OR deal origination", weight: 1.6 },
-  { keywords: "corporate development OR business development director", weight: 1.4 },
-  { keywords: "transaction services OR due diligence", weight: 1.5 },
-  
-  // Strategy 5: Finance and operations
-  { keywords: "financial controller OR head of finance OR finance manager", weight: 1.3 },
-  { keywords: "investment manager OR investment director OR asset manager", weight: 1.4 },
-  { keywords: "portfolio operations OR value creation OR operating partner", weight: 1.5 },
-  
-  // Strategy 6: Broad financial services
-  { keywords: "investment banking OR capital markets OR equity research", weight: 1.2 },
-  { keywords: "hedge fund OR asset management OR wealth management", weight: 1.2 },
-  { keywords: "credit analyst OR debt capital OR leveraged finance", weight: 1.3 },
+  // Combined PE/VC and leadership roles
+  { keywords: "private equity OR venture capital OR investment manager", weight: 1.5 },
+  { keywords: "CEO OR CFO OR managing director OR chief", weight: 1.6 },
+  { keywords: "talent acquisition OR recruiter OR HR director", weight: 1.5 },
+  { keywords: "M&A OR corporate development OR finance director", weight: 1.4 },
 ];
 
 // Senior title keywords for scoring boost
@@ -409,44 +412,36 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
   const seenJobIds = new Set<string>();
   
   for (const country of regionConfig.adzunaCountries) {
-    // Run multiple search strategies for broader coverage
+    // Run search strategies (streamlined for speed)
     for (const strategy of ADZUNA_SEARCH_STRATEGIES) {
       try {
-        // Fetch multiple pages per strategy (pages 1-3)
-        for (let page = 1; page <= 3; page++) {
-          const locationQuery = regionConfig.locationFilter || regionConfig.cities.slice(0, 8).join(" OR ");
-          const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}?app_id=${adzunaAppId}&app_key=${adzunaAppKey}&what=${encodeURIComponent(strategy.keywords)}&where=${encodeURIComponent(locationQuery)}&results_per_page=50&max_days_old=30&sort_by=date`;
-          
-          const response = await fetch(url);
-          
-          if (!response.ok) {
-            if (response.status === 429) {
-              console.log(`Adzuna rate limited for ${country}, waiting...`);
-              await new Promise(r => setTimeout(r, 1000));
-            }
-            continue;
+        // Fetch only page 1 for speed (50 results per strategy)
+        const locationQuery = regionConfig.locationFilter || regionConfig.cities.slice(0, 4).join(" OR ");
+        const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${adzunaAppId}&app_key=${adzunaAppKey}&what=${encodeURIComponent(strategy.keywords)}&where=${encodeURIComponent(locationQuery)}&results_per_page=50&max_days_old=30&sort_by=date`;
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          if (response.status === 429) {
+            console.log(`Adzuna rate limited for ${country}, skipping...`);
           }
-          
-          const data = await response.json();
-          const jobs = data.results || [];
-          
-          if (jobs.length === 0) break; // No more results, skip remaining pages
-          
-          // Add jobs avoiding duplicates
-          for (const job of jobs) {
-            const jobId = job.id || `${job.title}-${job.company?.display_name}`;
-            if (!seenJobIds.has(jobId)) {
-              seenJobIds.add(jobId);
-              allJobs.push({ ...job, strategyWeight: strategy.weight });
-            }
+          continue;
+        }
+        
+        const data = await response.json();
+        const jobs = data.results || [];
+        
+        // Add jobs avoiding duplicates
+        for (const job of jobs) {
+          const jobId = job.id || `${job.title}-${job.company?.display_name}`;
+          if (!seenJobIds.has(jobId)) {
+            seenJobIds.add(jobId);
+            allJobs.push({ ...job, strategyWeight: strategy.weight });
           }
         }
         
-        // Small delay between strategies to avoid rate limits
-        await new Promise(r => setTimeout(r, 100));
-        
       } catch (error) {
-        console.error(`Error fetching Adzuna for ${country} with strategy:`, error);
+        console.error(`Error fetching Adzuna for ${country}:`, error);
       }
     }
   }
@@ -530,7 +525,7 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
       region: region,
       tier: tier,
       score: baseScore,
-      signal_type: signalType,
+      signal_type: mapToValidSignalType(signalType),
       description: `${company} is actively expanding with ${jobCount} open positions. Roles include: ${uniqueTitles.join(", ")}. Locations: ${uniqueLocations.join(", ") || region.toUpperCase()}.`,
       source: "Adzuna Jobs",
       url: companyJobList[0]?.redirect_url || null,
@@ -610,7 +605,7 @@ Deno.serve(async (req) => {
             score: score,
             amount: amountData?.amount || null,
             currency: amountData?.currency || "EUR",
-            signal_type: tierResult.signalType,
+            signal_type: mapToValidSignalType(tierResult.signalType),
             description: item.description?.slice(0, 500) || null,
             url: item.url,
             source: feed.source,
