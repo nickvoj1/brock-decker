@@ -310,8 +310,92 @@ export type Database = {
         }
         Relationships: []
       }
+      signal_accuracy_metrics: {
+        Row: {
+          accuracy_percentage: number | null
+          correct_predictions: number | null
+          created_at: string
+          date: string
+          id: string
+          region: string
+          tier_1_accuracy: number | null
+          tier_2_accuracy: number | null
+          tier_3_accuracy: number | null
+          total_signals: number | null
+        }
+        Insert: {
+          accuracy_percentage?: number | null
+          correct_predictions?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          region: string
+          tier_1_accuracy?: number | null
+          tier_2_accuracy?: number | null
+          tier_3_accuracy?: number | null
+          total_signals?: number | null
+        }
+        Update: {
+          accuracy_percentage?: number | null
+          correct_predictions?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          region?: string
+          tier_1_accuracy?: number | null
+          tier_2_accuracy?: number | null
+          tier_3_accuracy?: number | null
+          total_signals?: number | null
+        }
+        Relationships: []
+      }
+      signal_feedback: {
+        Row: {
+          confidence_delta: number | null
+          correct_signal_type: string | null
+          correct_tier: string | null
+          created_at: string
+          created_by: string
+          feedback_note: string | null
+          id: string
+          signal_id: string
+          user_label: string
+        }
+        Insert: {
+          confidence_delta?: number | null
+          correct_signal_type?: string | null
+          correct_tier?: string | null
+          created_at?: string
+          created_by: string
+          feedback_note?: string | null
+          id?: string
+          signal_id: string
+          user_label: string
+        }
+        Update: {
+          confidence_delta?: number | null
+          correct_signal_type?: string | null
+          correct_tier?: string | null
+          created_at?: string
+          created_by?: string
+          feedback_note?: string | null
+          id?: string
+          signal_id?: string
+          user_label?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signal_feedback_signal_id_fkey"
+            columns: ["signal_id"]
+            isOneToOne: false
+            referencedRelation: "signals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       signals: {
         Row: {
+          ai_confidence: number | null
           ai_enriched_at: string | null
           ai_insight: string | null
           ai_pitch: string | null
@@ -326,11 +410,13 @@ export type Database = {
           description: string | null
           details: Json | null
           dismissed_by: string | null
+          feedback_count: number | null
           id: string
           is_dismissed: boolean | null
           is_high_intent: boolean | null
           published_at: string | null
           region: string
+          retrain_flag: boolean | null
           score: number | null
           signal_type: string | null
           source: string | null
@@ -340,6 +426,7 @@ export type Database = {
           url: string | null
         }
         Insert: {
+          ai_confidence?: number | null
           ai_enriched_at?: string | null
           ai_insight?: string | null
           ai_pitch?: string | null
@@ -354,11 +441,13 @@ export type Database = {
           description?: string | null
           details?: Json | null
           dismissed_by?: string | null
+          feedback_count?: number | null
           id?: string
           is_dismissed?: boolean | null
           is_high_intent?: boolean | null
           published_at?: string | null
           region: string
+          retrain_flag?: boolean | null
           score?: number | null
           signal_type?: string | null
           source?: string | null
@@ -368,6 +457,7 @@ export type Database = {
           url?: string | null
         }
         Update: {
+          ai_confidence?: number | null
           ai_enriched_at?: string | null
           ai_insight?: string | null
           ai_pitch?: string | null
@@ -382,11 +472,13 @@ export type Database = {
           description?: string | null
           details?: Json | null
           dismissed_by?: string | null
+          feedback_count?: number | null
           id?: string
           is_dismissed?: boolean | null
           is_high_intent?: boolean | null
           published_at?: string | null
           region?: string
+          retrain_flag?: boolean | null
           score?: number | null
           signal_type?: string | null
           source?: string | null

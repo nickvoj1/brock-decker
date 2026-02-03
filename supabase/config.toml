@@ -56,3 +56,9 @@ verify_jwt = false
 
 [functions.enrich-signal-ai]
 verify_jwt = false
+
+[functions.scrape-signals]
+verify_jwt = false
+
+[functions.retrain-signal]
+verify_jwt = false

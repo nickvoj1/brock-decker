@@ -9,7 +9,8 @@ import {
   Wand2,
   Briefcase,
   Check,
-  Search
+  Search,
+  RotateCcw
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,6 +48,8 @@ import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
 import { SignalCard } from "@/components/signals/SignalCard";
 import { SignalsTierChart } from "@/components/signals/SignalsTierChart";
 import { SignalsRegionMap } from "@/components/signals/SignalsRegionMap";
+import { SignalAccuracyChart } from "@/components/signals/SignalAccuracyChart";
+import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -96,6 +99,10 @@ export default function SignalsDashboard() {
   const [taSearchSignal, setTaSearchSignal] = useState<Signal | null>(null);
   const [bullhornExportLoading, setBullhornExportLoading] = useState(false);
   const [bullhornExported, setBullhornExported] = useState(false);
+  
+  // Retrain modal state
+  const [retrainModalOpen, setRetrainModalOpen] = useState(false);
+  const [selectedSignalForRetrain, setSelectedSignalForRetrain] = useState<Signal | null>(null);
 
   // Fetch signals on mount and when profile changes
   useEffect(() => {
@@ -412,6 +419,11 @@ export default function SignalsDashboard() {
     toast.success("Contacts exported");
   };
 
+  const handleRetrain = (signal: Signal) => {
+    setSelectedSignalForRetrain(signal);
+    setRetrainModalOpen(true);
+  };
+
   const filteredSignals = useMemo(() => {
     let filtered = signals.filter((s) => s.region === activeRegion && !s.is_dismissed);
     
@@ -527,6 +539,31 @@ export default function SignalsDashboard() {
           )}
         </div>
 
+        {/* Stats Row with Accuracy Chart */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <SignalsTierChart tierCounts={tierCounts} />
+          <SignalAccuracyChart region={activeRegion} />
+          <Card className="border-border/50">
+            <div className="p-4">
+              <h3 className="text-sm font-medium text-muted-foreground">Quick Stats</h3>
+              <div className="mt-3 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Total Signals</span>
+                  <span className="font-medium">{signals.filter(s => !s.is_dismissed).length}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>High Intent (Tier 1)</span>
+                  <span className="font-medium text-red-500">{tierCounts.tier_1 || 0}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>This Region</span>
+                  <span className="font-medium">{regionCounts[activeRegion] || 0}</span>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+
         {/* Filters Row - Simplified */}
         <div className="flex flex-wrap items-center gap-3 py-2 px-1">
           <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
@@ -608,6 +645,7 @@ export default function SignalsDashboard() {
                 onDismiss={handleDismiss}
                 onTAContacts={handleTAContacts}
                 onCVMatches={handleCVMatches}
+                onRetrain={handleRetrain}
                 taSearchLoading={taSearchLoading[signal.id] || false}
                 onSignalUpdated={(updated) => {
                   setSignals((prev) =>
@@ -712,6 +750,17 @@ export default function SignalsDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Signal Retrain Modal */}
+      <SignalRetrainModal
+        open={retrainModalOpen}
+        onOpenChange={setRetrainModalOpen}
+        signal={selectedSignalForRetrain}
+        profileName={profileName || ""}
+        onRetrained={() => {
+          fetchSignals();
+        }}
+      />
     </AppLayout>
   );
 }

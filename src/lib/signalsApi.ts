@@ -26,6 +26,10 @@ export interface Signal {
   ai_insight: string | null;
   ai_pitch: string | null;
   ai_enriched_at: string | null;
+  // Training fields
+  retrain_flag?: boolean;
+  ai_confidence?: number;
+  feedback_count?: number;
 }
 
 export interface SignalsResponse {
@@ -158,6 +162,30 @@ export async function enrichSignalsWithAI(signalIds?: string[]) {
     return response;
   } catch (err) {
     console.error("AI enrichment failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Unified scrape - combines Adzuna, Firecrawl, and RSS with AI classification
+export async function scrapeAllSignals(region?: string, options?: { includeAdzuna?: boolean; includeRSS?: boolean; includeFirecrawl?: boolean }) {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("scrape-signals", {
+      body: { 
+        region,
+        includeAdzuna: options?.includeAdzuna ?? true,
+        includeRSS: options?.includeRSS ?? true,
+        includeFirecrawl: options?.includeFirecrawl ?? true,
+      },
+    });
+
+    if (error) {
+      console.error("Unified scrape error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Unified scrape failed:", err);
     return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
 }
