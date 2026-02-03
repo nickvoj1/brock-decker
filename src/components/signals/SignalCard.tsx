@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Briefcase,
-  Sparkles
+  Sparkles,
+  RotateCcw
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ interface SignalCardProps {
   onDismiss: (id: string) => void;
   onTAContacts: (signal: Signal) => void;
   onCVMatches: (signal: Signal) => void;
+  onRetrain?: (signal: Signal) => void;
   taSearchLoading: boolean;
   onSignalUpdated?: (signal: Signal) => void;
 }
@@ -115,6 +117,7 @@ export const SignalCard = memo(function SignalCard({
   onDismiss,
   onTAContacts,
   onCVMatches,
+  onRetrain,
   taSearchLoading,
   onSignalUpdated,
 }: SignalCardProps) {
@@ -317,6 +320,18 @@ export const SignalCard = memo(function SignalCard({
             
             {/* Action Buttons */}
             <div className="flex items-center gap-2">
+              {onRetrain && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onRetrain(signal)}
+                  className="h-8 w-8 p-0"
+                  title="Train AI on this signal"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              
               <Button
                 size="sm"
                 variant="default"
