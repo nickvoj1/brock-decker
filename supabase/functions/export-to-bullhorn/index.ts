@@ -1851,13 +1851,24 @@ async function checkContactRecentlyContacted(
   }
 }
 
+// Interface for pre-classified contacts from the AI skills classifier
+interface ClassifiedContact {
+  email: string;
+  skills: string[];
+  side: 'buy' | 'sell' | 'consulting' | 'corporate' | 'other';
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
 
   try {
-    const { runId } = await req.json()
+    // Accept optional classifiedContacts array for AI-reviewed skills
+    const { runId, classifiedContacts } = await req.json() as { 
+      runId: string; 
+      classifiedContacts?: ClassifiedContact[] 
+    }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -1876,6 +1887,20 @@ Deno.serve(async (req) => {
     const contacts = run.enriched_data as ApolloContact[]
     if (!contacts || contacts.length === 0) {
       throw new Error('No contacts to export')
+    }
+
+    // Build a map of email -> pre-classified skills (if AI review was used)
+    const preClassifiedSkills = new Map<string, string>()
+    if (classifiedContacts && Array.isArray(classifiedContacts)) {
+      for (const classified of classifiedContacts) {
+        if (classified.email && Array.isArray(classified.skills)) {
+          preClassifiedSkills.set(
+            classified.email.toLowerCase(),
+            classified.skills.join(' ; ')
+          )
+        }
+      }
+      console.log(`Using ${preClassifiedSkills.size} pre-classified skills from AI review`)
     }
 
     const searchPreferences = normalizePreferences(run.preferences_data)
@@ -1998,7 +2023,9 @@ Deno.serve(async (req) => {
             companyCache[companyName] = clientCorporationId
           }
           
-          const skillsString = generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
+          // Use pre-classified skills if available (from AI review), otherwise generate
+          const skillsString = preClassifiedSkills.get(contact.email.toLowerCase()) 
+            || generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
           
           const { contactId, skillsString: generatedSkills, isExisting } = await findOrCreateClientContact(
             tokens.restUrl,

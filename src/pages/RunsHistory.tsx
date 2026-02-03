@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw, Sparkles } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ import {
   normalizePreferencesData,
 } from "@/lib/bullhornSkills";
 import { getEnrichmentRuns } from "@/lib/dataApi";
+import { SkillsReviewModal } from "@/components/upload/SkillsReviewModal";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
 
@@ -78,6 +79,11 @@ export default function RunsHistory() {
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
   const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
+  
+  // Skills review modal state
+  const [skillsReviewRun, setSkillsReviewRun] = useState<EnrichmentRun | null>(null);
+  const [pendingClassifiedContacts, setPendingClassifiedContacts] = useState<any[] | null>(null);
+  
   const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number }>>(() => {
     try {
       const stored = localStorage.getItem('bullhorn-overlap-cache');
@@ -119,10 +125,10 @@ export default function RunsHistory() {
   });
 
   const exportTooBullhornMutation = useMutation({
-    mutationFn: async (runId: string) => {
+    mutationFn: async ({ runId, classifiedContacts }: { runId: string; classifiedContacts?: any[] }) => {
       setExportingRunId(runId);
       const { data, error } = await supabase.functions.invoke('export-to-bullhorn', {
-        body: { runId }
+        body: { runId, classifiedContacts }
       });
       if (error) throw error;
       if (!data.success) throw new Error(data.error);
@@ -133,10 +139,11 @@ export default function RunsHistory() {
       toast({
         title: "Exported to Bullhorn",
         description: listCreated
-          ? `Distribution list "${data.listName}" created with ${data.contactsExported} contacts.`
-          : `Exported ${data.contactsExported} contacts. (No Distribution List was created — your Bullhorn instance currently doesn’t allow list creation via API.)`,
+          ? `Distribution list "${data.listName}" created with ${data.contactsExported} contacts${data.newContacts ? ` (${data.newContacts} new, ${data.existingContacts} existing)` : ''}.`
+          : `Exported ${data.contactsExported} contacts. (No Distribution List was created — your Bullhorn instance currently doesn't allow list creation via API.)`,
       });
       queryClient.invalidateQueries({ queryKey: ['enrichment-runs'] });
+      setPendingClassifiedContacts(null);
     },
     onError: (error: any) => {
       toast({
@@ -149,6 +156,21 @@ export default function RunsHistory() {
       setExportingRunId(null);
     },
   });
+
+  // Handle opening skills review modal
+  const openSkillsReview = (run: EnrichmentRun) => {
+    setSkillsReviewRun(run);
+  };
+
+  // Handle confirming AI-classified skills and exporting
+  const handleSkillsReviewConfirm = (classifiedContacts: any[]) => {
+    if (!skillsReviewRun) return;
+    setSkillsReviewRun(null);
+    exportTooBullhornMutation.mutate({ 
+      runId: skillsReviewRun.id, 
+      classifiedContacts 
+    });
+  };
 
   // Persist bullhorn overlap to localStorage
   useEffect(() => {
@@ -500,9 +522,19 @@ export default function RunsHistory() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => exportTooBullhornMutation.mutate(run.id)}
+                            onClick={() => openSkillsReview(run)}
                             disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
-                            title={run.bullhorn_exported_at ? "Re-export to Bullhorn" : "Export to Bullhorn"}
+                            title="Review AI Skills before export"
+                            className="text-purple-600 hover:text-purple-700"
+                          >
+                            <Sparkles className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => exportTooBullhornMutation.mutate({ runId: run.id })}
+                            disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
+                            title={run.bullhorn_exported_at ? "Re-export to Bullhorn (quick)" : "Export to Bullhorn (quick)"}
                             className={run.bullhorn_exported_at ? "text-green-600 hover:text-green-700" : ""}
                           >
                             {exportingRunId === run.id ? (
@@ -684,6 +716,18 @@ export default function RunsHistory() {
                     <Download className="mr-2 h-4 w-4" />
                     Download CSV ({getContactCount(selectedRun, removedContacts)})
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedRun(null);
+                      openSkillsReview(selectedRun);
+                    }}
+                    disabled={getContactCount(selectedRun, removedContacts) === 0 || exportingRunId === selectedRun.id}
+                    className="flex-1 text-purple-600 border-purple-300 hover:bg-purple-50"
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    AI Review Skills
+                  </Button>
                   {selectedRun.bullhorn_exported_at ? (
                     <Button
                       variant="outline"
@@ -696,7 +740,7 @@ export default function RunsHistory() {
                   ) : (
                     <Button
                       variant="outline"
-                      onClick={() => exportTooBullhornMutation.mutate(selectedRun.id)}
+                      onClick={() => exportTooBullhornMutation.mutate({ runId: selectedRun.id })}
                       disabled={getContactCount(selectedRun, removedContacts) === 0 || exportingRunId === selectedRun.id}
                       className="flex-1"
                     >
@@ -705,7 +749,7 @@ export default function RunsHistory() {
                       ) : (
                         <Upload className="mr-2 h-4 w-4" />
                       )}
-                      Export to Bullhorn
+                      Quick Export
                     </Button>
                   )}
                 </div>
@@ -713,6 +757,17 @@ export default function RunsHistory() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Skills Review Modal */}
+        {skillsReviewRun && (
+          <SkillsReviewModal
+            isOpen={!!skillsReviewRun}
+            onClose={() => setSkillsReviewRun(null)}
+            contacts={((skillsReviewRun.enriched_data as unknown) as ApolloContact[]) || []}
+            preferences={normalizePreferencesData(skillsReviewRun.preferences_data)}
+            onConfirm={handleSkillsReviewConfirm}
+          />
+        )}
       </div>
     </AppLayout>
   );
