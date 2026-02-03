@@ -205,18 +205,6 @@ const EUROPE_KEYWORDS = [
   "france", "netherlands", "switzerland", "italy", "spain", "sweden", "norway", "denmark"
 ];
 
-// Additional broad keywords for more permissive matching
-const BROAD_BUSINESS_KEYWORDS = [
-  "investment", "investor", "fund", "capital", "equity", "venture", "startup",
-  "growth", "expansion", "funding", "series a", "series b", "series c", "ipo",
-  "merger", "deal", "financing", "raise", "million", "billion", "valuation",
-  "portfolio", "backed", "led by", "invest", "stake", "buyout", "exit",
-  "hire", "hiring", "recruit", "appoint", "join", "ceo", "cfo", "cto", "chro",
-  "partner", "managing director", "executive", "leadership", "team",
-  "office", "opens", "launch", "expand", "enter", "market", "growth",
-  "private equity", "pe", "vc", "m&a", "acquisition", "company", "firm"
-];
-
 function detectRegionFromContent(text: string, defaultRegion: string): string {
   const lowerText = text.toLowerCase();
   
@@ -239,8 +227,86 @@ function detectRegionFromContent(text: string, defaultRegion: string): string {
   return defaultRegion;
 }
 
+// STRICT: Only PE/VC relevant keywords - must match at least one
+const PE_VC_REQUIRED_KEYWORDS = [
+  // Fund/investment terms
+  "private equity", "venture capital", "pe fund", "vc fund", "growth equity",
+  "buyout", "lbo", "leveraged buyout", "fund close", "closes fund", "raises fund",
+  "portfolio company", "portco", "investment firm", "asset management",
+  // Deal terms
+  "acquisition", "acquires", "acquired", "merger", "m&a", "deal",
+  "investment", "invests", "invested", "backing", "backed by",
+  // PE/VC firm indicators
+  "capital partners", "equity partners", "ventures", "capital management",
+  "infrastructure fund", "credit fund", "debt fund", "real estate fund",
+  // Leadership moves at financial firms
+  "managing director", "partner", "principal", "vice president",
+  // Hiring signals at PE/VC
+  "talent acquisition", "chro", "head of hr", "head of talent",
+  "hiring manager", "recruiter", "people team",
+];
+
+// EXCLUDED: Companies/topics that are NOT relevant to PE/VC recruiting
+const EXCLUDED_COMPANIES = [
+  // Gaming/Entertainment
+  "playstation", "xbox", "nintendo", "activision", "blizzard", "ea sports", "ubisoft",
+  "netflix", "disney", "warner", "paramount", "sony pictures", "universal studios",
+  // Consumer tech giants (not PE/VC focused)
+  "apple", "google", "meta", "facebook", "amazon", "microsoft", "tesla", "spacex",
+  // Retail/Consumer
+  "nike", "adidas", "coca-cola", "pepsi", "mcdonalds", "starbucks", "walmart", "target",
+  "ikea", "zara", "h&m", "uniqlo", "costco", "home depot",
+  // Automotive
+  "ford", "gm", "general motors", "toyota", "honda", "bmw", "mercedes", "volkswagen",
+  // Pharma (unless PE-backed)
+  "pfizer", "moderna", "johnson & johnson", "merck", "novartis",
+  // Airlines/Travel
+  "delta", "united airlines", "american airlines", "lufthansa", "ryanair",
+];
+
+// EXCLUDED: News topics that are NOT relevant
+const EXCLUDED_TOPICS = [
+  // Politics
+  "customs union", "brexit", "parliament", "election", "senate", "congress",
+  "white house", "downing street", "european commission", "nato", "un ",
+  "immigration", "border", "tariff", "sanctions",
+  // General news
+  "weather", "climate change", "earthquake", "hurricane", "flood",
+  "sports", "championship", "world cup", "olympics", "premier league",
+  "celebrity", "entertainment", "movie", "film release", "album",
+  // Crime/Accidents
+  "murder", "shooting", "crash", "accident", "arrested", "trial",
+];
+
+function isRelevantToPEVC(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  
+  // Check for excluded companies
+  for (const excluded of EXCLUDED_COMPANIES) {
+    if (lowerText.includes(excluded)) {
+      return false;
+    }
+  }
+  
+  // Check for excluded topics
+  for (const excluded of EXCLUDED_TOPICS) {
+    if (lowerText.includes(excluded)) {
+      return false;
+    }
+  }
+  
+  // Must contain at least one PE/VC keyword
+  const hasPEVCKeyword = PE_VC_REQUIRED_KEYWORDS.some(kw => lowerText.includes(kw));
+  return hasPEVCKeyword;
+}
+
 function detectTierAndType(text: string): { tier: string; signalType: string; score: number } | null {
   const lowerText = text.toLowerCase();
+  
+  // FIRST: Check if relevant to PE/VC at all
+  if (!isRelevantToPEVC(lowerText)) {
+    return null; // Skip entirely
+  }
   
   // Check each tier in priority order - strict matching
   for (const [tierKey, tierConfig] of Object.entries(TIER_TAXONOMY)) {
@@ -255,15 +321,8 @@ function detectTierAndType(text: string): { tier: string; signalType: string; sc
     }
   }
   
-  // Fallback: broad business keyword matching for Tier 3
-  const broadMatchCount = BROAD_BUSINESS_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
-  if (broadMatchCount >= 1) {
-    // Any broad match → tier_3 with score based on matches
-    return { tier: "tier_3", signalType: "industry_events", score: 30 + Math.min(broadMatchCount * 3, 20) };
-  }
-  
-  // Accept ALL news items as tier_3 with minimum score
-  return { tier: "tier_3", signalType: "industry_events", score: 25 };
+  // If passed PE/VC filter but no tier match, assign tier_3
+  return { tier: "tier_3", signalType: "industry_events", score: 35 };
 }
 
 function extractAmount(text: string): { amount: number; currency: string } | null {
@@ -461,6 +520,14 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
   const signals: any[] = [];
   
   for (const [company, companyJobList] of Object.entries(companyJobs)) {
+    // FILTER: Skip excluded companies
+    const lowerCompany = company.toLowerCase();
+    const isExcluded = EXCLUDED_COMPANIES.some(exc => lowerCompany.includes(exc));
+    if (isExcluded) {
+      console.log(`Skipping excluded company: ${company}`);
+      continue;
+    }
+    
     const jobCount = companyJobList.length;
     
     // Calculate quality score based on multiple factors
