@@ -7,6 +7,7 @@ export interface SignalSearchContact {
   email: string;
   company: string;
   category: string;
+  linkedin_url?: string;
 }
 
 export interface SignalSearchResult {

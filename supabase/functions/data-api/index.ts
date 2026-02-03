@@ -1115,15 +1115,15 @@ Deno.serve(async (req) => {
     // === SIGNALS ===
     if (action === "get-signals") {
       const { region } = data || {};
-      const cutoffDate = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours
+      const cutoffDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000); // 14 days
       
       let query = supabase
         .from("signals")
         .select("*")
         .eq("is_dismissed", false)
         .gte("published_at", cutoffDate.toISOString())
-        .order("published_at", { ascending: false })
-        .limit(100);
+        .order("score", { ascending: false })
+        .limit(200);
       
       if (region) {
         query = query.eq("region", region);
@@ -1132,20 +1132,22 @@ Deno.serve(async (req) => {
       const { data: signals, error } = await query;
       if (error) throw error;
       
-      // Get region counts
+      // Get region and tier counts
       const { data: allSignals } = await supabase
         .from("signals")
-        .select("region")
+        .select("region, tier")
         .eq("is_dismissed", false)
         .gte("published_at", cutoffDate.toISOString());
       
       const regionCounts: Record<string, number> = {};
+      const tierCounts: Record<string, number> = { tier_1: 0, tier_2: 0, tier_3: 0 };
       (allSignals || []).forEach((s: any) => {
         regionCounts[s.region] = (regionCounts[s.region] || 0) + 1;
+        if (s.tier) tierCounts[s.tier] = (tierCounts[s.tier] || 0) + 1;
       });
       
       return new Response(
-        JSON.stringify({ success: true, data: { signals: signals || [], regionCounts } }),
+        JSON.stringify({ success: true, data: { signals: signals || [], regionCounts, tierCounts } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
