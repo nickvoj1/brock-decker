@@ -14,20 +14,22 @@ import {
   Target,
   ChevronDown,
   ChevronUp,
-  Briefcase
+  Briefcase,
+  Sparkles
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Signal } from "@/lib/signalsApi";
 import { formatDistanceToNow } from "date-fns";
-
+import { supabase } from "@/integrations/supabase/client";
 interface SignalCardProps {
   signal: Signal;
   onDismiss: (id: string) => void;
   onTAContacts: (signal: Signal) => void;
   onCVMatches: (signal: Signal) => void;
   taSearchLoading: boolean;
+  onSignalUpdated?: (signal: Signal) => void;
 }
 
 const TIER_CONFIG = {
@@ -94,12 +96,40 @@ export const SignalCard = memo(function SignalCard({
   onTAContacts,
   onCVMatches,
   taSearchLoading,
+  onSignalUpdated,
 }: SignalCardProps) {
   const [showInsight, setShowInsight] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-4 w-4" />;
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
+  
+  const handleEnrichAI = async () => {
+    setEnriching(true);
+    try {
+      const { error } = await supabase.functions.invoke("enrich-signal-ai", {
+        body: { signalIds: [signal.id] },
+      });
+      
+      if (error) throw error;
+      
+      // Fetch updated signal
+      const { data: updated } = await supabase
+        .from("signals")
+        .select("*")
+        .eq("id", signal.id)
+        .single();
+      
+      if (updated && onSignalUpdated) {
+        onSignalUpdated(updated as Signal);
+      }
+    } catch (e) {
+      console.error("Failed to enrich signal:", e);
+    } finally {
+      setEnriching(false);
+    }
+  };
   
   return (
     <Card className={`border-border/50 hover:border-border transition-all overflow-hidden`}>
@@ -142,8 +172,8 @@ export const SignalCard = memo(function SignalCard({
             {signal.title}
           </h3>
           
-          {/* AI Insight Toggle Button */}
-          {hasAIInsight && (
+          {/* AI Insight Toggle Button - always show, either expand or trigger enrichment */}
+          {hasAIInsight ? (
             <Button
               variant="ghost"
               size="sm"
@@ -159,6 +189,23 @@ export const SignalCard = memo(function SignalCard({
               ) : (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               )}
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-between text-left h-auto py-2 px-3 bg-muted/50 hover:bg-muted"
+              onClick={handleEnrichAI}
+              disabled={enriching}
+            >
+              <span className="flex items-center gap-2 text-sm font-medium">
+                {enriching ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                ) : (
+                  <Sparkles className="h-4 w-4 text-amber-500" />
+                )}
+                {enriching ? "Generating AI Insight..." : "Generate AI Insight"}
+              </span>
             </Button>
           )}
           
