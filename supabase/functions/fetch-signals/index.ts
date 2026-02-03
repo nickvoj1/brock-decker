@@ -152,6 +152,29 @@ const RSS_FEEDS = {
 // HELPER FUNCTIONS
 // ============================================================================
 
+// Location keywords for region detection
+const LONDON_KEYWORDS = [
+  "london", "uk", "united kingdom", "britain", "british", "england", "city of london",
+  "canary wharf", "mayfair", "westminster", "ftse", "lse", "bank of england"
+];
+
+const USA_KEYWORDS = [
+  "us", "usa", "united states", "america", "american", "new york", "nyc", "boston",
+  "san francisco", "silicon valley", "wall street", "nasdaq", "s&p", "california",
+  "texas", "chicago", "los angeles", "miami", "seattle", "washington dc"
+];
+
+const UAE_KEYWORDS = [
+  "dubai", "abu dhabi", "uae", "emirates", "gulf", "middle east", "difc", "adgm",
+  "sharjah", "qatar", "saudi", "bahrain", "kuwait", "oman"
+];
+
+const EUROPE_KEYWORDS = [
+  "berlin", "paris", "frankfurt", "amsterdam", "munich", "zurich", "milan", "madrid",
+  "stockholm", "copenhagen", "vienna", "brussels", "luxembourg", "dublin", "germany",
+  "france", "netherlands", "switzerland", "italy", "spain", "sweden", "norway", "denmark"
+];
+
 // Additional broad keywords for more permissive matching
 const BROAD_BUSINESS_KEYWORDS = [
   "investment", "investor", "fund", "capital", "equity", "venture", "startup",
@@ -160,8 +183,31 @@ const BROAD_BUSINESS_KEYWORDS = [
   "portfolio", "backed", "led by", "invest", "stake", "buyout", "exit",
   "hire", "hiring", "recruit", "appoint", "join", "ceo", "cfo", "cto", "chro",
   "partner", "managing director", "executive", "leadership", "team",
-  "office", "opens", "launch", "expand", "enter", "market", "growth"
+  "office", "opens", "launch", "expand", "enter", "market", "growth",
+  "private equity", "pe", "vc", "m&a", "acquisition", "company", "firm"
 ];
+
+function detectRegionFromContent(text: string, defaultRegion: string): string {
+  const lowerText = text.toLowerCase();
+  
+  // Check London first (most specific for UK)
+  const londonMatches = LONDON_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
+  if (londonMatches >= 1) return "london";
+  
+  // Check USA
+  const usaMatches = USA_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
+  if (usaMatches >= 1) return "usa";
+  
+  // Check UAE
+  const uaeMatches = UAE_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
+  if (uaeMatches >= 1) return "uae";
+  
+  // Check Europe
+  const europeMatches = EUROPE_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
+  if (europeMatches >= 1) return "europe";
+  
+  return defaultRegion;
+}
 
 function detectTierAndType(text: string): { tier: string; signalType: string; score: number } | null {
   const lowerText = text.toLowerCase();
@@ -181,15 +227,13 @@ function detectTierAndType(text: string): { tier: string; signalType: string; sc
   
   // Fallback: broad business keyword matching for Tier 3
   const broadMatchCount = BROAD_BUSINESS_KEYWORDS.filter(kw => lowerText.includes(kw)).length;
-  if (broadMatchCount >= 2) {
-    // Multiple broad matches → tier_3 with moderate score
-    return { tier: "tier_3", signalType: "industry_events", score: 35 + Math.min(broadMatchCount * 3, 15) };
-  } else if (broadMatchCount === 1) {
-    // Single broad match → tier_3 with low score
-    return { tier: "tier_3", signalType: "industry_events", score: 30 };
+  if (broadMatchCount >= 1) {
+    // Any broad match → tier_3 with score based on matches
+    return { tier: "tier_3", signalType: "industry_events", score: 30 + Math.min(broadMatchCount * 3, 20) };
   }
   
-  return null;
+  // Accept ALL news items as tier_3 with minimum score
+  return { tier: "tier_3", signalType: "industry_events", score: 25 };
 }
 
 function extractAmount(text: string): { amount: number; currency: string } | null {
@@ -401,7 +445,7 @@ Deno.serve(async (req) => {
     const regionsToFetch = region ? [region] : Object.keys(REGIONS);
     const allSignals: any[] = [];
     const now = new Date();
-    const cutoffDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 14 days
+    const cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days lookback for more signals
 
     // Fetch from RSS feeds
     for (const reg of regionsToFetch) {
@@ -423,6 +467,9 @@ Deno.serve(async (req) => {
           const amountData = extractAmount(fullText);
           const company = extractCompany(item.title, item.description);
           
+          // Detect actual region from content (override feed region if content mentions specific location)
+          const detectedRegion = detectRegionFromContent(fullText, reg);
+          
           // Boost score for fund closes with large amounts
           let score = tierResult.score;
           if (amountData) {
@@ -434,7 +481,7 @@ Deno.serve(async (req) => {
           allSignals.push({
             title: item.title.slice(0, 255),
             company: company,
-            region: reg,
+            region: detectedRegion,
             tier: tierResult.tier,
             score: score,
             amount: amountData?.amount || null,
