@@ -8,7 +8,7 @@ import {
   DollarSign,
   Users,
   Globe,
-  Clock,
+  MapPin,
   Loader2,
   Lightbulb,
   Target,
@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Signal } from "@/lib/signalsApi";
 import { formatDistanceToNow } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
+
 interface SignalCardProps {
   signal: Signal;
   onDismiss: (id: string) => void;
@@ -35,44 +36,27 @@ interface SignalCardProps {
 const TIER_CONFIG = {
   tier_1: { 
     label: "Tier 1", 
-    color: "bg-red-500/10 text-red-600 border-red-500/20",
-    description: "Immediate Intent",
-    bgGradient: "from-red-500/5 to-transparent"
+    color: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
+    dotColor: "bg-red-500",
   },
   tier_2: { 
     label: "Tier 2", 
-    color: "bg-amber-500/10 text-amber-600 border-amber-500/20",
-    description: "Medium Intent",
-    bgGradient: "from-amber-500/5 to-transparent"
+    color: "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400",
+    dotColor: "bg-amber-500",
   },
   tier_3: { 
     label: "Tier 3", 
-    color: "bg-green-500/10 text-green-600 border-green-500/20",
-    description: "Early Interest",
-    bgGradient: "from-green-500/5 to-transparent"
+    color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+    dotColor: "bg-emerald-500",
   },
 };
 
 const SIGNAL_TYPE_ICONS: Record<string, React.ReactNode> = {
-  funding: <DollarSign className="h-4 w-4" />,
-  hiring: <Users className="h-4 w-4" />,
-  expansion: <Globe className="h-4 w-4" />,
-  c_suite: <Users className="h-4 w-4" />,
-  team_growth: <UserSearch className="h-4 w-4" />,
-  pe_vc_investment: <DollarSign className="h-4 w-4" />,
-  fundraise_lbo: <TrendingUp className="h-4 w-4" />,
-  acquisition: <Briefcase className="h-4 w-4" />,
-  new_ceo_cfo_chro: <Users className="h-4 w-4" />,
-  new_fund_launch: <TrendingUp className="h-4 w-4" />,
-  portfolio_hiring: <Users className="h-4 w-4" />,
-  rapid_job_postings: <Users className="h-4 w-4" />,
-  new_recruiter: <UserSearch className="h-4 w-4" />,
-  office_expansion: <Globe className="h-4 w-4" />,
-  senior_churn: <Users className="h-4 w-4" />,
-  product_launch: <Briefcase className="h-4 w-4" />,
-  linkedin_hiring_posts: <Users className="h-4 w-4" />,
-  careers_page_refresh: <FileText className="h-4 w-4" />,
-  industry_events: <Globe className="h-4 w-4" />,
+  funding: <DollarSign className="h-3.5 w-3.5" />,
+  hiring: <Users className="h-3.5 w-3.5" />,
+  expansion: <Globe className="h-3.5 w-3.5" />,
+  c_suite: <Users className="h-3.5 w-3.5" />,
+  team_growth: <UserSearch className="h-3.5 w-3.5" />,
 };
 
 // Sector detection for badges
@@ -89,15 +73,15 @@ const SECTOR_KEYWORDS: Record<string, string[]> = {
 };
 
 const SECTOR_COLORS: Record<string, string> = {
-  "PE": "bg-purple-500/10 text-purple-600 border-purple-500/20",
-  "VC": "bg-blue-500/10 text-blue-600 border-blue-500/20",
-  "Bank": "bg-slate-500/10 text-slate-600 border-slate-500/20",
-  "FinTech": "bg-cyan-500/10 text-cyan-600 border-cyan-500/20",
-  "Consultancy": "bg-orange-500/10 text-orange-600 border-orange-500/20",
-  "Secondaries": "bg-pink-500/10 text-pink-600 border-pink-500/20",
-  "Credit": "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
-  "Infra": "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-  "Hedge Fund": "bg-violet-500/10 text-violet-600 border-violet-500/20",
+  "PE": "bg-purple-500/10 text-purple-700 dark:text-purple-400",
+  "VC": "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  "Bank": "bg-slate-500/10 text-slate-700 dark:text-slate-400",
+  "FinTech": "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",
+  "Consultancy": "bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  "Secondaries": "bg-pink-500/10 text-pink-700 dark:text-pink-400",
+  "Credit": "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
+  "Infra": "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  "Hedge Fund": "bg-violet-500/10 text-violet-700 dark:text-violet-400",
 };
 
 function detectSector(signal: { title: string; description?: string | null; company?: string | null }): string | null {
@@ -138,10 +122,14 @@ export const SignalCard = memo(function SignalCard({
   const [enriching, setEnriching] = useState(false);
   
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
-  const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-4 w-4" />;
+  const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-3.5 w-3.5" />;
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
   const sector = detectSector(signal);
   const sectorColor = sector ? SECTOR_COLORS[sector] : null;
+  
+  // Extract location from details if available
+  const location = (signal.details as Record<string, unknown>)?.location as string | undefined;
+  const positions = (signal.details as Record<string, unknown>)?.positions as string | undefined;
   
   const handleEnrichAI = async () => {
     setEnriching(true);
@@ -170,60 +158,86 @@ export const SignalCard = memo(function SignalCard({
   };
   
   return (
-    <Card className={`border-border/50 hover:border-border transition-all overflow-hidden`}>
-      <CardContent className="p-4">
-        <div className="flex flex-col gap-3">
-          {/* Header row: Company + Tier + Amount + Dismiss */}
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              {signal.company && (
-                <span className="font-bold text-lg text-foreground">{signal.company}</span>
-              )}
-              {sector && sectorColor && (
-                <Badge variant="outline" className={sectorColor}>
-                  {sector}
+    <Card className="group border-border/40 hover:border-primary/30 transition-all duration-200 hover:shadow-md overflow-hidden">
+      <CardContent className="p-0">
+        {/* Tier indicator bar */}
+        <div className={`h-1 w-full ${tierConfig.dotColor}`} />
+        
+        <div className="p-4 space-y-3">
+          {/* Top Row: Company + Badges + Dismiss */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                {signal.company && (
+                  <h3 className="text-base font-semibold text-foreground truncate">
+                    {signal.company}
+                  </h3>
+                )}
+                {signal.amount && (
+                  <Badge className="bg-primary/10 text-primary border-0 font-medium">
+                    {formatAmount(signal.amount, signal.currency)}
+                  </Badge>
+                )}
+              </div>
+              
+              {/* Badge Row */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {sector && sectorColor && (
+                  <Badge variant="secondary" className={`${sectorColor} border-0 text-xs font-medium`}>
+                    {sector}
+                  </Badge>
+                )}
+                <Badge variant="outline" className={`${tierConfig.color} text-xs`}>
+                  {tierConfig.label}
                 </Badge>
-              )}
-              <Badge variant="outline" className={tierConfig.color}>
-                {tierConfig.label}
-              </Badge>
-              {signal.signal_type && (
-                <Badge variant="secondary" className="flex items-center gap-1">
-                  {signalIcon}
-                  <span className="text-xs">{formatSignalType(signal.signal_type)}</span>
-                </Badge>
-              )}
-              {signal.amount && (
-                <Badge variant="outline" className="bg-primary/5 font-semibold">
-                  {formatAmount(signal.amount, signal.currency)}
-                </Badge>
-              )}
+                {signal.signal_type && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs">
+                    {signalIcon}
+                    <span>{formatSignalType(signal.signal_type)}</span>
+                  </Badge>
+                )}
+              </div>
             </div>
             
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 flex-shrink-0"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
               onClick={() => onDismiss(signal.id)}
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
           
-          {/* Original headline */}
-          <h3 className="text-sm text-muted-foreground line-clamp-2">
+          {/* Title/Headline */}
+          <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2">
             {signal.title}
-          </h3>
+          </p>
           
-          {/* AI Insight Toggle Button - always show, either expand or trigger enrichment */}
+          {/* Location & Positions (if available from job scraping) */}
+          {(location || positions) && (
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              {location && (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <MapPin className="h-3 w-3" />
+                  {location}
+                </span>
+              )}
+              {positions && (
+                <span className="text-muted-foreground truncate max-w-[300px]">
+                  <strong>Roles:</strong> {positions}
+                </span>
+              )}
+            </div>
+          )}
+          
+          {/* AI Insight Toggle */}
           {hasAIInsight ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-between text-left h-auto py-2 px-3 bg-muted/50 hover:bg-muted"
+            <button
+              className="w-full flex items-center justify-between text-left py-2 px-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
               onClick={() => setShowInsight(!showInsight)}
             >
-              <span className="flex items-center gap-2 text-sm font-medium">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <Lightbulb className="h-4 w-4 text-amber-500" />
                 AI Insight
               </span>
@@ -232,34 +246,32 @@ export const SignalCard = memo(function SignalCard({
               ) : (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               )}
-            </Button>
+            </button>
           ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full justify-between text-left h-auto py-2 px-3 bg-muted/50 hover:bg-muted"
+            <button
+              className="w-full flex items-center justify-between text-left py-2 px-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors disabled:opacity-50"
               onClick={handleEnrichAI}
               disabled={enriching}
             >
-              <span className="flex items-center gap-2 text-sm font-medium">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                 {enriching ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 ) : (
-                  <Sparkles className="h-4 w-4 text-amber-500" />
+                  <Sparkles className="h-4 w-4 text-primary" />
                 )}
-                {enriching ? "Generating AI Insight..." : "Generate AI Insight"}
+                {enriching ? "Generating..." : "Generate AI Insight"}
               </span>
-            </Button>
+            </button>
           )}
           
-          {/* AI Insight Content - Only shown when expanded */}
+          {/* AI Insight Content */}
           {showInsight && hasAIInsight && (
             <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
               {signal.ai_insight && (
-                <div className="bg-background/50 rounded-lg p-3 border border-border/50">
+                <div className="bg-amber-50 dark:bg-amber-900/10 rounded-lg p-3 border border-amber-200/50 dark:border-amber-800/30">
                   <div className="flex items-start gap-2">
-                    <Lightbulb className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm font-medium text-foreground leading-relaxed">
+                    <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-900 dark:text-amber-100 leading-relaxed">
                       {signal.ai_insight}
                     </p>
                   </div>
@@ -267,10 +279,10 @@ export const SignalCard = memo(function SignalCard({
               )}
               
               {signal.ai_pitch && (
-                <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
+                <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
                   <div className="flex items-start gap-2">
                     <Target className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-primary font-medium leading-relaxed">
+                    <p className="text-sm text-foreground leading-relaxed">
                       {signal.ai_pitch}
                     </p>
                   </div>
@@ -279,64 +291,69 @@ export const SignalCard = memo(function SignalCard({
             </div>
           )}
           
-          {/* Meta info row */}
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            {signal.source && <span>{signal.source}</span>}
-            {signal.published_at && (
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {formatDistanceToNow(new Date(signal.published_at), { addSuffix: true })}
-              </span>
-            )}
-            {signal.url && (
-              <a
-                href={signal.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 hover:text-primary transition-colors"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Source
-              </a>
-            )}
-          </div>
-          
-          {/* Actions - Only Find TA Contacts and CV Matches */}
-          <div className="flex items-center gap-2 flex-wrap pt-1">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => onTAContacts(signal)}
-              disabled={taSearchLoading}
-              className="h-8"
-            >
-              {taSearchLoading ? (
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              ) : (
-                <UserSearch className="h-3 w-3 mr-1" />
+          {/* Meta & Source */}
+          <div className="flex items-center justify-between pt-1 border-t border-border/30">
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {signal.source && (
+                <span className="truncate max-w-[120px]">{signal.source}</span>
               )}
-              Find TA Contacts
-              {signal.contacts_found > 0 && (
-                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">
-                  {signal.contacts_found}
-                </Badge>
+              {signal.published_at && (
+                <span>
+                  {formatDistanceToNow(new Date(signal.published_at), { addSuffix: true })}
+                </span>
               )}
-            </Button>
+              {signal.url && (
+                <a
+                  href={signal.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 hover:text-primary transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Link
+                </a>
+              )}
+            </div>
             
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onCVMatches(signal)}
-              className="h-8"
-            >
-              <FileText className="h-3 w-3 mr-1" />
-              CV Matches
-              {signal.cv_matches > 0 && (
-                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">
-                  {signal.cv_matches}
-                </Badge>
-              )}
-            </Button>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => onTAContacts(signal)}
+                disabled={taSearchLoading}
+                className="h-8 text-xs"
+              >
+                {taSearchLoading ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <>
+                    <UserSearch className="h-3 w-3 mr-1" />
+                    TA Contacts
+                    {signal.contacts_found > 0 && (
+                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] bg-white/20">
+                        {signal.contacts_found}
+                      </Badge>
+                    )}
+                  </>
+                )}
+              </Button>
+              
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onCVMatches(signal)}
+                className="h-8 text-xs"
+              >
+                <FileText className="h-3 w-3 mr-1" />
+                CV Match
+                {signal.cv_matches > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {signal.cv_matches}
+                  </Badge>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </CardContent>
