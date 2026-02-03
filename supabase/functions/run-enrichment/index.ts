@@ -665,17 +665,20 @@ Deno.serve(async (req) => {
     }
     console.log('Excluding contacts from candidate\'s previous employers:', Array.from(excludedCompanies))
 
-    // Fetch recently used contacts (within last 3 days) to exclude them
-    const threeDaysAgo = new Date()
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+    // Fetch recently used contacts (within last 14 days) to exclude them
+    // This prevents the same contacts from appearing in different searches
+    // by different users with similar industries/sectors/locations
+    const CONTACT_EXCLUSION_DAYS = 14
+    const exclusionCutoff = new Date()
+    exclusionCutoff.setDate(exclusionCutoff.getDate() - CONTACT_EXCLUSION_DAYS)
     
     const { data: recentlyUsedContacts } = await supabase
       .from('used_contacts')
       .select('email')
-      .gte('added_at', threeDaysAgo.toISOString())
+      .gte('added_at', exclusionCutoff.toISOString())
     
     const usedEmails = new Set((recentlyUsedContacts || []).map(c => c.email.toLowerCase()))
-    console.log(`Found ${usedEmails.size} recently used contacts to exclude`)
+    console.log(`Excluding ${usedEmails.size} contacts used in the last ${CONTACT_EXCLUSION_DAYS} days`)
 
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
