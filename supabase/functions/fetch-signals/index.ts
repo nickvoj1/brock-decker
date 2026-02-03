@@ -5,167 +5,168 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// RSS Feed configurations by region - Focused on PE/VC/Fund news
-// Prioritized high-quality sources that reliably return PE/VC content
+// ============================================================================
+// TIER TAXONOMY - Hardcoded signal classification
+// ============================================================================
+const TIER_TAXONOMY = {
+  tier_1: {
+    name: "Tier 1 – Immediate Hiring Intent",
+    color: "#ef4444", // red
+    types: [
+      "pe_vc_investment",
+      "fundraise_lbo",
+      "acquisition",
+      "new_ceo_cfo_chro",
+      "new_fund_launch",
+      "portfolio_hiring",
+      "rapid_job_postings",
+    ],
+    keywords: {
+      pe_vc_investment: ["private equity", "pe investment", "vc investment", "venture capital investment", "growth equity", "buyout"],
+      fundraise_lbo: ["closes fund", "closed fund", "final close", "first close", "lbo", "leveraged buyout", "fundraise", "raises fund", "closes €", "closes $", "closes £"],
+      acquisition: ["acquires", "acquisition", "acquired", "buys", "bought", "takes over", "takeover", "merger"],
+      new_ceo_cfo_chro: ["new ceo", "new cfo", "new chro", "appoints ceo", "names ceo", "hires ceo", "appoints cfo", "chief executive", "chief financial"],
+      new_fund_launch: ["launches fund", "new fund", "debut fund", "inaugural fund", "fund launch", "first-time fund"],
+      portfolio_hiring: ["portfolio company hiring", "portfolio expansion", "portco hiring", "portfolio talent"],
+      rapid_job_postings: ["hiring spree", "multiple roles", "rapid hiring", "expanding team"],
+    },
+    minScore: 80,
+  },
+  tier_2: {
+    name: "Tier 2 – Medium Intent",
+    color: "#f59e0b", // amber
+    types: [
+      "new_recruiter",
+      "office_expansion",
+      "senior_churn",
+      "product_launch",
+    ],
+    keywords: {
+      new_recruiter: ["hires recruiter", "talent acquisition", "recruiting team", "hr hire", "people team"],
+      office_expansion: ["opens office", "new office", "expands to", "expansion into", "establishes presence", "enters market"],
+      senior_churn: ["senior departure", "executive leaves", "partner departs", "md exits", "leadership change"],
+      product_launch: ["launches product", "new product", "product announcement", "service launch"],
+    },
+    minScore: 50,
+  },
+  tier_3: {
+    name: "Tier 3 – Early Interest",
+    color: "#22c55e", // green
+    types: [
+      "linkedin_hiring_posts",
+      "careers_page_refresh",
+      "industry_events",
+    ],
+    keywords: {
+      linkedin_hiring_posts: ["hiring post", "we're hiring", "join our team", "looking for candidates", "open positions"],
+      careers_page_refresh: ["careers page", "job portal", "new careers", "updated jobs"],
+      industry_events: ["conference", "summit", "event", "webinar", "panel", "speaking at"],
+    },
+    minScore: 30,
+  },
+};
+
+// ============================================================================
+// REGION CONFIGURATION
+// ============================================================================
+const REGIONS = {
+  europe: { 
+    label: "Europe", 
+    adzunaCountries: ["gb", "de", "fr", "nl", "be", "at", "ch"],
+    cities: ["London", "Berlin", "Paris", "Amsterdam", "Frankfurt", "Munich", "Zurich"],
+    includesLondon: true,
+  },
+  uae: { 
+    label: "UAE", 
+    adzunaCountries: [],
+    cities: ["Dubai", "Abu Dhabi", "Sharjah"],
+    includesLondon: false,
+  },
+  usa: { 
+    label: "USA", 
+    adzunaCountries: ["us"],
+    cities: ["New York", "Boston", "Chicago", "San Francisco", "Los Angeles", "Miami"],
+    includesLondon: false,
+  },
+};
+
+// ============================================================================
+// RSS FEEDS BY REGION
+// ============================================================================
 const RSS_FEEDS = {
   europe: [
-    // Primary PE-specific sources
     { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire EU" },
     { url: "https://www.altassets.net/feed", source: "AltAssets" },
     { url: "https://sifted.eu/feed", source: "Sifted" },
     { url: "https://www.eu-startups.com/feed/", source: "EU-Startups" },
-    // Real Deals - UK/Europe PE focused
     { url: "https://realdeals.eu.com/feed/", source: "Real Deals" },
-    // Unquote - European PE news
-    { url: "https://www.unquote.com/feed/", source: "Unquote" },
-    // City AM - London finance
     { url: "https://www.cityam.com/feed/", source: "City AM" },
-    // Reuters Business - European focus
     { url: "https://feeds.reuters.com/reuters/UKBusinessNews", source: "Reuters UK" },
   ],
   uae: [
     { url: "https://gulfbusiness.com/feed/", source: "Gulf Business" },
-    // MENA PE focused sources
     { url: "https://www.arabianbusiness.com/feed/", source: "Arabian Business" },
-    { url: "https://wam.ae/en/rss/economy", source: "WAM Economy" },
-    // Zawya alternatives - regional finance
-    { url: "https://www.thenationalnews.com/business/rss", source: "The National" },
     { url: "https://gulfnews.com/rss/business", source: "Gulf News" },
-    // Entrepreneur Middle East
-    { url: "https://www.entrepreneur.com/en-ae/rss", source: "Entrepreneur ME" },
+    { url: "https://www.thenationalnews.com/business/rss", source: "The National" },
   ],
-  east_usa: [
+  usa: [
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
     { url: "https://www.buyoutsinsider.com/feed/", source: "Buyouts Insider" },
-    // Bloomberg PE/M&A
     { url: "https://feeds.bloomberg.com/markets/news.rss", source: "Bloomberg" },
-    // Axios Pro Rata (deals newsletter)
-    { url: "https://www.axios.com/newsletters/axios-pro-rata/feed.xml", source: "Axios Pro Rata" },
-    // WSJ PE coverage
-    { url: "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml", source: "WSJ Business" },
-    // Fortune PE/VC
-    { url: "https://fortune.com/feed/fortune-feeds/?id=3230629", source: "Fortune" },
-  ],
-  west_usa: [
     { url: "https://news.crunchbase.com/feed/", source: "Crunchbase News" },
     { url: "https://techcrunch.com/category/venture/feed/", source: "TechCrunch VC" },
-    { url: "https://www.pehub.com/feed/", source: "PE Hub" },
-    // StrictlyVC - daily VC news
-    { url: "https://www.strictlyvc.com/feed/", source: "StrictlyVC" },
-    // Term Sheet - Fortune's deal newsletter
-    { url: "https://fortune.com/feed/fortune-feeds/?id=3230630", source: "Term Sheet" },
-    // Pitchbook alternatives
-    { url: "https://venturebeat.com/category/deals/feed/", source: "VentureBeat" },
+    { url: "https://fortune.com/feed/fortune-feeds/?id=3230629", source: "Fortune" },
   ],
 };
 
-// Fund types we care about (for classification)
-const FUND_TYPES = {
-  private_equity: ["private equity", "pe fund", "buyout", "lbo", "leveraged buyout", "growth equity", "mid-market"],
-  venture_capital: ["venture capital", "vc fund", "seed fund", "early stage", "series a", "series b", "series c", "growth stage"],
-  infrastructure: ["infrastructure fund", "infra fund", "real assets", "renewable energy fund", "energy transition"],
-  credit: ["private credit", "direct lending", "credit fund", "debt fund", "clo", "mezzanine", "distressed debt"],
-  real_estate: ["real estate fund", "property fund", "reit"],
-  secondaries: ["secondaries", "secondary fund", "gp-led", "continuation fund"],
-};
-
-// Keywords for PE/Fund-specific signal detection - prioritized order
-const PE_SIGNAL_KEYWORDS = {
-  // Fund closes - HIGHEST PRIORITY (signals deployment = hiring)
-  fund_close: [
-    "closes fund", "closed fund", "final close", "first close", "closes on",
-    "raised fund", "reaches close", "completes fundraise", "fundraising close",
-    "closes at", "closes oversubscribed", "hard cap", "exceeds target",
-    "closes €", "closes $", "closes £", "committed capital",
-    "fund iii", "fund iv", "fund v", "fund vi", "fund vii", "fund viii",
-    "billion fund", "raises €", "raises $", "raises £", "secures €", "secures $",
-    "commitments of", "capital commitments", "lp commitments",
-  ],
-  // New fund launches
-  new_fund: [
-    "launches fund", "launching fund", "new fund", "debut fund", "inaugural fund",
-    "announces fund", "raising fund", "begins fundraising", "seeks to raise",
-    "targets €", "targets $", "targeting", "fundraising for",
-    "first-time fund", "successor fund", "follow-on fund",
-    "fund launch", "launched a", "launching a",
-  ],
-  // Deal activity - indicates deployment = need for deal team
-  deal: [
-    "acquires", "acquisition", "acquired", "buys", "bought", "takes stake",
-    "invests in", "investment in", "backs", "backed by", "leads round",
-    "co-invest", "platform investment", "add-on", "bolt-on",
-    "majority stake", "minority stake", "growth investment",
-    "buyout of", "lbo", "leveraged buyout", "management buyout", "mbo",
-    "takes private", "going private", "take-private",
-    "series a", "series b", "series c", "series d", "series e",
-    "funding round", "raises funding", "secures funding",
-  ],
-  // Exits - indicates capital return = new fund coming
-  exit: [
-    "exits", "exit from", "sells stake", "sale of", "divests", "divestiture",
-    "ipo", "goes public", "secondary sale", "trade sale",
-    "returns", "multiple", "realized", "distributions",
-    "exits investment", "portfolio exit", "successful exit",
-    "acquired by", "sold to", "merger with",
-  ],
-  // Office/Team expansion - direct hiring signal
-  expansion: [
-    "opens office", "new office", "expands to", "expands into", "enters market",
-    "hires", "appoints", "names", "promotes", "joins as", "recruits",
-    "builds team", "growing team", "headcount",
-    "opens in", "launching in", "expanding to", "expansion into",
-    "new presence", "establishes presence",
-  ],
-  // Senior hires at funds - indicates growth
-  senior_hire: [
-    "partner", "managing director", "md joins", "principal", "operating partner",
-    "head of", "chief", "ceo", "cfo", "coo", "cio",
-    "investment director", "portfolio director",
-    "joins as partner", "named partner", "promoted to partner",
-    "hires managing director", "appoints head",
-  ],
-};
-
-// Amount extraction patterns - improved for fund sizes
-const AMOUNT_PATTERNS = [
-  // Billions first (more specific)
-  /(\d+(?:\.\d+)?)\s*(?:billion|bn|b)\s*(?:dollar|usd|\$|euro|eur|€|pound|gbp|£)?/i,
-  /\$(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
-  /€(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
-  /£(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
-  // Millions
-  /(\d+(?:\.\d+)?)\s*(?:million|mn|m)\s*(?:dollar|usd|\$|euro|eur|€|pound|gbp|£)?/i,
-  /\$(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
-  /€(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
-  /£(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
-  // Currency symbols with numbers
-  /\$(\d+(?:\.\d+)?)\s*(million|m|billion|b)/i,
-  /€(\d+(?:\.\d+)?)\s*(million|m|billion|b)/i,
-  /£(\d+(?:\.\d+)?)\s*(million|m|billion|b)/i,
-];
-
-function extractAmount(text: string): { amount: number; currency: string } | null {
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+function detectTierAndType(text: string): { tier: string; signalType: string; score: number } | null {
   const lowerText = text.toLowerCase();
   
-  for (const pattern of AMOUNT_PATTERNS) {
+  // Check each tier in priority order
+  for (const [tierKey, tierConfig] of Object.entries(TIER_TAXONOMY)) {
+    for (const [signalType, keywords] of Object.entries(tierConfig.keywords)) {
+      const matchCount = keywords.filter((kw: string) => lowerText.includes(kw)).length;
+      if (matchCount > 0) {
+        // Calculate score based on matches and tier
+        let score = tierConfig.minScore + (matchCount * 5);
+        score = Math.min(score, 100);
+        return { tier: tierKey, signalType, score };
+      }
+    }
+  }
+  
+  return null;
+}
+
+function extractAmount(text: string): { amount: number; currency: string } | null {
+  const patterns = [
+    /(\d+(?:\.\d+)?)\s*(?:billion|bn|b)\s*(?:dollar|usd|\$|euro|eur|€|pound|gbp|£)?/i,
+    /\$(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
+    /€(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
+    /£(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
+    /(\d+(?:\.\d+)?)\s*(?:million|mn|m)\s*(?:dollar|usd|\$|euro|eur|€|pound|gbp|£)?/i,
+    /\$(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
+    /€(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
+    /£(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
+  ];
+  
+  for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
       let value = parseFloat(match[1]);
-      const unitPart = match[2]?.toLowerCase() || "";
       const fullMatch = match[0].toLowerCase();
       
-      // Determine if billion or million
       const isBillion = fullMatch.includes("billion") || fullMatch.includes("bn") || 
-        (unitPart === "b") || (fullMatch.includes("b") && !fullMatch.includes("m"));
+        (fullMatch.includes("b") && !fullMatch.includes("m"));
       
-      if (isBillion) {
-        value *= 1000; // Convert to millions for consistency
-      }
+      if (isBillion) value *= 1000;
       
-      // Determine currency
       let currency = "USD";
-      if (text.includes("€") || lowerText.includes("euro") || lowerText.includes("eur")) currency = "EUR";
-      else if (text.includes("£") || lowerText.includes("pound") || lowerText.includes("gbp")) currency = "GBP";
+      if (text.includes("€") || text.toLowerCase().includes("euro")) currency = "EUR";
+      else if (text.includes("£") || text.toLowerCase().includes("pound")) currency = "GBP";
       
       return { amount: value, currency };
     }
@@ -173,175 +174,35 @@ function extractAmount(text: string): { amount: number; currency: string } | nul
   return null;
 }
 
-function detectSignalType(text: string): { type: string; confidence: number } | null {
-  const lowerText = text.toLowerCase();
-  
-  // Check PE-specific signals first (in priority order)
-  for (const [type, keywords] of Object.entries(PE_SIGNAL_KEYWORDS)) {
-    const matchCount = keywords.filter(keyword => lowerText.includes(keyword)).length;
-    if (matchCount > 0) {
-      // Higher confidence for more keyword matches
-      const confidence = Math.min(matchCount * 0.3 + 0.4, 1.0);
-      return { type, confidence };
-    }
-  }
-  
-  return null;
-}
-
-function detectFundType(text: string): string | null {
-  const lowerText = text.toLowerCase();
-  
-  for (const [fundType, keywords] of Object.entries(FUND_TYPES)) {
-    if (keywords.some(keyword => lowerText.includes(keyword))) {
-      return fundType;
-    }
-  }
-  return null;
-}
-
-function extractFundOrCompany(title: string, description: string = ""): string | null {
-  // Clean title - remove leading descriptors
-  let cleanTitle = title
+function extractCompany(title: string, description: string = ""): string | null {
+  const cleanTitle = title
     .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
-    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\s+/i, "")
-    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\s+/i, "")
-    .replace(/^(it\s+)?scale-up\s+/i, "")
-    .replace(/^startup\s+/i, "")
     .trim();
   
-  // Extract company BEFORE common action verbs
-  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i;
+  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes)/i;
   
   const match = cleanTitle.match(verbPattern);
   if (match) {
-    let company = match[1]
-      .trim()
-      .replace(/['']s$/i, "") // Remove possessive
-      .replace(/\s+/g, " "); // Normalize spaces
-    
-    // Skip if it's a generic phrase
-    const skipPhrases = [
-      "the", "a", "an", "new", "report", "update", "breaking", "exclusive",
-      "bootstrapped for seven years", "backed by", "formerly known as",
-      "sources say", "according to", "report says", "rumor has it"
-    ];
-    
-    if (skipPhrases.some(phrase => company.toLowerCase() === phrase || company.toLowerCase().startsWith(phrase + " "))) {
-      // Try extracting from description if title is generic
-      if (description) {
-        const descMatch = description.match(/(?:company|startup|firm|fund)\s+([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:has|is|raises|closes|announced)/i);
-        if (descMatch) {
-          return descMatch[1].trim();
-        }
+    let company = match[1].trim().replace(/['']s$/i, "");
+    const skipPhrases = ["the", "a", "an", "new", "report", "update"];
+    if (!skipPhrases.some(p => company.toLowerCase() === p)) {
+      if (company.length >= 2 && company.length <= 50) {
+        return company;
       }
-      return null;
-    }
-    
-    // Valid company name
-    if (company.length >= 2 && company.length <= 50) {
-      return company;
     }
   }
   
-  // Fallback: Look for known PE/VC fund name patterns
   const fundPatterns = [
-    // "XYZ Capital closes €500M fund"
-    /([A-Z][A-Za-z0-9\s&]{2,25}?(?:Capital|Partners|Ventures|Equity|Investment|Advisors|Management|Group|Holdings))\s+(?:closes|raises|launches|announces)/i,
-    // After colon: "Type: CompanyName announces..."
-    /:\s*([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:raises|closes|announces|launches|acquires)/i,
-    // "backed/acquired by CompanyName"
-    /(?:backed|acquired|led|funded)\s+by\s+([A-Z][A-Za-z0-9\-\.&\s]{2,30})/i,
+    /([A-Z][A-Za-z0-9\s&]{2,25}?(?:Capital|Partners|Ventures|Equity|Investment|Advisors|Management|Group))\s+(?:closes|raises|launches)/i,
+    /:\s*([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:raises|closes|announces)/i,
   ];
   
   for (const pattern of fundPatterns) {
     const fundMatch = title.match(pattern);
-    if (fundMatch) {
-      return fundMatch[1].trim();
-    }
-  }
-  
-  // Last resort: Check description for company mentions
-  if (description) {
-    const descPatterns = [
-      /([A-Z][A-Za-z0-9\-\.&]{2,20}),?\s+(?:a|the|an)\s+(?:startup|company|firm|fund|fintech|platform)/i,
-      /(?:startup|company|firm)\s+([A-Z][A-Za-z0-9\-\.&]{2,20})/i,
-    ];
-    
-    for (const pattern of descPatterns) {
-      const descMatch = description.match(pattern);
-      if (descMatch) {
-        return descMatch[1].trim();
-      }
-    }
+    if (fundMatch) return fundMatch[1].trim();
   }
   
   return null;
-}
-
-function calculateHiringIntent(
-  signalType: string | null, 
-  amount: number | null,
-  fundType: string | null
-): { isHighIntent: boolean; intentScore: number; reason: string } {
-  let score = 0;
-  const reasons: string[] = [];
-  
-  // Signal type scoring
-  if (signalType === "fund_close") {
-    score += 40;
-    reasons.push("Fund close = deployment team hiring");
-  } else if (signalType === "new_fund") {
-    score += 30;
-    reasons.push("New fund launch");
-  } else if (signalType === "expansion") {
-    score += 35;
-    reasons.push("Office/team expansion");
-  } else if (signalType === "senior_hire") {
-    score += 25;
-    reasons.push("Senior hire indicates growth");
-  } else if (signalType === "deal") {
-    score += 20;
-    reasons.push("Active deal flow");
-  } else if (signalType === "exit") {
-    score += 15;
-    reasons.push("Exit = capital to deploy");
-  }
-  
-  // Amount scoring (in millions)
-  if (amount) {
-    if (amount >= 1000) {
-      score += 30;
-      reasons.push(`Large fund (${amount >= 1000 ? `€${(amount/1000).toFixed(1)}B` : `€${amount}M`})`);
-    } else if (amount >= 500) {
-      score += 25;
-      reasons.push(`Mid-large fund (€${amount}M)`);
-    } else if (amount >= 250) {
-      score += 20;
-      reasons.push(`Mid fund (€${amount}M)`);
-    } else if (amount >= 100) {
-      score += 15;
-      reasons.push(`Growing fund (€${amount}M)`);
-    } else if (amount >= 50) {
-      score += 10;
-      reasons.push(`Boutique fund (€${amount}M)`);
-    }
-  }
-  
-  // Fund type bonus
-  if (fundType === "private_equity" || fundType === "infrastructure") {
-    score += 10;
-    reasons.push("PE/Infra = larger teams");
-  } else if (fundType === "credit") {
-    score += 8;
-    reasons.push("Credit funds growing");
-  }
-  
-  return {
-    isHighIntent: score >= 50,
-    intentScore: Math.min(score, 100),
-    reason: reasons.join("; "),
-  };
 }
 
 async function parseRSSFeed(url: string): Promise<any[]> {
@@ -353,20 +214,14 @@ async function parseRSSFeed(url: string): Promise<any[]> {
       },
     });
     
-    if (!response.ok) {
-      console.log(`Failed to fetch ${url}: ${response.status}`);
-      return [];
-    }
+    if (!response.ok) return [];
     
     const xml = await response.text();
     const items: any[] = [];
-    
-    // Simple XML parsing for RSS items
     const itemMatches = xml.matchAll(/<item>([\s\S]*?)<\/item>/gi);
     
     for (const match of itemMatches) {
       const itemXml = match[1];
-      
       const titleMatch = itemXml.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
       const linkMatch = itemXml.match(/<link>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/link>/i);
       const descMatch = itemXml.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
@@ -389,6 +244,96 @@ async function parseRSSFeed(url: string): Promise<any[]> {
   }
 }
 
+async function fetchAdzunaJobs(region: string): Promise<any[]> {
+  const adzunaAppId = Deno.env.get("ADZUNA_APP_ID");
+  const adzunaAppKey = Deno.env.get("ADZUNA_APP_KEY");
+  
+  if (!adzunaAppId || !adzunaAppKey) {
+    console.log("Adzuna API keys not configured, skipping job signals");
+    return [];
+  }
+  
+  const regionConfig = REGIONS[region as keyof typeof REGIONS];
+  if (!regionConfig || regionConfig.adzunaCountries.length === 0) {
+    return [];
+  }
+  
+  const allJobs: any[] = [];
+  const keywords = "private equity OR venture capital OR recruiter OR talent acquisition";
+  
+  for (const country of regionConfig.adzunaCountries) {
+    try {
+      const cities = regionConfig.cities.slice(0, 3).join(" OR ");
+      const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${adzunaAppId}&app_key=${adzunaAppKey}&what=${encodeURIComponent(keywords)}&where=${encodeURIComponent(cities)}&results_per_page=50&max_days_old=30`;
+      
+      console.log(`Fetching Adzuna jobs for ${country}...`);
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        console.log(`Adzuna API error for ${country}: ${response.status}`);
+        continue;
+      }
+      
+      const data = await response.json();
+      const jobs = data.results || [];
+      
+      // Group by company and count
+      const companyJobs: Record<string, any[]> = {};
+      for (const job of jobs) {
+        const company = job.company?.display_name || "Unknown";
+        if (!companyJobs[company]) companyJobs[company] = [];
+        companyJobs[company].push(job);
+      }
+      
+      // Create signals for companies with multiple job postings
+      for (const [company, companyJobList] of Object.entries(companyJobs)) {
+        const jobCount = companyJobList.length;
+        let tier = "tier_3";
+        let score = 30;
+        let signalType = "linkedin_hiring_posts";
+        
+        // Score based on job count (rapid_job_postings = 3+ roles in <30 days)
+        if (jobCount >= 3) {
+          tier = "tier_1";
+          score = 90 + Math.min(jobCount, 10);
+          signalType = "rapid_job_postings";
+        } else if (jobCount >= 2) {
+          tier = "tier_2";
+          score = 60 + (jobCount * 5);
+          signalType = "new_recruiter";
+        } else {
+          score = 30 + (jobCount * 10);
+        }
+        
+        allJobs.push({
+          title: `${company} has ${jobCount} open role${jobCount > 1 ? "s" : ""} in ${region.toUpperCase()}`,
+          company: company,
+          region: region,
+          tier: tier,
+          score: score,
+          signal_type: signalType,
+          description: `${company} is actively hiring with ${jobCount} open positions in the PE/VC/Recruitment space.`,
+          source: "Adzuna Jobs",
+          url: companyJobList[0]?.redirect_url || null,
+          published_at: new Date().toISOString(),
+          details: { 
+            job_count: jobCount, 
+            locations: [...new Set(companyJobList.map((j: any) => j.location?.display_name).filter(Boolean))],
+            titles: companyJobList.slice(0, 5).map((j: any) => j.title),
+          },
+        });
+      }
+    } catch (error) {
+      console.error(`Error fetching Adzuna jobs for ${country}:`, error);
+    }
+  }
+  
+  return allJobs;
+}
+
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -401,11 +346,12 @@ Deno.serve(async (req) => {
 
     const { region } = await req.json().catch(() => ({ region: null }));
     
-    const regionsToFetch = region ? [region] : Object.keys(RSS_FEEDS);
+    const regionsToFetch = region ? [region] : Object.keys(REGIONS);
     const allSignals: any[] = [];
     const now = new Date();
-    const cutoffDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 14 days (2 weeks) for more quality leads
+    const cutoffDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 14 days
 
+    // Fetch from RSS feeds
     for (const reg of regionsToFetch) {
       const feeds = RSS_FEEDS[reg as keyof typeof RSS_FEEDS] || [];
       
@@ -415,50 +361,46 @@ Deno.serve(async (req) => {
         console.log(`  Found ${items.length} items from ${feed.source}`);
         
         for (const item of items) {
-          // Skip if too old
-          if (item.published_at && new Date(item.published_at) < cutoffDate) {
-            continue;
-          }
+          if (item.published_at && new Date(item.published_at) < cutoffDate) continue;
           
           const fullText = `${item.title} ${item.description || ""}`;
-          const signalResult = detectSignalType(fullText);
+          const tierResult = detectTierAndType(fullText);
           
-          // Skip if no relevant PE/fund signal detected
-          if (!signalResult) continue;
+          if (!tierResult) continue;
           
           const amountData = extractAmount(fullText);
-          const fundType = detectFundType(fullText);
-          const company = extractFundOrCompany(item.title, item.description);
+          const company = extractCompany(item.title, item.description);
           
-          // Filter by minimum amount for fund_close and new_fund signals
-          if ((signalResult.type === "fund_close" || signalResult.type === "new_fund")) {
-            if (!amountData || amountData.amount < 50) continue; // Skip < €50M funds
+          // Boost score for fund closes with large amounts
+          let score = tierResult.score;
+          if (amountData) {
+            if (amountData.amount >= 1000) score = Math.min(score + 15, 100);
+            else if (amountData.amount >= 500) score = Math.min(score + 10, 100);
+            else if (amountData.amount >= 100) score = Math.min(score + 5, 100);
           }
-          
-          // For deals, require some amount or clear company name
-          if (signalResult.type === "deal") {
-            if (!amountData && !company) continue;
-          }
-          
-          const intentResult = calculateHiringIntent(signalResult.type, amountData?.amount || null, fundType);
           
           allSignals.push({
             title: item.title.slice(0, 255),
             company: company,
             region: reg,
+            tier: tierResult.tier,
+            score: score,
             amount: amountData?.amount || null,
             currency: amountData?.currency || "EUR",
-            signal_type: signalResult.type,
+            signal_type: tierResult.signalType,
             description: item.description?.slice(0, 500) || null,
             url: item.url,
             source: feed.source,
             published_at: item.published_at || now.toISOString(),
-            is_high_intent: intentResult.isHighIntent,
-            // Store additional metadata in description if no description
-            // intent_score and fund_type could be added as columns later
+            is_high_intent: tierResult.tier === "tier_1",
+            details: {},
           });
         }
       }
+      
+      // Fetch Adzuna jobs for the region
+      const adzunaSignals = await fetchAdzunaJobs(reg);
+      allSignals.push(...adzunaSignals);
     }
 
     console.log(`Total signals collected: ${allSignals.length}`);
@@ -472,7 +414,6 @@ Deno.serve(async (req) => {
 
     let insertedCount = 0;
     if (uniqueSignals.length > 0) {
-      // Upsert signals (avoid duplicates)
       for (const signal of uniqueSignals) {
         const { data: existing } = await supabase
           .from("signals")
@@ -483,22 +424,25 @@ Deno.serve(async (req) => {
         if (!existing) {
           const { error } = await supabase.from("signals").insert(signal);
           if (!error) insertedCount++;
+          else console.error("Insert error:", error);
         }
       }
     }
 
     console.log(`Inserted ${insertedCount} new signals`);
 
-    // Get counts by region (non-dismissed, recent)
+    // Get counts by region and tier
     const { data: counts } = await supabase
       .from("signals")
-      .select("region")
+      .select("region, tier")
       .eq("is_dismissed", false)
       .gte("published_at", cutoffDate.toISOString());
     
     const regionCounts: Record<string, number> = {};
+    const tierCounts: Record<string, number> = { tier_1: 0, tier_2: 0, tier_3: 0 };
     (counts || []).forEach((s: any) => {
       regionCounts[s.region] = (regionCounts[s.region] || 0) + 1;
+      if (s.tier) tierCounts[s.tier] = (tierCounts[s.tier] || 0) + 1;
     });
 
     return new Response(
@@ -506,6 +450,7 @@ Deno.serve(async (req) => {
         success: true, 
         fetched: insertedCount,
         regionCounts,
+        tierCounts,
         message: `Processed ${uniqueSignals.length} signals, inserted ${insertedCount} new`
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

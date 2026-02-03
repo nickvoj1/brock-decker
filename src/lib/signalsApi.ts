@@ -5,6 +5,8 @@ export interface Signal {
   title: string;
   company: string | null;
   region: string;
+  tier: string | null;
+  score: number;
   amount: number | null;
   currency: string | null;
   signal_type: string | null;
@@ -17,12 +19,15 @@ export interface Signal {
   contacts_found: number;
   cv_matches: number;
   bullhorn_note_added: boolean;
+  contacts_url: string | null;
+  details: Record<string, unknown> | null;
   created_at: string;
 }
 
 export interface SignalsResponse {
   signals: Signal[];
   regionCounts: Record<string, number>;
+  tierCounts: Record<string, number>;
 }
 
 interface DataApiResponse<T = unknown> {
@@ -97,14 +102,13 @@ export async function refreshSignals(profileName: string, region?: string) {
       return { success: false, error: error.message };
     }
 
-    // The edge function returns { success, fetched, regionCounts, message } directly
-    // Wrap it in a data property to match the expected DataApiResponse format
     if (response && response.success) {
       return { 
         success: true, 
         data: { 
           fetched: response.fetched || 0, 
-          regionCounts: response.regionCounts || {} 
+          regionCounts: response.regionCounts || {},
+          tierCounts: response.tierCounts || {},
         } 
       };
     }
@@ -116,82 +120,28 @@ export async function refreshSignals(profileName: string, region?: string) {
   }
 }
 
-// Extract company name from signal title if company field is empty
-function extractCompanyFromTitle(title: string): string {
-  // Clean title - remove leading descriptors
-  let cleanTitle = title
-    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
-    .replace(/^(french|german|uk|british|european|spanish|dutch|swiss|us|american)\s+/i, "")
-    .replace(/^(fintech|proptech|healthtech|edtech|insurtech|legaltech|deeptech|biotech|cleantech)\s+/i, "")
-    .replace(/^(it\s+)?scale-up\s+/i, "")
-    .replace(/^startup\s+/i, "")
-    .trim();
-  
-  // Extract company BEFORE common action verbs
-  const verbPattern = /^([A-Z][A-Za-z0-9''\-\.&\s]{1,40}?)\s+(?:raises|closes|secures|announces|completes|launches|acquires|enters|targets|opens|hires|appoints|names|promotes|backs|invests|exits|sells|buys|takes|signs|expands|reaches|receives|lands|wins|gets|has|is|to|in|at|for|joins|adds|extends)/i;
-  
-  const match = cleanTitle.match(verbPattern);
-  if (match) {
-    let company = match[1]
-      .trim()
-      .replace(/['']s$/i, "") // Remove possessive
-      .replace(/\s+/g, " "); // Normalize spaces
-    
-    // Skip if it's a generic phrase
-    const skipPhrases = [
-      "the", "a", "an", "new", "report", "update", "breaking", "exclusive",
-      "bootstrapped for seven years", "backed by", "formerly known as",
-      "sources say", "according to", "report says", "rumor has it"
-    ];
-    
-    if (skipPhrases.some(phrase => company.toLowerCase() === phrase || company.toLowerCase().startsWith(phrase + " "))) {
-      return "";
-    }
-    
-    // Valid company name
-    if (company.length >= 2 && company.length <= 50) {
-      return company;
-    }
-  }
-  
-  // Fallback: Look for known PE/VC fund name patterns
-  const fundPatterns = [
-    /([A-Z][A-Za-z0-9\s&]{2,25}?(?:Capital|Partners|Ventures|Equity|Investment|Advisors|Management|Group|Holdings))\s+(?:closes|raises|launches|announces)/i,
-    /:\s*([A-Z][A-Za-z0-9\-\.&\s]{2,30}?)\s+(?:raises|closes|announces|launches|acquires)/i,
-    /(?:backed|acquired|led|funded)\s+by\s+([A-Z][A-Za-z0-9\-\.&\s]{2,30})/i,
-  ];
-  
-  for (const pattern of fundPatterns) {
-    const fundMatch = title.match(pattern);
-    if (fundMatch) {
-      return fundMatch[1].trim();
-    }
-  }
-  
-  return "";
-}
-
-// Build Apollo search URL for a signal
-export function buildApolloSearchUrl(signal: Signal): string {
-  const baseUrl = "https://app.apollo.io/";
-  const companyName = signal.company || extractCompanyFromTitle(signal.title);
-  
-  // This creates a search query that would work in Apollo
-  // In practice, we navigate to our own enrichment page
-  const query = encodeURIComponent(companyName);
-  return `${baseUrl}#/people?qKeywords=${query}`;
-}
-
 // Build Bullhorn note text for a signal
 export function buildBullhornNote(signal: Signal): string {
   const parts: string[] = [];
-  const companyName = signal.company || extractCompanyFromTitle(signal.title);
   
-  if (companyName) {
-    parts.push(`Company: ${companyName}`);
+  if (signal.company) {
+    parts.push(`Company: ${signal.company}`);
   }
   
   parts.push(`Signal: ${signal.title}`);
+  
+  if (signal.tier) {
+    const tierLabels: Record<string, string> = {
+      tier_1: "Tier 1 – Immediate Hiring Intent",
+      tier_2: "Tier 2 – Medium Intent",
+      tier_3: "Tier 3 – Early Interest",
+    };
+    parts.push(`Priority: ${tierLabels[signal.tier] || signal.tier}`);
+  }
+  
+  if (signal.score) {
+    parts.push(`Score: ${signal.score}/100`);
+  }
   
   if (signal.amount && signal.currency) {
     const symbol = signal.currency === "EUR" ? "€" : signal.currency === "GBP" ? "£" : "$";
@@ -219,48 +169,85 @@ export function buildBullhornNote(signal: Signal): string {
   return parts.join("\n");
 }
 
+// Build Apollo search URL
+export function buildApolloSearchUrl(signal: Signal): string {
+  const baseUrl = "https://app.apollo.io/";
+  const companyName = signal.company || "";
+  const query = encodeURIComponent(companyName);
+  return `${baseUrl}#/people?qKeywords=${query}`;
+}
+
 // Get enrichment preferences from signal
 export function getSignalEnrichmentParams(signal: Signal): Record<string, string> {
   const params: Record<string, string> = {};
   
-  // Extract company name from signal.company or parse from title
-  const companyName = signal.company || extractCompanyFromTitle(signal.title);
-  if (companyName) {
-    params.company = companyName;
+  if (signal.company) {
+    params.company = signal.company;
   }
   
   if (signal.region) {
-    // Map signal region to location preferences
     const regionLocationMap: Record<string, string> = {
-      europe: "London,Frankfurt,Paris",
+      europe: "London,Frankfurt,Paris,Amsterdam",
       uae: "Dubai,Abu Dhabi",
-      east_usa: "New York,Boston",
-      west_usa: "San Francisco,Los Angeles",
+      usa: "New York,Boston,San Francisco,Los Angeles",
     };
     params.locations = regionLocationMap[signal.region] || "";
   }
   
-  // Map signal type to likely industries
   const signalTypeIndustryMap: Record<string, string> = {
-    fund_close: "Private Equity,Venture Capital,Asset Management",
-    new_fund: "Private Equity,Venture Capital,Asset Management",
-    deal: "Private Equity,Investment Banking,Corporate Finance",
-    exit: "Private Equity,Venture Capital",
-    expansion: "Financial Services,Investment Management",
-    senior_hire: "Financial Services,Private Equity",
+    pe_vc_investment: "Private Equity,Venture Capital",
+    fundraise_lbo: "Private Equity,Venture Capital",
+    acquisition: "Private Equity,Investment Banking",
+    new_ceo_cfo_chro: "Financial Services,Executive Leadership",
+    new_fund_launch: "Private Equity,Venture Capital,Asset Management",
+    rapid_job_postings: "Financial Services,Private Equity",
   };
   
   if (signal.signal_type && signalTypeIndustryMap[signal.signal_type]) {
     params.industries = signalTypeIndustryMap[signal.signal_type];
   }
   
-  // Add additional signal context for display
   params.signalId = signal.id;
   params.signalTitle = signal.title;
   params.signalRegion = signal.region;
   if (signal.signal_type) params.signalType = signal.signal_type;
   if (signal.amount) params.signalAmount = signal.amount.toString();
   if (signal.currency) params.signalCurrency = signal.currency;
+  if (signal.tier) params.signalTier = signal.tier;
+  if (signal.score) params.signalScore = signal.score.toString();
   
   return params;
+}
+
+// Export signals to CSV
+export function exportSignalsToCSV(signals: Signal[]): string {
+  const headers = [
+    "Company",
+    "Tier",
+    "Score",
+    "Type",
+    "Title",
+    "Amount",
+    "Currency",
+    "Region",
+    "Source",
+    "Published",
+    "URL",
+  ];
+  
+  const rows = signals.map((s) => [
+    s.company || "",
+    s.tier || "",
+    s.score?.toString() || "",
+    s.signal_type || "",
+    `"${(s.title || "").replace(/"/g, '""')}"`,
+    s.amount?.toString() || "",
+    s.currency || "",
+    s.region || "",
+    s.source || "",
+    s.published_at ? new Date(s.published_at).toLocaleDateString() : "",
+    s.url || "",
+  ]);
+  
+  return [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
 }
