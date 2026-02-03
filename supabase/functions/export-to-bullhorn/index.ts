@@ -1758,6 +1758,82 @@ async function assertDistributionListsApiAvailable(restUrl: string, bhRestToken:
   throw new Error(`Distribution Lists API is not available in this Bullhorn instance. Details: ${errorText}`)
 }
 
+// Check if a contact was recently contacted (has a note within the last 14 days)
+// Returns true if the contact should be SKIPPED (has recent note), false if OK to contact
+async function checkContactRecentlyContacted(
+  restUrl: string,
+  bhRestToken: string,
+  email: string
+): Promise<{ skip: boolean; reason?: string; contactId?: number }> {
+  try {
+    // Step 1: Search for contact by email
+    const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${encodeURIComponent(bhRestToken)}&query=email:"${encodeURIComponent(email)}"&fields=id,email,firstName,lastName&count=1`
+    const searchResponse = await bullhornFetch(searchUrl)
+    
+    if (!searchResponse.ok) {
+      await searchResponse.text()
+      // If search fails, proceed with export (don't block on errors)
+      return { skip: false }
+    }
+    
+    const searchData = await searchResponse.json()
+    
+    if (!searchData.data || searchData.data.length === 0) {
+      // Contact doesn't exist in Bullhorn - OK to create
+      return { skip: false }
+    }
+    
+    const contactId = searchData.data[0].id
+    const contactName = `${searchData.data[0].firstName || ''} ${searchData.data[0].lastName || ''}`.trim()
+    
+    // Step 2: Fetch the most recent note for this contact
+    // Notes in Bullhorn are stored as "Note" entity with personReference pointing to the contact
+    const fourteenDaysAgo = new Date()
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14)
+    const fourteenDaysAgoTimestamp = fourteenDaysAgo.getTime()
+    
+    // Query notes for this contact, ordered by dateAdded descending
+    const notesUrl = `${restUrl}query/Note?BhRestToken=${encodeURIComponent(bhRestToken)}&where=personReference.id=${contactId}&fields=id,dateAdded,action,comments&orderBy=-dateAdded&count=1`
+    const notesResponse = await bullhornFetch(notesUrl)
+    
+    if (!notesResponse.ok) {
+      await notesResponse.text()
+      // If notes query fails, try alternate approach
+      // Some Bullhorn instances use "ClientContactNote" or track via the contact's "notes" field
+      return { skip: false, contactId }
+    }
+    
+    const notesData = await notesResponse.json()
+    
+    if (!notesData.data || notesData.data.length === 0) {
+      // Contact exists but has no notes - OK to contact
+      return { skip: false, contactId }
+    }
+    
+    const lastNote = notesData.data[0]
+    const lastNoteDate = lastNote.dateAdded
+    
+    // Bullhorn returns dateAdded as epoch milliseconds
+    if (typeof lastNoteDate === 'number' && lastNoteDate >= fourteenDaysAgoTimestamp) {
+      const daysSinceNote = Math.floor((Date.now() - lastNoteDate) / (1000 * 60 * 60 * 24))
+      console.log(`Skipping ${email} (${contactName}): last note was ${daysSinceNote} days ago (within 14-day window)`)
+      return { 
+        skip: true, 
+        reason: `Last note was ${daysSinceNote} days ago`,
+        contactId 
+      }
+    }
+    
+    // Last note is older than 14 days - OK to contact
+    return { skip: false, contactId }
+    
+  } catch (err: any) {
+    console.error(`Error checking recent contact for ${email}:`, err.message)
+    // On error, don't block the export
+    return { skip: false }
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -1818,7 +1894,62 @@ Deno.serve(async (req) => {
     const runDate = new Date(run.created_at)
     const listName = `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
 
-    console.log(`Creating/updating ${contacts.length} ClientContacts...`)
+    // Step 1: Pre-filter contacts that were recently contacted (note within 14 days)
+    console.log(`Checking ${contacts.length} contacts for recent activity in Bullhorn...`)
+    const skippedContacts: { email: string; reason: string }[] = []
+    const contactsToExport: ApolloContact[] = []
+    
+    // Check contacts in batches of 5 to avoid rate limiting
+    const PRECHECK_BATCH_SIZE = 5
+    for (let i = 0; i < contacts.length; i += PRECHECK_BATCH_SIZE) {
+      const batch = contacts.slice(i, i + PRECHECK_BATCH_SIZE)
+      
+      const checkResults = await Promise.allSettled(
+        batch.map(async (contact) => {
+          const { skip, reason } = await checkContactRecentlyContacted(
+            tokens.restUrl,
+            tokens.bhRestToken,
+            contact.email
+          )
+          return { contact, skip, reason }
+        })
+      )
+      
+      for (const result of checkResults) {
+        if (result.status === 'fulfilled') {
+          if (result.value.skip) {
+            skippedContacts.push({ 
+              email: result.value.contact.email, 
+              reason: result.value.reason || 'Recently contacted' 
+            })
+          } else {
+            contactsToExport.push(result.value.contact)
+          }
+        } else {
+          // On error, include the contact (don't block on check failures)
+          const contact = batch[checkResults.indexOf(result)]
+          if (contact) contactsToExport.push(contact)
+        }
+      }
+      
+      // Small delay between batches
+      if (i + PRECHECK_BATCH_SIZE < contacts.length) {
+        await sleep(50)
+      }
+    }
+    
+    console.log(`Pre-check complete: ${contactsToExport.length} contacts to export, ${skippedContacts.length} skipped (recently contacted)`)
+    
+    if (skippedContacts.length > 0) {
+      console.log(`Skipped contacts (note within 14 days):`)
+      skippedContacts.forEach(s => console.log(`  - ${s.email}: ${s.reason}`))
+    }
+    
+    if (contactsToExport.length === 0) {
+      throw new Error(`All ${contacts.length} contacts were skipped because they have notes within the last 14 days. No contacts to export.`)
+    }
+
+    console.log(`Creating/updating ${contactsToExport.length} ClientContacts...`)
     const contactIds: number[] = []
     const errors: string[] = []
     
@@ -1826,9 +1957,9 @@ Deno.serve(async (req) => {
 
     // Process contacts in batches of 5 for better throughput
     const BATCH_SIZE = 5
-    for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
-      const batch = contacts.slice(i, i + BATCH_SIZE)
-      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(contacts.length / BATCH_SIZE)} (contacts ${i + 1}-${Math.min(i + BATCH_SIZE, contacts.length)})`)
+    for (let i = 0; i < contactsToExport.length; i += BATCH_SIZE) {
+      const batch = contactsToExport.slice(i, i + BATCH_SIZE)
+      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(contactsToExport.length / BATCH_SIZE)} (contacts ${i + 1}-${Math.min(i + BATCH_SIZE, contactsToExport.length)})`)
       
       // Process batch in parallel
       const batchResults = await Promise.allSettled(
@@ -1890,7 +2021,7 @@ Deno.serve(async (req) => {
       }
     }
     
-    console.log(`Export complete: ${contactIds.length}/${contacts.length} contacts processed`)
+    console.log(`Export complete: ${contactIds.length}/${contactsToExport.length} contacts processed (${skippedContacts.length} skipped due to recent notes)`)
 
     if (contactIds.length === 0) {
       throw new Error('Failed to create any contacts in Bullhorn')
@@ -1922,6 +2053,8 @@ Deno.serve(async (req) => {
         listName,
         listId,
         contactsExported: contactIds.length,
+        contactsSkipped: skippedContacts.length,
+        skippedDetails: skippedContacts.length > 0 ? skippedContacts : undefined,
         errors: errors.length > 0 ? errors : undefined,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
