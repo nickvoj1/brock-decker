@@ -5,46 +5,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// PE/VC/Finance company career pages to scrape for job signals
-const CAREER_PAGES: Record<string, { url: string; company: string; region: string }[]> = {
+// PE/VC/Finance company career pages - curated list with accurate regions
+const CAREER_PAGES: Record<string, { url: string; company: string; region: string; location: string }[]> = {
   london: [
-    { url: "https://www.blackstone.com/careers/", company: "Blackstone", region: "london" },
-    { url: "https://www.kkr.com/careers", company: "KKR", region: "london" },
-    { url: "https://www.carlyle.com/careers", company: "The Carlyle Group", region: "london" },
-    { url: "https://careers.goldmansachs.com/locations/emea", company: "Goldman Sachs", region: "london" },
-    { url: "https://www.bridgepoint.eu/careers", company: "Bridgepoint", region: "london" },
-    { url: "https://www.permira.com/careers", company: "Permira", region: "london" },
-    { url: "https://www.cvc.com/careers/", company: "CVC Capital Partners", region: "london" },
-    { url: "https://www.apax.com/careers/", company: "Apax Partners", region: "london" },
-    { url: "https://www.bcpartners.com/careers", company: "BC Partners", region: "london" },
+    { url: "https://www.blackstone.com/careers/", company: "Blackstone", region: "london", location: "London" },
+    { url: "https://www.kkr.com/careers", company: "KKR", region: "london", location: "London" },
+    { url: "https://www.carlyle.com/careers", company: "The Carlyle Group", region: "london", location: "London" },
+    { url: "https://www.bridgepoint.eu/careers", company: "Bridgepoint", region: "london", location: "London" },
+    { url: "https://www.permira.com/careers", company: "Permira", region: "london", location: "London" },
+    { url: "https://www.cvc.com/careers/", company: "CVC Capital Partners", region: "london", location: "London" },
+    { url: "https://www.apax.com/careers/", company: "Apax Partners", region: "london", location: "London" },
+    { url: "https://www.bcpartners.com/careers", company: "BC Partners", region: "london", location: "London" },
+    { url: "https://www.3i.com/careers", company: "3i Group", region: "london", location: "London" },
+    { url: "https://www.icgam.com/careers", company: "ICG", region: "london", location: "London" },
   ],
   europe: [
-    { url: "https://www.eqtgroup.com/careers/", company: "EQT Partners", region: "europe" },
-    { url: "https://www.ardian.com/en/careers", company: "Ardian", region: "europe" },
-    { url: "https://www.partnersgroup.com/en/careers/", company: "Partners Group", region: "europe" },
-    { url: "https://www.triton-partners.com/careers/", company: "Triton", region: "europe" },
-    { url: "https://www.nordiccapital.com/careers/", company: "Nordic Capital", region: "europe" },
-    { url: "https://www.ikpartners.com/careers", company: "IK Partners", region: "europe" },
-    { url: "https://www.cinven.com/careers/", company: "Cinven", region: "europe" },
-    { url: "https://www.pai.com/careers", company: "PAI Partners", region: "europe" },
+    { url: "https://www.eqtgroup.com/careers/", company: "EQT Partners", region: "europe", location: "Stockholm" },
+    { url: "https://www.ardian.com/en/careers", company: "Ardian", region: "europe", location: "Paris" },
+    { url: "https://www.partnersgroup.com/en/careers/", company: "Partners Group", region: "europe", location: "Zurich" },
+    { url: "https://www.triton-partners.com/careers/", company: "Triton", region: "europe", location: "Frankfurt" },
+    { url: "https://www.nordiccapital.com/careers/", company: "Nordic Capital", region: "europe", location: "Stockholm" },
+    { url: "https://www.ikpartners.com/careers", company: "IK Partners", region: "europe", location: "Luxembourg" },
+    { url: "https://www.cinven.com/careers/", company: "Cinven", region: "europe", location: "Luxembourg" },
+    { url: "https://www.pai.com/careers", company: "PAI Partners", region: "europe", location: "Paris" },
+    { url: "https://www.hgcapital.com/careers", company: "HgCapital", region: "europe", location: "London" },
   ],
   uae: [
-    { url: "https://www.mubadala.com/en/careers", company: "Mubadala", region: "uae" },
-    { url: "https://www.adia.ae/en/careers", company: "ADIA", region: "uae" },
-    { url: "https://www.adq.ae/careers/", company: "ADQ", region: "uae" },
-    { url: "https://www.emirates-nbd.com/en/about-us/careers/", company: "Emirates NBD", region: "uae" },
+    { url: "https://www.mubadala.com/en/careers", company: "Mubadala", region: "uae", location: "Abu Dhabi" },
+    { url: "https://www.adia.ae/en/careers", company: "ADIA", region: "uae", location: "Abu Dhabi" },
+    { url: "https://www.adq.ae/careers/", company: "ADQ", region: "uae", location: "Abu Dhabi" },
+    { url: "https://www.investcorp.com/careers", company: "Investcorp", region: "uae", location: "Bahrain" },
   ],
   usa: [
-    { url: "https://www.blackstone.com/careers/", company: "Blackstone", region: "usa" },
-    { url: "https://www.kkr.com/careers", company: "KKR", region: "usa" },
-    { url: "https://www.carlyle.com/careers", company: "The Carlyle Group", region: "usa" },
-    { url: "https://www.apolloglobal.com/careers/", company: "Apollo Global", region: "usa" },
-    { url: "https://www.tpg.com/careers", company: "TPG", region: "usa" },
-    { url: "https://www.warburgpincus.com/careers/", company: "Warburg Pincus", region: "usa" },
-    { url: "https://www.generalatlantic.com/careers/", company: "General Atlantic", region: "usa" },
-    { url: "https://www.silverlake.com/careers", company: "Silver Lake", region: "usa" },
-    { url: "https://www.thomabravo.com/careers", company: "Thoma Bravo", region: "usa" },
-    { url: "https://www.vistaequitypartners.com/careers/", company: "Vista Equity Partners", region: "usa" },
+    { url: "https://www.blackstone.com/careers/", company: "Blackstone", region: "usa", location: "New York" },
+    { url: "https://www.kkr.com/careers", company: "KKR", region: "usa", location: "New York" },
+    { url: "https://www.carlyle.com/careers", company: "The Carlyle Group", region: "usa", location: "Washington DC" },
+    { url: "https://www.apolloglobal.com/careers/", company: "Apollo Global", region: "usa", location: "New York" },
+    { url: "https://www.tpg.com/careers", company: "TPG", region: "usa", location: "San Francisco" },
+    { url: "https://www.warburgpincus.com/careers/", company: "Warburg Pincus", region: "usa", location: "New York" },
+    { url: "https://www.generalatlantic.com/careers/", company: "General Atlantic", region: "usa", location: "New York" },
+    { url: "https://www.silverlake.com/careers", company: "Silver Lake", region: "usa", location: "Menlo Park" },
+    { url: "https://www.thomabravo.com/careers", company: "Thoma Bravo", region: "usa", location: "Chicago" },
+    { url: "https://www.vistaequitypartners.com/careers/", company: "Vista Equity Partners", region: "usa", location: "Austin" },
   ],
 };
 
@@ -109,7 +111,7 @@ interface JobSignal {
   signalType: string;
   tier: string;
   score: number;
-  location: string | null;
+  location: string;
   position: string | null;
 }
 
@@ -118,6 +120,13 @@ interface ExtractedJob {
   location: string | null;
   isJunior: boolean;
   isSenior: boolean;
+}
+
+interface CareerPageConfig {
+  url: string;
+  company: string;
+  region: string;
+  location: string;
 }
 
 /**
@@ -248,12 +257,13 @@ function detectJobType(text: string, positions: ExtractedJob[]): { tier: string;
 
 async function scrapeCareerPage(
   firecrawlApiKey: string,
-  pageConfig: { url: string; company: string; region: string }
+  pageConfig: CareerPageConfig
 ): Promise<JobSignal[]> {
   const signals: JobSignal[] = [];
   
   try {
-    console.log(`Scraping career page: ${pageConfig.company} (${pageConfig.url})`);
+    console.log(`Scraping: ${pageConfig.company} (${pageConfig.location})`);
+    
     
     const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
       method: "POST",
@@ -299,8 +309,9 @@ async function scrapeCareerPage(
       return signals;
     }
     
-    // Extract location from content
+    // Extract location from content - but prefer the configured location
     const detectedLocation = extractLocation(markdown, pageConfig.region);
+    const finalLocation = detectedLocation || pageConfig.location;
     
     // Get top positions for the signal
     const topPositions = extractedPositions
@@ -325,9 +336,8 @@ async function scrapeCareerPage(
       : `${pageConfig.company} hiring: ${positionSummary}`;
     
     // Build description with location and positions
-    const locationInfo = detectedLocation ? `📍 ${detectedLocation}` : `📍 ${pageConfig.region.toUpperCase()}`;
     const positionList = positionsToShow.join(" | ");
-    const description = `${locationInfo}\n\n**Open Positions:** ${positionList}`;
+    const description = `📍 ${finalLocation}\n\n**Open Positions:** ${positionList}`;
     
     signals.push({
       title,
@@ -338,11 +348,11 @@ async function scrapeCareerPage(
       signalType,
       tier,
       score: Math.min(score + (extractedPositions.length > 5 ? 10 : 0), 100),
-      location: detectedLocation,
+      location: finalLocation,
       position: positionsToShow.join(", "),
     });
     
-    console.log(`Created signal for ${pageConfig.company}: ${title}`);
+    console.log(`✓ ${pageConfig.company}: ${extractedPositions.length} roles at ${finalLocation}`);
     return signals;
     
   } catch (error) {
@@ -373,7 +383,7 @@ Deno.serve(async (req) => {
 
     // Get career pages for the requested region(s)
     const regions = region ? [region] : ["london", "europe", "uae", "usa"];
-    const allPages: { url: string; company: string; region: string }[] = [];
+    const allPages: CareerPageConfig[] = [];
     
     for (const r of regions) {
       const pages = CAREER_PAGES[r] || [];

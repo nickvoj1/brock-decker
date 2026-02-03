@@ -639,15 +639,18 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
       ? `including ${seniorRoleCount} senior/leadership role${seniorRoleCount > 1 ? "s" : ""}`
       : "across various levels";
     
+    // Extract primary location for the signal
+    const primaryLocation = uniqueLocations.length > 0 ? uniqueLocations[0] : null;
+    
     signals.push({
-      title: `${company} is hiring: ${jobCount} open role${jobCount > 1 ? "s" : ""} ${roleTypeSummary}`,
+      title: `${company} hiring ${jobCount} role${jobCount > 1 ? "s" : ""}: ${uniqueTitles.slice(0, 2).join(", ")}`,
       company: company,
       region: region,
       tier: tier,
       score: baseScore,
       signal_type: mapToValidSignalType(signalType),
-      description: `${company} is actively expanding with ${jobCount} open positions. Roles include: ${uniqueTitles.join(", ")}. Locations: ${uniqueLocations.join(", ") || region.toUpperCase()}.`,
-      source: "Adzuna Jobs",
+      description: `📍 ${primaryLocation || region.toUpperCase()}\n\n**Open Positions:** ${uniqueTitles.slice(0, 4).join(", ")}${uniqueTitles.length > 4 ? ` (+${uniqueTitles.length - 4} more)` : ""}`,
+      source: "Adzuna",
       url: companyJobList[0]?.redirect_url || null,
       published_at: new Date().toISOString(),
       is_high_intent: tier === "tier_1",
@@ -655,9 +658,10 @@ async function fetchAdzunaJobs(region: string): Promise<any[]> {
         job_count: jobCount,
         senior_role_count: seniorRoleCount,
         is_pe_vc_company: isPEVCCompany,
+        location: primaryLocation,
         locations: uniqueLocations,
+        positions: uniqueTitles.slice(0, 5).join(", "),
         titles: uniqueTitles,
-        avg_strategy_weight: avgWeight,
       },
     });
   }
@@ -721,6 +725,12 @@ Deno.serve(async (req) => {
             else if (amountData.amount >= 100) score = Math.min(score + 5, 100);
           }
           
+          // STRICT: Skip signals without a company name (not actionable)
+          if (!company) {
+            console.log(`Skipping signal without company: ${item.title.slice(0, 40)}...`);
+            continue;
+          }
+          
           allSignals.push({
             title: item.title.slice(0, 255),
             company: company,
@@ -735,7 +745,11 @@ Deno.serve(async (req) => {
             source: feed.source,
             published_at: item.published_at || now.toISOString(),
             is_high_intent: tierResult.tier === "tier_1",
-            details: {},
+            details: {
+              location: validatedRegion === "london" ? "London" : 
+                        validatedRegion === "uae" ? "Dubai" :
+                        validatedRegion === "usa" ? "New York" : "Europe",
+            },
           });
         }
       }
