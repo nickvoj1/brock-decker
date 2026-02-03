@@ -353,7 +353,27 @@ const LAW_FIRM_KEYWORDS = [
   'barrister', 'attorney at law', 'attorneys at law'
 ]
 
-function isLawFirm(companyName: string, industry?: string | null): boolean {
+// Keywords in selected industries that indicate user wants to target legal sector
+const LEGAL_INTENT_KEYWORDS = ['legal', 'law', 'solicitor', 'attorney', 'barrister', 'counsel']
+
+function hasLegalIndustryIntent(selectedIndustries: string[]): boolean {
+  if (!selectedIndustries || selectedIndustries.length === 0) return false
+  
+  for (const industry of selectedIndustries) {
+    const industryLower = (industry || '').toLowerCase()
+    for (const keyword of LEGAL_INTENT_KEYWORDS) {
+      if (industryLower.includes(keyword)) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function isLawFirm(companyName: string, industry?: string | null, skipExclusion = false): boolean {
+  // If user is specifically targeting legal industry, don't exclude law firms
+  if (skipExclusion) return false
+  
   if (!companyName) return false
   
   const nameLower = companyName.toLowerCase().trim()
@@ -780,6 +800,12 @@ Deno.serve(async (req) => {
     }
     
     const useEqualDistribution = allIndustries.length > 1
+    
+    // Check if targeting legal sector (include law firms if so)
+    const includeLawFirms = hasLegalIndustryIntent(allIndustries)
+    if (includeLawFirms) {
+      console.log('Legal industry intent detected - law firms will be INCLUDED in results')
+    }
 
     // Search across each combination
     for (const combo of searchCombinations) {
@@ -933,7 +959,8 @@ Deno.serve(async (req) => {
               }
               
               // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
-              if (isLawFirm(companyName, personIndustry)) {
+              // Skip exclusion if user is targeting legal sector
+              if (isLawFirm(companyName, personIndustry, includeLawFirms)) {
                 continue
               }
               
@@ -1261,7 +1288,9 @@ Deno.serve(async (req) => {
                 }
                 
                 // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
-                if (isLawFirm(personCompanyName, personIndustry)) {
+                // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
+                // Skip exclusion if user is targeting legal sector
+                if (isLawFirm(personCompanyName, personIndustry, includeLawFirms)) {
                   continue
                 }
                 
