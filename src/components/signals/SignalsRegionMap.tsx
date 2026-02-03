@@ -8,7 +8,8 @@ interface RegionMapProps {
 }
 
 const REGION_POSITIONS = {
-  europe: { x: "45%", y: "30%", label: "Europe" },
+  london: { x: "42%", y: "25%", label: "London" },
+  europe: { x: "50%", y: "35%", label: "Europe" },
   uae: { x: "65%", y: "50%", label: "UAE" },
   usa: { x: "20%", y: "35%", label: "USA" },
 };
