@@ -1,20 +1,20 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { 
   ExternalLink, 
   X, 
   UserSearch, 
   FileText, 
-  Briefcase,
   TrendingUp,
   DollarSign,
   Users,
   Globe,
   Clock,
-  Check,
   Loader2,
   Lightbulb,
   Target,
-  Sparkles
+  ChevronDown,
+  ChevronUp,
+  Briefcase
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,8 +27,6 @@ interface SignalCardProps {
   onDismiss: (id: string) => void;
   onTAContacts: (signal: Signal) => void;
   onCVMatches: (signal: Signal) => void;
-  onBullhornNote: (signal: Signal) => void;
-  bullhornLoading: boolean;
   taSearchLoading: boolean;
 }
 
@@ -95,16 +93,16 @@ export const SignalCard = memo(function SignalCard({
   onDismiss,
   onTAContacts,
   onCVMatches,
-  onBullhornNote,
-  bullhornLoading,
   taSearchLoading,
 }: SignalCardProps) {
+  const [showInsight, setShowInsight] = useState(false);
+  
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-4 w-4" />;
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
   
   return (
-    <Card className={`border-border/50 hover:border-border transition-all overflow-hidden ${hasAIInsight ? 'bg-gradient-to-br ' + tierConfig.bgGradient : ''}`}>
+    <Card className={`border-border/50 hover:border-border transition-all overflow-hidden`}>
       <CardContent className="p-4">
         <div className="flex flex-col gap-3">
           {/* Header row: Company + Tier + Amount + Dismiss */}
@@ -139,40 +137,55 @@ export const SignalCard = memo(function SignalCard({
             </Button>
           </div>
           
-          {/* Original headline - smaller now */}
+          {/* Original headline */}
           <h3 className="text-sm text-muted-foreground line-clamp-2">
             {signal.title}
           </h3>
           
-          {/* AI Insight - THE STAR OF THE SHOW */}
-          {signal.ai_insight && (
-            <div className="bg-background/50 rounded-lg p-3 border border-border/50">
-              <div className="flex items-start gap-2">
-                <Lightbulb className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
-                <p className="text-sm font-medium text-foreground leading-relaxed">
-                  {signal.ai_insight}
-                </p>
-              </div>
-            </div>
+          {/* AI Insight Toggle Button */}
+          {hasAIInsight && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-between text-left h-auto py-2 px-3 bg-muted/50 hover:bg-muted"
+              onClick={() => setShowInsight(!showInsight)}
+            >
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <Lightbulb className="h-4 w-4 text-amber-500" />
+                AI Insight
+              </span>
+              {showInsight ? (
+                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              )}
+            </Button>
           )}
           
-          {/* AI Pitch Recommendation */}
-          {signal.ai_pitch && (
-            <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
-              <div className="flex items-start gap-2">
-                <Target className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-primary font-medium leading-relaxed">
-                  {signal.ai_pitch}
-                </p>
-              </div>
-            </div>
-          )}
-          
-          {/* Pending AI enrichment indicator */}
-          {!hasAIInsight && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Sparkles className="h-3 w-3" />
-              <span>AI insight pending...</span>
+          {/* AI Insight Content - Only shown when expanded */}
+          {showInsight && hasAIInsight && (
+            <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
+              {signal.ai_insight && (
+                <div className="bg-background/50 rounded-lg p-3 border border-border/50">
+                  <div className="flex items-start gap-2">
+                    <Lightbulb className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm font-medium text-foreground leading-relaxed">
+                      {signal.ai_insight}
+                    </p>
+                  </div>
+                </div>
+              )}
+              
+              {signal.ai_pitch && (
+                <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
+                  <div className="flex items-start gap-2">
+                    <Target className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-primary font-medium leading-relaxed">
+                      {signal.ai_pitch}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           
@@ -198,7 +211,7 @@ export const SignalCard = memo(function SignalCard({
             )}
           </div>
           
-          {/* Actions */}
+          {/* Actions - Only Find TA Contacts and CV Matches */}
           <div className="flex items-center gap-2 flex-wrap pt-1">
             <Button
               size="sm"
@@ -233,23 +246,6 @@ export const SignalCard = memo(function SignalCard({
                   {signal.cv_matches}
                 </Badge>
               )}
-            </Button>
-            
-            <Button
-              size="sm"
-              variant={signal.bullhorn_note_added ? "secondary" : "outline"}
-              onClick={() => onBullhornNote(signal)}
-              disabled={bullhornLoading || signal.bullhorn_note_added}
-              className="h-8"
-            >
-              {bullhornLoading ? (
-                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              ) : signal.bullhorn_note_added ? (
-                <Check className="h-3 w-3 mr-1" />
-              ) : (
-                <Briefcase className="h-3 w-3 mr-1" />
-              )}
-              Bullhorn
             </Button>
           </div>
         </div>

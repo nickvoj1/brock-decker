@@ -6,7 +6,9 @@ import {
   Filter,
   Download,
   Loader2,
-  Wand2
+  Wand2,
+  Briefcase,
+  Check
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -89,6 +91,8 @@ export default function SignalsDashboard() {
   const [taSearchResults, setTaSearchResults] = useState<SignalSearchResult | null>(null);
   const [taResultsModalOpen, setTaResultsModalOpen] = useState(false);
   const [taSearchSignal, setTaSearchSignal] = useState<Signal | null>(null);
+  const [bullhornExportLoading, setBullhornExportLoading] = useState(false);
+  const [bullhornExported, setBullhornExported] = useState(false);
 
   // Fetch signals on mount and when profile changes
   useEffect(() => {
@@ -235,6 +239,7 @@ export default function SignalsDashboard() {
     
     setTaSearchLoading((prev) => ({ ...prev, [signal.id]: true }));
     setTaSearchSignal(signal);
+    setBullhornExported(signal.bullhorn_note_added); // Reset based on signal state
     
     toast.info(`Searching for TA contacts at ${signal.company || "company"}...`, {
       duration: 10000,
@@ -311,6 +316,30 @@ export default function SignalsDashboard() {
       console.error("Failed to mark Bullhorn:", error);
     } finally {
       setBullhornLoading((prev) => ({ ...prev, [signal.id]: false }));
+    }
+  };
+
+  const handleAddToBullhorn = async () => {
+    if (!taSearchSignal || !profileName) return;
+    
+    setBullhornExportLoading(true);
+    const note = buildBullhornNote(taSearchSignal);
+    await navigator.clipboard.writeText(note);
+    
+    try {
+      await markSignalBullhornAdded(profileName, taSearchSignal.id);
+      setSignals((prev) =>
+        prev.map((s) =>
+          s.id === taSearchSignal.id ? { ...s, bullhorn_note_added: true } : s
+        )
+      );
+      setBullhornExported(true);
+      toast.success("Signal note copied to clipboard & marked as added to Bullhorn");
+    } catch (error) {
+      console.error("Failed to mark Bullhorn:", error);
+      toast.error("Failed to update Bullhorn status");
+    } finally {
+      setBullhornExportLoading(false);
     }
   };
 
@@ -536,8 +565,6 @@ export default function SignalsDashboard() {
                       onDismiss={handleDismiss}
                       onTAContacts={handleTAContacts}
                       onCVMatches={handleCVMatches}
-                      onBullhornNote={handleBullhornNote}
-                      bullhornLoading={bullhornLoading[signal.id] || false}
                       taSearchLoading={taSearchLoading[signal.id] || false}
                     />
                   ))}
@@ -561,12 +588,29 @@ export default function SignalsDashboard() {
       <Dialog open={taResultsModalOpen} onOpenChange={setTaResultsModalOpen}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
+            <DialogTitle className="flex items-center justify-between gap-4">
               <span>TA Contacts at {taSearchSignal?.company}</span>
-              <Button size="sm" variant="outline" onClick={handleDownloadContacts}>
-                <Download className="h-4 w-4 mr-1" />
-                Download CSV
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={handleDownloadContacts}>
+                  <Download className="h-4 w-4 mr-1" />
+                  Download CSV
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant={bullhornExported ? "secondary" : "default"}
+                  onClick={handleAddToBullhorn}
+                  disabled={bullhornExportLoading || bullhornExported}
+                >
+                  {bullhornExportLoading ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : bullhornExported ? (
+                    <Check className="h-4 w-4 mr-1" />
+                  ) : (
+                    <Briefcase className="h-4 w-4 mr-1" />
+                  )}
+                  {bullhornExported ? "Added to Bullhorn" : "Add to Bullhorn"}
+                </Button>
+              </div>
             </DialogTitle>
           </DialogHeader>
           <div className="mt-4">
