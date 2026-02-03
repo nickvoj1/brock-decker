@@ -312,6 +312,9 @@ export type Database = {
       }
       signals: {
         Row: {
+          ai_enriched_at: string | null
+          ai_insight: string | null
+          ai_pitch: string | null
           amount: number | null
           bullhorn_note_added: boolean | null
           company: string | null
@@ -337,6 +340,9 @@ export type Database = {
           url: string | null
         }
         Insert: {
+          ai_enriched_at?: string | null
+          ai_insight?: string | null
+          ai_pitch?: string | null
           amount?: number | null
           bullhorn_note_added?: boolean | null
           company?: string | null
@@ -362,6 +368,9 @@ export type Database = {
           url?: string | null
         }
         Update: {
+          ai_enriched_at?: string | null
+          ai_insight?: string | null
+          ai_pitch?: string | null
           amount?: number | null
           bullhorn_note_added?: boolean | null
           company?: string | null
