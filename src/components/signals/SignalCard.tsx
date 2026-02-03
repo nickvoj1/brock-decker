@@ -75,6 +75,42 @@ const SIGNAL_TYPE_ICONS: Record<string, React.ReactNode> = {
   industry_events: <Globe className="h-4 w-4" />,
 };
 
+// Sector detection for badges
+const SECTOR_KEYWORDS: Record<string, string[]> = {
+  "PE": ["private equity", "pe fund", "buyout", "lbo", "leveraged buyout", "growth equity", "portco", "portfolio company", "mid-market"],
+  "VC": ["venture capital", "vc fund", "seed fund", "series a", "series b", "series c", "early stage", "growth stage", "startup"],
+  "Bank": ["investment bank", "merchant bank", "bulge bracket", "m&a advisory", "capital markets", "corporate finance", "goldman sachs", "morgan stanley", "jpmorgan", "jp morgan", "barclays", "hsbc", "deutsche bank", "ubs", "lazard", "rothschild", "evercore", "moelis", "centerview", "pjt partners"],
+  "FinTech": ["fintech", "financial technology", "payments", "neobank", "digital bank", "insurtech", "wealthtech", "regtech", "proptech", "lending platform"],
+  "Consultancy": ["mckinsey", "bain", "boston consulting", "bcg", "kearney", "oliver wyman", "roland berger", "strategy&", "pwc", "deloitte", "kpmg", "ey ", "ernst & young", "accenture", "alvarez & marsal", "fti consulting"],
+  "Secondaries": ["secondaries", "secondary fund", "secondary market", "gp-led", "lp-led", "continuation fund", "continuation vehicle"],
+  "Credit": ["credit fund", "debt fund", "direct lending", "mezzanine", "distressed debt", "leveraged finance"],
+  "Infra": ["infrastructure fund", "infra fund", "real assets", "renewable energy fund"],
+  "Hedge Fund": ["hedge fund", "macro fund", "quant fund", "multi-strategy"],
+};
+
+const SECTOR_COLORS: Record<string, string> = {
+  "PE": "bg-purple-500/10 text-purple-600 border-purple-500/20",
+  "VC": "bg-blue-500/10 text-blue-600 border-blue-500/20",
+  "Bank": "bg-slate-500/10 text-slate-600 border-slate-500/20",
+  "FinTech": "bg-cyan-500/10 text-cyan-600 border-cyan-500/20",
+  "Consultancy": "bg-orange-500/10 text-orange-600 border-orange-500/20",
+  "Secondaries": "bg-pink-500/10 text-pink-600 border-pink-500/20",
+  "Credit": "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
+  "Infra": "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  "Hedge Fund": "bg-violet-500/10 text-violet-600 border-violet-500/20",
+};
+
+function detectSector(signal: { title: string; description?: string | null; company?: string | null }): string | null {
+  const text = `${signal.title} ${signal.description || ""} ${signal.company || ""}`.toLowerCase();
+  
+  for (const [sector, keywords] of Object.entries(SECTOR_KEYWORDS)) {
+    if (keywords.some(kw => text.includes(kw))) {
+      return sector;
+    }
+  }
+  return null;
+}
+
 function formatAmount(amount: number | null, currency: string | null): string {
   if (!amount) return "";
   const symbol = currency === "EUR" ? "€" : currency === "GBP" ? "£" : "$";
@@ -104,6 +140,8 @@ export const SignalCard = memo(function SignalCard({
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-4 w-4" />;
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
+  const sector = detectSector(signal);
+  const sectorColor = sector ? SECTOR_COLORS[sector] : null;
   
   const handleEnrichAI = async () => {
     setEnriching(true);
@@ -140,6 +178,11 @@ export const SignalCard = memo(function SignalCard({
             <div className="flex items-center gap-2 flex-wrap">
               {signal.company && (
                 <span className="font-bold text-lg text-foreground">{signal.company}</span>
+              )}
+              {sector && sectorColor && (
+                <Badge variant="outline" className={sectorColor}>
+                  {sector}
+                </Badge>
               )}
               <Badge variant="outline" className={tierConfig.color}>
                 {tierConfig.label}
