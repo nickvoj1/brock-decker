@@ -209,7 +209,37 @@ const LAW_FIRM_KEYWORDS = [
   'barrister', 'attorney at law', 'attorneys at law'
 ]
 
-function isLawFirm(companyName: string, industry?: string | null): boolean {
+// Keywords that indicate the signal/search is targeting legal sector
+const LEGAL_INTENT_KEYWORDS = ['legal', 'law', 'solicitor', 'attorney', 'barrister', 'counsel']
+
+function hasLegalIntent(aiAnalysis: AISignalAnalysis | null): boolean {
+  if (!aiAnalysis) return false
+  
+  // Check if AI identified the company as being in legal industry
+  const industryLower = (aiAnalysis.industry || '').toLowerCase()
+  for (const keyword of LEGAL_INTENT_KEYWORDS) {
+    if (industryLower.includes(keyword)) {
+      return true
+    }
+  }
+  
+  // Check search keywords
+  for (const kw of aiAnalysis.searchKeywords || []) {
+    const kwLower = kw.toLowerCase()
+    for (const keyword of LEGAL_INTENT_KEYWORDS) {
+      if (kwLower.includes(keyword)) {
+        return true
+      }
+    }
+  }
+  
+  return false
+}
+
+function isLawFirm(companyName: string, industry?: string | null, skipExclusion = false): boolean {
+  // If targeting legal sector, don't exclude law firms
+  if (skipExclusion) return false
+  
   if (!companyName) return false
   
   const nameLower = companyName.toLowerCase().trim()
@@ -346,7 +376,8 @@ async function searchWithStrategy(
   seenPersonIds: Set<string>,
   targetCompany: string,
   maxPerCompany: number,
-  maxContactsNeeded: number = 50 // Limit how many contacts we actually need
+  maxContactsNeeded: number = 50, // Limit how many contacts we actually need
+  includeLawFirms: boolean = false // Skip law firm exclusion if targeting legal sector
 ): Promise<ApolloContact[]> {
   const contacts: ApolloContact[] = []
   const pendingReveals: { person: Record<string, unknown>; categoryName: string }[] = []
@@ -418,7 +449,8 @@ async function searchWithStrategy(
         }
         
         // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
-        if (isLawFirm(personCompany, personIndustry)) {
+        // Skip exclusion if user is targeting legal sector
+        if (isLawFirm(personCompany, personIndustry, includeLawFirms)) {
           continue
         }
 
@@ -684,6 +716,12 @@ Deno.serve(async (req) => {
     const categoriesTried: string[] = []
     const categoriesWithResults: string[] = []
     let usedStrategy = 'none'
+    
+    // Check if targeting legal sector (include law firms if so)
+    const includeLawFirms = hasLegalIntent(aiAnalysis)
+    if (includeLawFirms) {
+      console.log('Legal industry intent detected - law firms will be INCLUDED in results')
+    }
 
     console.log(`Will try ${categoryPriority.length} role categories across ${strategies.length} strategies`)
 
@@ -714,7 +752,8 @@ Deno.serve(async (req) => {
           seenPersonIds,
           strategy.company,
           MAX_PER_COMPANY,
-          maxContactsPerCategory
+          maxContactsPerCategory,
+          includeLawFirms
         )
 
         if (contacts.length > 0) {
