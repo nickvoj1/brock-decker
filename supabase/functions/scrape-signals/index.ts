@@ -21,6 +21,37 @@ const REGION_COOKIES: Record<string, string> = {
 };
 
 // ============================================================================
+// ROTATING USER AGENTS - Python scraper pattern for anti-blocking
+// ============================================================================
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:89.0) Gecko/20100101 Firefox/89.0",
+];
+
+function getRandomUserAgent(): string {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+}
+
+// ============================================================================
+// DIRECT HTML SCRAPER SOURCES - From Python scraper (non-RSS)
+// ============================================================================
+const HTML_SCRAPE_SOURCES = [
+  { url: "https://www.globalprivatecapital.org/industry-news/", source: "Global Private Capital", region: "global" },
+  { url: "https://psgcapital.com/news-insights/latest-transactions/", source: "PSG Capital", region: "global" },
+  { url: "https://www.ifc.org/en/pressroom", source: "IFC", region: "global" },
+  { url: "https://www.bayportfinance.com/latest-investor-news/", source: "Bayport Finance", region: "global" },
+  { url: "https://www.zawya.com/en/news/latest", source: "Zawya", region: "uae" },
+  { url: "https://www.africaprivateequitynews.com/t/deals", source: "Africa PE News Deals", region: "global" },
+  { url: "https://www.africaprivateequitynews.com/t/exits", source: "Africa PE News Exits", region: "global" },
+  { url: "https://www.africaprivateequitynews.com/t/debt-and-mez", source: "Africa PE News Debt", region: "global" },
+  { url: "https://www.africaprivateequitynews.com/t/venture-capital", source: "Africa PE News VC", region: "global" },
+  { url: "https://www.avca.africa/news-insights/industry-news/", source: "AVCA Africa", region: "global" },
+];
+
+// ============================================================================
 // TIER TAXONOMY - The core classification system
 // ============================================================================
 const TIER_TAXONOMY = {
@@ -434,8 +465,10 @@ async function fetchRSSFeed(feedUrl: string, source: string, region: string): Pr
   try {
     const response = await fetch(feedUrl, {
       headers: { 
-        "User-Agent": "Mozilla/5.0 (compatible; PESignalScraper/2.1)" 
-      }
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+      },
+      signal: AbortSignal.timeout(10000), // 10s timeout
     });
     
     if (!response.ok) {
@@ -507,6 +540,116 @@ function cleanHtml(text: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
     .trim();
+}
+
+// ============================================================================
+// DIRECT HTML SCRAPER - Python scraper pattern (BeautifulSoup-like)
+// ============================================================================
+async function scrapeHTMLPage(pageUrl: string, source: string, region: string): Promise<any[]> {
+  const items: any[] = [];
+  
+  try {
+    const response = await fetch(pageUrl, {
+      headers: { 
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+      },
+      signal: AbortSignal.timeout(10000), // 10s timeout like Python
+    });
+    
+    if (!response.ok) {
+      console.log(`HTML scrape failed for ${source}: ${response.status}`);
+      return [];
+    }
+
+    const html = await response.text();
+    
+    // Extract headlines from h1, h2, h3, and anchor tags (Python pattern)
+    const headlinePatterns = [
+      /<h1[^>]*>([\s\S]*?)<\/h1>/gi,
+      /<h2[^>]*>([\s\S]*?)<\/h2>/gi,
+      /<h3[^>]*>([\s\S]*?)<\/h3>/gi,
+      /<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    ];
+    
+    const baseUrl = new URL(pageUrl).origin;
+    const foundLinks = new Set<string>();
+    
+    // Process heading tags (h1, h2, h3)
+    for (let i = 0; i < 3; i++) {
+      const pattern = headlinePatterns[i];
+      let match;
+      while ((match = pattern.exec(html)) !== null) {
+        const text = cleanHtml(match[1]).trim();
+        if (text.length < 10 || text.split(/\s+/).length <= 3) continue;
+        
+        // Python filter: exclude privacy, sign in, terms, cookie
+        const lowerText = text.toLowerCase();
+        if (["privacy", "sign in", "terms", "cookie", "subscribe", "login"].some(kw => lowerText.includes(kw))) continue;
+        
+        // Python filter: must have PE keywords
+        if (!PE_FILTER_KEYWORDS.some(kw => lowerText.includes(kw))) continue;
+        if (EXCLUDED_TOPICS.some(topic => lowerText.includes(topic))) continue;
+        
+        // Quality check
+        const quality = isQualitySignal(text, "", pageUrl);
+        if (!quality.isQuality) continue;
+        
+        items.push({
+          title: text,
+          description: `Found on ${source}`,
+          url: pageUrl,
+          source,
+          region,
+          published_at: new Date().toISOString(),
+        });
+      }
+    }
+    
+    // Process anchor tags with href
+    const anchorPattern = /<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let anchorMatch;
+    while ((anchorMatch = anchorPattern.exec(html)) !== null) {
+      let link = anchorMatch[1];
+      const text = cleanHtml(anchorMatch[2]).trim();
+      
+      if (text.length < 10 || text.split(/\s+/).length <= 3) continue;
+      
+      // Resolve relative URLs
+      if (link.startsWith("/")) {
+        link = baseUrl + link;
+      } else if (!link.startsWith("http")) {
+        continue; // Skip invalid links
+      }
+      
+      if (foundLinks.has(link)) continue;
+      foundLinks.add(link);
+      
+      const lowerText = text.toLowerCase();
+      if (["privacy", "sign in", "terms", "cookie", "subscribe", "login"].some(kw => lowerText.includes(kw))) continue;
+      if (!PE_FILTER_KEYWORDS.some(kw => lowerText.includes(kw))) continue;
+      if (EXCLUDED_TOPICS.some(topic => lowerText.includes(topic))) continue;
+      
+      const quality = isQualitySignal(text, "", link);
+      if (!quality.isQuality) continue;
+      
+      items.push({
+        title: text,
+        description: `Found on ${source}`,
+        url: link,
+        source,
+        region,
+        published_at: new Date().toISOString(),
+      });
+    }
+    
+    console.log(`HTML scrape ${source}: Found ${items.length} PE signals`);
+  } catch (error) {
+    console.error(`HTML scrape error for ${source}:`, error);
+  }
+  
+  return items.slice(0, 30); // Limit to 30 per source like Python
 }
 
 // ============================================================================
@@ -691,7 +834,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { region: targetRegion, includeRSS = true, includeFirecrawl = true } = body;
+    const { region: targetRegion, includeRSS = true, includeFirecrawl = true, includeHTMLScrape = true } = body;
     
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -701,7 +844,7 @@ Deno.serve(async (req) => {
 
     const regions = targetRegion ? [targetRegion] : ["london", "europe", "uae", "usa"];
     const allSignals: any[] = [];
-    const stats = { rss: 0, firecrawl: 0, classified: 0, inserted: 0, skipped: 0, qualityRejected: 0 };
+    const stats = { rss: 0, firecrawl: 0, htmlScrape: 0, classified: 0, inserted: 0, skipped: 0, qualityRejected: 0 };
 
     // Fetch feedback for RAG context
     const { data: feedbackData } = await supabase
@@ -728,7 +871,18 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 2. Firecrawl Deep Search with FT cookies
+      // 2. Direct HTML Scraping (Python scraper pattern) - for sources without RSS
+      if (includeHTMLScrape) {
+        const htmlSources = HTML_SCRAPE_SOURCES.filter(s => s.region === "global" || s.region === r);
+        console.log(`Processing ${htmlSources.length} HTML scrape sources for ${r}`);
+        for (const source of htmlSources) {
+          const items = await scrapeHTMLPage(source.url, source.source, r);
+          stats.htmlScrape += items.length;
+          allSignals.push(...items);
+        }
+      }
+
+      // 3. Firecrawl Deep Search with FT cookies
       if (includeFirecrawl && firecrawlApiKey) {
         const queries = FT_SEARCH_QUERIES[r as keyof typeof FT_SEARCH_QUERIES] || [];
         for (const query of queries.slice(0, 4)) {
@@ -853,7 +1007,7 @@ Deno.serve(async (req) => {
     const summary = {
       success: true,
       stats,
-      message: `FT Multi-Region PE Scraper v2.2: RSS=${stats.rss}, Firecrawl=${stats.firecrawl}, Quality Rejected=${stats.qualityRejected}, Classified=${stats.classified}, Inserted=${stats.inserted}, Skipped=${stats.skipped}`,
+      message: `PE Scraper v2.3: RSS=${stats.rss}, HTML=${stats.htmlScrape}, Firecrawl=${stats.firecrawl}, Rejected=${stats.qualityRejected}, Inserted=${stats.inserted}, Skipped=${stats.skipped}`,
     };
 
     console.log("\n========== SCRAPE COMPLETE ==========");
