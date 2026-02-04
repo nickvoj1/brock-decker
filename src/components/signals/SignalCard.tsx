@@ -29,6 +29,7 @@ import { formatDistanceToNow } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useProfileName } from "@/hooks/useProfileName";
+import { SignalFeedbackModal } from "./SignalFeedbackModal";
 
 interface SignalCardProps {
   signal: Signal;
@@ -132,6 +133,7 @@ export const SignalCard = memo(function SignalCard({
   const [showInsight, setShowInsight] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-3.5 w-3.5" />;
@@ -377,7 +379,7 @@ export const SignalCard = memo(function SignalCard({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleFeedback('REJECT_WRONG_REGION')}
+                  onClick={() => setFeedbackModalOpen(true)}
                   disabled={feedbackLoading}
                   className="h-7 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
                 >
@@ -387,6 +389,24 @@ export const SignalCard = memo(function SignalCard({
               </div>
             </div>
           )}
+          
+          {/* Feedback Modal for Comments */}
+          <SignalFeedbackModal
+            open={feedbackModalOpen}
+            onOpenChange={setFeedbackModalOpen}
+            signal={signal}
+            profileName={profileName || "Unknown"}
+            onFeedbackSubmitted={(signalId, isApproved) => {
+              const updatedSignal = {
+                ...signal,
+                user_feedback: isApproved ? 'APPROVE' : 'REJECT',
+                validated_region: isApproved ? signal.region?.toUpperCase() : 'REJECTED',
+              };
+              if (onSignalUpdated) {
+                onSignalUpdated(updatedSignal);
+              }
+            }}
+          />
           
           {/* Meta & Source */}
           <div className="flex items-center justify-between pt-1 border-t border-border/30">
