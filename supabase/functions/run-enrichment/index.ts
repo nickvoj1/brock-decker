@@ -353,6 +353,62 @@ const LAW_FIRM_KEYWORDS = [
   'barrister', 'attorney at law', 'attorneys at law'
 ]
 
+// Known major global law firms (case-insensitive partial matching)
+// These firms often don't have "law" or "LLP" in their commonly used names
+const KNOWN_LAW_FIRMS = [
+  // Magic Circle / UK Elite
+  'norton rose fulbright', 'norton rose', 'linklaters', 'clifford chance', 
+  'freshfields', 'allen & overy', 'allen and overy', 'a&o shearman',
+  'slaughter and may', 'slaughter & may', 'herbert smith', 'ashurst',
+  'hogan lovells', 'dla piper', 'eversheds', 'eversheds sutherland',
+  'addleshaw goddard', 'cms cameron', 'dentons', 'pinsent masons',
+  'burges salmon', 'travers smith', 'macfarlanes', 'stephenson harwood',
+  'osborne clarke', 'taylor wessing', 'shoosmiths', 'fieldfisher',
+  'bird & bird', 'bird and bird', 'simmons & simmons', 'simmons and simmons',
+  'clyde & co', 'clyde and co', 'gowling wlg', 'mayer brown', 'reed smith',
+  'watson farley', 'mishcon de reya', 'charles russell speechlys',
+  'withers', 'farrer & co', 'farrer and co', 'forsters',
+  
+  // US Elite / Wall Street
+  'kirkland & ellis', 'kirkland and ellis', 'latham & watkins', 'latham and watkins',
+  'skadden', 'skadden arps', 'sullivan & cromwell', 'sullivan and cromwell',
+  'wachtell', 'wachtell lipton', 'davis polk', 'cravath', 'simpson thacher',
+  'paul weiss', 'cleary gottlieb', 'weil gotshal', 'debevoise', 'debevoise & plimpton',
+  'willkie farr', 'milbank', 'fried frank', 'quinn emanuel', 'gibson dunn',
+  'sidley austin', 'sidley', 'jones day', 'white & case', 'white and case',
+  'covington', 'covington & burling', 'orrick', 'morrison & foerster', 
+  'morrison foerster', 'mofo', 'paul hastings', 'proskauer', 'akin gump',
+  'baker mckenzie', 'baker & mckenzie', 'king & spalding', 'king and spalding',
+  'ropes & gray', 'ropes and gray', 'morgan lewis', 'goodwin', 'goodwin procter',
+  'cooley', 'fenwick', 'fenwick & west', 'wilson sonsini', 'perkins coie',
+  'sheppard mullin', 'greenberg traurig', 'holland & knight', 'katten',
+  'dechert', 'cadwalader', 'schulte roth', 'kramer levin', 'stroock',
+  
+  // European / German / Swiss
+  'gleiss lutz', 'hengeler mueller', 'hengeler müller', 'freshfields bruckhaus',
+  'noerr', 'luther', 'oppenhoff', 'white & case germany', 'homburger',
+  'bär & karrer', 'walder wyss', 'lenz & staehelin', 'niederer kraft frey',
+  
+  // French
+  'bredin prat', 'darrois villey', 'gide loyrette', 'cleary paris',
+  
+  // Other Global
+  'baker botts', 'vinson & elkins', 'vinson and elkins', 'bracewell',
+  'haynes and boone', 'haynes boone', 'king & wood mallesons', 
+  'king wood mallesons', 'herbert smith freehills', 'allens',
+  'blake cassels', 'stikeman elliott', 'osler', 'mccarthy tetrault',
+  
+  // Nordic
+  'mannheimer swartling', 'roschier', 'gernandt & danielsson',
+  
+  // Spanish / LatAm  
+  'garrigues', 'cuatrecasas', 'uria menendez', 'pérez-llorca',
+  
+  // Asian
+  'nishimura', 'nagashima', 'anderson mori', 'mori hamada', 'kim & chang',
+  'rajah & tann', 'wong partnership', 'drew & napier'
+]
+
 // Keywords in selected industries that indicate user wants to target legal sector
 const LEGAL_INTENT_KEYWORDS = ['legal', 'law', 'solicitor', 'attorney', 'barrister', 'counsel']
 
@@ -377,6 +433,14 @@ function isLawFirm(companyName: string, industry?: string | null, skipExclusion 
   if (!companyName) return false
   
   const nameLower = companyName.toLowerCase().trim()
+  
+  // Check against known law firms list (highest priority - catches firms like "Norton Rose Fulbright")
+  for (const firm of KNOWN_LAW_FIRMS) {
+    if (nameLower.includes(firm)) {
+      console.log(`[LAW FIRM EXCLUDED] "${companyName}" - matched known firm: ${firm}`)
+      return true
+    }
+  }
   
   // Check for law firm suffixes in company name
   for (const suffix of LAW_FIRM_SUFFIXES) {
