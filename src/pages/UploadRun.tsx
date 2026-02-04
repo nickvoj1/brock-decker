@@ -354,6 +354,24 @@ export default function UploadRun() {
     setIsRunning(true);
     
     try {
+      // Pre-fetch Bullhorn emails to exclude from search (find NEW contacts only)
+      let bullhornEmails: string[] = [];
+      try {
+        const { data: bhResult } = await supabase.functions.invoke('fetch-bullhorn-emails', {});
+        if (bhResult?.success && bhResult?.emails) {
+          bullhornEmails = bhResult.emails;
+          if (bullhornEmails.length > 0) {
+            toast({
+              title: "Bullhorn Exclusion Active",
+              description: `Excluding ${bullhornEmails.length} existing CRM contacts from search`,
+            });
+          }
+        }
+      } catch (bhError) {
+        // Non-fatal: continue without Bullhorn exclusion
+        console.log('Bullhorn pre-fetch skipped (not connected or error)');
+      }
+
       // Create a new run record via data-api (service role, bypasses RLS)
       const runResult = await createEnrichmentRun(profileName.trim(), {
         search_counter: maxContacts,
@@ -373,12 +391,12 @@ export default function UploadRun() {
 
       toast({
         title: "Searching for contacts",
-        description: `Finding up to ${maxContacts} hiring contacts${isQuickSearch ? ` for "${quickSearchName}"` : ` for ${candidateData.name}`}`,
+        description: `Finding up to ${maxContacts} NEW hiring contacts${isQuickSearch ? ` for "${quickSearchName}"` : ` for ${candidateData.name}`}`,
       });
 
-      // Call the enrichment edge function
+      // Call the enrichment edge function with Bullhorn exclusion list
       const { data: enrichResult, error: enrichError } = await supabase.functions.invoke('run-enrichment', {
-        body: { runId: run.id }
+        body: { runId: run.id, bullhornEmails }
       });
 
       if (enrichError) {

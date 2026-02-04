@@ -34,13 +34,15 @@ export interface SignalAutoSearchResponse {
  */
 export async function runSignalAutoSearch(
   signalId: string,
-  profileName: string
+  profileName: string,
+  bullhornEmails?: string[]
 ): Promise<SignalAutoSearchResponse> {
   try {
     const { data: response, error } = await supabase.functions.invoke("signal-auto-search", {
       body: {
         signalId,
         profileName,
+        bullhornEmails,
       },
     });
 

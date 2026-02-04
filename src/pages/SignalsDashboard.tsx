@@ -359,13 +359,29 @@ export default function SignalsDashboard() {
     setTaSearchSignal(signal);
     setBullhornExported(signal.bullhorn_note_added); // Reset based on signal state
     
+    // Pre-fetch Bullhorn emails to exclude existing CRM contacts
+    let bullhornEmails: string[] = [];
+    try {
+      const { data: bhResult } = await supabase.functions.invoke('fetch-bullhorn-emails', {});
+      if (bhResult?.success && bhResult?.emails) {
+        bullhornEmails = bhResult.emails;
+        if (bullhornEmails.length > 0) {
+          toast.info(`Excluding ${bullhornEmails.length} existing CRM contacts from search`, {
+            duration: 3000,
+          });
+        }
+      }
+    } catch (bhError) {
+      console.log('Bullhorn pre-fetch skipped (not connected or error)');
+    }
+    
     toast.info(`Searching for TA contacts at ${signal.company || "company"}...`, {
       duration: 10000,
       id: `ta-search-${signal.id}`,
     });
     
     try {
-      const response = await runSignalAutoSearch(signal.id, profileName);
+      const response = await runSignalAutoSearch(signal.id, profileName, bullhornEmails);
       
       if (response.success && response.data) {
         const { contacts, targetCompany, categoriesWithResults } = response.data;
