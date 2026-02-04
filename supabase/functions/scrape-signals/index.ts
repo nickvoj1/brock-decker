@@ -93,29 +93,105 @@ const RSS_FEEDS = {
 };
 
 // ============================================================================
-// CAREER PAGES FOR FIRECRAWL
+// CAREER PAGES FOR FIRECRAWL - COMPREHENSIVE PE/VC/FINANCE FIRMS
 // ============================================================================
-const CAREER_PAGES: Record<string, { url: string; company: string }[]> = {
+const CAREER_PAGES: Record<string, { url: string; company: string; region: string }[]> = {
   london: [
-    { url: "https://www.blackstone.com/careers/", company: "Blackstone" },
-    { url: "https://www.kkr.com/careers", company: "KKR" },
-    { url: "https://www.permira.com/careers", company: "Permira" },
-    { url: "https://www.cvc.com/careers/", company: "CVC Capital" },
-    { url: "https://www.apax.com/careers/", company: "Apax Partners" },
+    // Global PE Firms with London presence
+    { url: "https://www.blackstone.com/careers/", company: "Blackstone", region: "london" },
+    { url: "https://www.kkr.com/careers", company: "KKR", region: "london" },
+    { url: "https://www.carlyle.com/careers", company: "Carlyle Group", region: "london" },
+    { url: "https://www.permira.com/careers", company: "Permira", region: "london" },
+    { url: "https://www.cvc.com/careers/", company: "CVC Capital", region: "london" },
+    { url: "https://www.apax.com/careers/", company: "Apax Partners", region: "london" },
+    { url: "https://www.cinven.com/careers/", company: "Cinven", region: "london" },
+    { url: "https://www.bc-partners.com/careers/", company: "BC Partners", region: "london" },
+    { url: "https://www.bridgepoint.eu/en/careers/", company: "Bridgepoint", region: "london" },
+    { url: "https://www.hgcapital.com/careers/", company: "HG Capital", region: "london" },
+    { url: "https://www.3i.com/careers/", company: "3i Group", region: "london" },
+    { url: "https://www.tikehaucapital.com/en/careers", company: "Tikehau Capital", region: "london" },
+    // VC Firms
+    { url: "https://www.indexventures.com/about/join-us", company: "Index Ventures", region: "london" },
+    { url: "https://www.balderton.com/jobs/", company: "Balderton Capital", region: "london" },
+    { url: "https://www.atomico.com/careers/", company: "Atomico", region: "london" },
+    { url: "https://www.accel.com/about/join-us", company: "Accel", region: "london" },
+    { url: "https://www.draper-esprit.com/careers/", company: "Draper Esprit", region: "london" },
+    // Investment Banks London
+    { url: "https://www.goldmansachs.com/careers/", company: "Goldman Sachs", region: "london" },
+    { url: "https://www.morganstanley.com/careers/", company: "Morgan Stanley", region: "london" },
+    { url: "https://www.jpmorgan.com/careers", company: "JP Morgan", region: "london" },
+    { url: "https://home.barclays/careers/", company: "Barclays", region: "london" },
+    { url: "https://www.hsbc.com/careers", company: "HSBC", region: "london" },
+    { url: "https://www.lazard.com/careers/", company: "Lazard", region: "london" },
+    { url: "https://www.rothschildandco.com/en/careers/", company: "Rothschild & Co", region: "london" },
+    { url: "https://www.evercore.com/careers/", company: "Evercore", region: "london" },
   ],
   europe: [
-    { url: "https://www.eqtgroup.com/careers/", company: "EQT Partners" },
-    { url: "https://www.ardian.com/en/careers", company: "Ardian" },
-    { url: "https://www.partnersgroup.com/en/careers/", company: "Partners Group" },
+    // European PE
+    { url: "https://www.eqtgroup.com/careers/", company: "EQT Partners", region: "europe" },
+    { url: "https://www.ardian.com/en/careers", company: "Ardian", region: "europe" },
+    { url: "https://www.partnersgroup.com/en/careers/", company: "Partners Group", region: "europe" },
+    { url: "https://www.ica-ap.com/careers/", company: "IK Investment Partners", region: "europe" },
+    { url: "https://www.montagu.com/careers/", company: "Montagu Private Equity", region: "europe" },
+    { url: "https://www.equistone.com/careers/", company: "Equistone Partners", region: "europe" },
+    { url: "https://www.triton-partners.com/careers/", company: "Triton Partners", region: "europe" },
+    { url: "https://www.nordicCapital.com/careers/", company: "Nordic Capital", region: "europe" },
+    { url: "https://www.capenergy.com/careers/", company: "Capvis", region: "europe" },
+    // European VC
+    { url: "https://www.northzone.com/about#careers", company: "Northzone", region: "europe" },
+    { url: "https://www.lakestar.com/jobs/", company: "Lakestar", region: "europe" },
+    { url: "https://www.partech.com/careers/", company: "Partech", region: "europe" },
+    { url: "https://www.projectaventures.com/careers/", company: "Project A Ventures", region: "europe" },
+    { url: "https://www.speedinvest.com/careers", company: "Speedinvest", region: "europe" },
+    // European Banks
+    { url: "https://www.db.com/careers", company: "Deutsche Bank", region: "europe" },
+    { url: "https://www.ubs.com/careers", company: "UBS", region: "europe" },
+    { url: "https://www.credit-suisse.com/careers", company: "Credit Suisse", region: "europe" },
+    { url: "https://www.bnpparibas.com/en/careers", company: "BNP Paribas", region: "europe" },
   ],
   uae: [
-    { url: "https://www.mubadala.com/en/careers", company: "Mubadala" },
-    { url: "https://www.adia.ae/en/careers", company: "ADIA" },
+    // Sovereign Wealth Funds
+    { url: "https://www.mubadala.com/en/careers", company: "Mubadala", region: "uae" },
+    { url: "https://www.adia.ae/en/careers", company: "ADIA", region: "uae" },
+    { url: "https://www.adq.ae/careers/", company: "ADQ", region: "uae" },
+    { url: "https://www.investcorp.com/careers/", company: "Investcorp", region: "uae" },
+    // Regional PE/Finance
+    { url: "https://www.abraaj.com/careers/", company: "Abraaj (Legacy)", region: "uae" },
+    { url: "https://www.gulf-capital.com/careers/", company: "Gulf Capital", region: "uae" },
+    { url: "https://www.waha-capital.com/careers/", company: "Waha Capital", region: "uae" },
+    // Banks MENA
+    { url: "https://www.emiratesnbd.com/en/careers", company: "Emirates NBD", region: "uae" },
+    { url: "https://www.fab.ae/en/careers", company: "First Abu Dhabi Bank", region: "uae" },
   ],
   usa: [
-    { url: "https://www.apolloglobal.com/careers/", company: "Apollo Global" },
-    { url: "https://www.tpg.com/careers", company: "TPG" },
-    { url: "https://www.warburgpincus.com/careers/", company: "Warburg Pincus" },
+    // Mega PE Firms
+    { url: "https://www.apolloglobal.com/careers/", company: "Apollo Global", region: "usa" },
+    { url: "https://www.tpg.com/careers", company: "TPG", region: "usa" },
+    { url: "https://www.warburgpincus.com/careers/", company: "Warburg Pincus", region: "usa" },
+    { url: "https://www.bfranco.com/careers/", company: "Francisco Partners", region: "usa" },
+    { url: "https://www.thoma-bravo.com/careers/", company: "Thoma Bravo", region: "usa" },
+    { url: "https://www.silverlake.com/careers/", company: "Silver Lake", region: "usa" },
+    { url: "https://www.vistaequitypartners.com/careers/", company: "Vista Equity Partners", region: "usa" },
+    { url: "https://www.hellman-friedman.com/careers/", company: "Hellman & Friedman", region: "usa" },
+    { url: "https://www.baincapital.com/careers/", company: "Bain Capital", region: "usa" },
+    { url: "https://www.gtcr.com/careers/", company: "GTCR", region: "usa" },
+    { url: "https://www.leonardgreen.com/careers/", company: "Leonard Green", region: "usa" },
+    { url: "https://www.wellsfargoassetmanagement.com/careers/", company: "Wells Fargo AM", region: "usa" },
+    // Top VC Firms
+    { url: "https://www.sequoiacap.com/jobs/", company: "Sequoia Capital", region: "usa" },
+    { url: "https://a16z.com/about/jobs/", company: "Andreessen Horowitz", region: "usa" },
+    { url: "https://www.kpcb.com/careers", company: "Kleiner Perkins", region: "usa" },
+    { url: "https://www.greylock.com/careers/", company: "Greylock Partners", region: "usa" },
+    { url: "https://www.lsvp.com/about/#careers", company: "Lightspeed Venture", region: "usa" },
+    { url: "https://www.generalcatalyst.com/join-us", company: "General Catalyst", region: "usa" },
+    { url: "https://www.insightpartners.com/careers/", company: "Insight Partners", region: "usa" },
+    { url: "https://www.tigerglobal.com/careers/", company: "Tiger Global", region: "usa" },
+    // US Banks
+    { url: "https://careers.bankofamerica.com/", company: "Bank of America", region: "usa" },
+    { url: "https://www.moelis.com/careers/", company: "Moelis & Company", region: "usa" },
+    { url: "https://www.pjtpartners.com/careers", company: "PJT Partners", region: "usa" },
+    { url: "https://www.centerview.com/careers/", company: "Centerview Partners", region: "usa" },
+    { url: "https://www.greenhill.com/careers/", company: "Greenhill", region: "usa" },
   ],
 };
 
