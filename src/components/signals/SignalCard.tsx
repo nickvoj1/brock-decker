@@ -356,12 +356,12 @@ export const SignalCard = memo(function SignalCard({
             </div>
           )}
           
-          {/* Pending Signal Action Row */}
+          {/* Pending Signal Action Row - Simple Approve/Reject */}
           {isPending && (
             <div className="flex items-center gap-2 p-2 bg-orange-50 dark:bg-orange-900/10 rounded-lg border border-orange-200/50 dark:border-orange-800/30">
               <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
               <span className="text-xs text-orange-800 dark:text-orange-200 flex-1">
-                Pending validation – is this signal correctly classified for {signal.region?.toUpperCase()}?
+                Is this a good signal for {signal.region?.toUpperCase()}?
               </span>
               <div className="flex items-center gap-1">
                 <Button
@@ -372,17 +372,7 @@ export const SignalCard = memo(function SignalCard({
                   className="h-7 text-xs bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
                 >
                   {feedbackLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
-                  {signal.region?.toUpperCase()} ✓
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleFeedback('REJECT_NORDIC')}
-                  disabled={feedbackLoading}
-                  className="h-7 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
-                >
-                  <XCircle className="h-3 w-3 mr-1" />
-                  Nordic ✗
+                  Good ✓
                 </Button>
                 <Button
                   size="sm"
@@ -392,7 +382,7 @@ export const SignalCard = memo(function SignalCard({
                   className="h-7 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
                 >
                   <XCircle className="h-3 w-3 mr-1" />
-                  Wrong Region
+                  Bad ✗
                 </Button>
               </div>
             </div>
