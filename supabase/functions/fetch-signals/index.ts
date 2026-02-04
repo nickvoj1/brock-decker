@@ -127,54 +127,128 @@ const REGIONS = {
 };
 
 // ============================================================================
-// RSS FEEDS BY REGION
+// RSS FEEDS BY REGION - COMPREHENSIVE PE/VC/FINANCE SOURCES
 // ============================================================================
 const RSS_FEEDS = {
   london: [
+    // PE/VC Specific
     { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire UK" },
+    { url: "https://realdeals.eu.com/feed/", source: "Real Deals" },
+    { url: "https://www.altassets.net/feed", source: "AltAssets" },
+    { url: "https://www.penews.com/rss", source: "PE News" },
+    { url: "https://www.investmentweek.co.uk/rss", source: "Investment Week" },
+    // Business News UK
     { url: "https://www.cityam.com/feed/", source: "City AM" },
     { url: "https://feeds.reuters.com/reuters/UKBusinessNews", source: "Reuters UK" },
     { url: "https://www.ft.com/rss/home/uk", source: "FT UK" },
     { url: "https://www.theguardian.com/business/rss", source: "Guardian Business" },
     { url: "https://www.standard.co.uk/business/rss", source: "Evening Standard" },
-    { url: "https://realdeals.eu.com/feed/", source: "Real Deals" },
-    { url: "https://www.altassets.net/feed", source: "AltAssets" },
-    { url: "https://www.investmentweek.co.uk/rss", source: "Investment Week" },
-    { url: "https://www.penews.com/rss", source: "PE News" },
+    { url: "https://feeds.skynews.com/feeds/rss/business.xml", source: "Sky News Business" },
+    { url: "https://www.telegraph.co.uk/business/rss.xml", source: "Telegraph Business" },
+    { url: "https://www.thisismoney.co.uk/money/markets/index.rss", source: "This is Money" },
+    // Press Releases (Global - UK focused)
+    { url: "https://www.prnewswire.co.uk/rss/news-releases-list.rss", source: "PR Newswire UK" },
+    { url: "https://www.businesswire.com/portal/site/home/news/rss/?rss=G1QFDERJXkJeGQ==", source: "Business Wire UK" },
   ],
   europe: [
+    // VC/Startup Tech
     { url: "https://sifted.eu/feed", source: "Sifted" },
     { url: "https://www.eu-startups.com/feed/", source: "EU-Startups" },
     { url: "https://tech.eu/feed", source: "Tech.eu" },
     { url: "https://www.dealroom.co/blog/feed", source: "Dealroom" },
+    // German Finance
     { url: "https://www.handelsblatt.com/rss/finance", source: "Handelsblatt" },
     { url: "https://www.manager-magazin.de/rss/", source: "Manager Magazin" },
+    { url: "https://www.boersen-zeitung.de/rss", source: "Börsen-Zeitung" },
+    { url: "https://www.wiwo.de/rss/finanzen.rss", source: "WirtschaftsWoche" },
+    // French Finance
     { url: "https://www.lesechos.fr/rss/finance.xml", source: "Les Echos" },
+    { url: "https://www.latribune.fr/rss/rubriques/entreprises-finance.html", source: "La Tribune" },
+    // Netherlands/Benelux
     { url: "https://fd.nl/rss/financien", source: "FD Netherlands" },
+    // Switzerland
+    { url: "https://www.nzz.ch/finanzen.rss", source: "NZZ Finance" },
     { url: "https://www.swissinfo.ch/eng/business/rss", source: "SwissInfo" },
+    // Nordic
+    { url: "https://www.di.se/rss/", source: "Dagens Industri" },
+    { url: "https://www.thelocal.se/feeds/rss.php", source: "The Local Sweden" },
     { url: "https://www.thelocal.de/rss/business", source: "The Local DE" },
+    // Pan-European
+    { url: "https://www.investeurope.eu/news-opinion/rss/", source: "Invest Europe" },
+    // Press Releases
+    { url: "https://www.prnewswire.com/rss/financial-services-latest-news.rss", source: "PR Newswire Finance" },
+    { url: "https://www.globenewswire.com/RssFeed/country/Europe/feedTitle/GlobeNewswire_Europe", source: "GlobeNewswire EU" },
   ],
   uae: [
+    // Middle East Business
     { url: "https://gulfbusiness.com/feed/", source: "Gulf Business" },
     { url: "https://www.arabianbusiness.com/feed/", source: "Arabian Business" },
     { url: "https://gulfnews.com/rss/business", source: "Gulf News" },
     { url: "https://www.thenationalnews.com/business/rss", source: "The National" },
     { url: "https://www.zawya.com/rss/", source: "Zawya" },
     { url: "https://www.khaleejtimes.com/rss/business", source: "Khaleej Times" },
-    { url: "https://www.middleeastmonitor.com/feed/", source: "ME Monitor" },
+    // Regional Investment
+    { url: "https://www.meed.com/rss", source: "MEED" },
     { url: "https://wam.ae/en/rss/economy", source: "WAM Economy" },
+    { url: "https://www.middleeastmonitor.com/feed/", source: "ME Monitor" },
+    // Press Releases
+    { url: "https://www.prnewswire.com/rss/middle-east-latest-news.rss", source: "PR Newswire ME" },
   ],
   usa: [
+    // PE/VC Specific
     { url: "https://www.pehub.com/feed/", source: "PE Hub" },
     { url: "https://www.buyoutsinsider.com/feed/", source: "Buyouts Insider" },
-    { url: "https://feeds.bloomberg.com/markets/news.rss", source: "Bloomberg" },
-    { url: "https://news.crunchbase.com/feed/", source: "Crunchbase News" },
-    { url: "https://techcrunch.com/category/venture/feed/", source: "TechCrunch VC" },
-    { url: "https://fortune.com/feed/fortune-feeds/?id=3230629", source: "Fortune" },
     { url: "https://pitchbook.com/rss/news", source: "PitchBook" },
-    { url: "https://www.wsj.com/xml/rss/3_7014.xml", source: "WSJ PE" },
-    { url: "https://www.axios.com/pro/deal-feed.rss", source: "Axios Pro Deals" },
+    { url: "https://news.crunchbase.com/feed/", source: "Crunchbase News" },
     { url: "https://www.institutionalinvestor.com/rss", source: "Institutional Investor" },
+    // VC/Tech
+    { url: "https://techcrunch.com/category/venture/feed/", source: "TechCrunch VC" },
+    { url: "https://www.axios.com/pro/deal-feed.rss", source: "Axios Pro Deals" },
+    { url: "https://venturebeat.com/category/business/feed/", source: "VentureBeat" },
+    { url: "https://www.strictlyvc.com/feed/", source: "StrictlyVC" },
+    // Business News
+    { url: "https://feeds.bloomberg.com/markets/news.rss", source: "Bloomberg" },
+    { url: "https://fortune.com/feed/fortune-feeds/?id=3230629", source: "Fortune" },
+    { url: "https://www.wsj.com/xml/rss/3_7014.xml", source: "WSJ PE" },
+    { url: "https://www.wsj.com/xml/rss/3_7085.xml", source: "WSJ M&A" },
+    { url: "https://www.cnbc.com/id/10001147/device/rss/rss.html", source: "CNBC Finance" },
+    { url: "https://www.businessinsider.com/finance/rss", source: "Business Insider Finance" },
+    { url: "https://seekingalpha.com/market_currents.xml", source: "Seeking Alpha" },
+    // Press Releases - Financial
+    { url: "https://www.prnewswire.com/rss/financial-services-banking-latest-news.rss", source: "PR Newswire Banking" },
+    { url: "https://www.prnewswire.com/rss/mergers-and-acquisitions-latest-news.rss", source: "PR Newswire M&A" },
+    { url: "https://www.businesswire.com/portal/site/home/news/rss/?rss=G1QFDERJXkJeGQ==", source: "Business Wire" },
+    { url: "https://www.globenewswire.com/RssFeed/industry/3010/feedTitle/GlobeNewswire_Banking_Financial_Services", source: "GlobeNewswire Finance" },
+  ],
+};
+
+// ============================================================================
+// ADDITIONAL WEB SOURCES (for Firecrawl scraping)
+// ============================================================================
+const WEB_SOURCES = {
+  // Press release aggregators
+  pressReleases: [
+    { url: "https://www.prnewswire.com/news-releases/financial-services-banking-latest-news/financial-services-banking-list/", source: "PR Newswire" },
+    { url: "https://www.businesswire.com/portal/site/home/news/industries/?vnsId=31313", source: "Business Wire Finance" },
+    { url: "https://www.globenewswire.com/en/news-release/industry/3010", source: "GlobeNewswire" },
+  ],
+  // PE/VC news sites (for deep scraping)
+  pevcNews: [
+    { url: "https://www.preqin.com/insights", source: "Preqin Insights" },
+    { url: "https://www.privateequityinternational.com/news/", source: "PEI" },
+    { url: "https://www.secondariesinvestor.com/", source: "Secondaries Investor" },
+    { url: "https://www.infrastructureinvestor.com/", source: "Infrastructure Investor" },
+    { url: "https://www.privatedebtinvestor.com/", source: "Private Debt Investor" },
+  ],
+  // Senior executive moves
+  executiveMoves: [
+    { url: "https://www.efinancialcareers.com/news", source: "eFinancialCareers" },
+    { url: "https://www.heidrick.com/en/insights", source: "Heidrick & Struggles" },
+  ],
+  // Industry events
+  events: [
+    { url: "https://www.superreturn.com/", source: "SuperReturn" },
+    { url: "https://www.bvca.co.uk/news-events", source: "BVCA Events" },
   ],
 };
 
