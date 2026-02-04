@@ -538,6 +538,124 @@ async function parseRSSFeed(url: string): Promise<any[]> {
   }
 }
 
+// ============================================================================
+// FIRECRAWL DEEP SEARCH - 100+ PAGES PER SEARCH QUERY
+// ============================================================================
+const FIRECRAWL_SEARCH_QUERIES = {
+  london: [
+    '"private equity" OR "PE fund" site:ft.com OR site:cityam.com OR site:realdeals.eu.com London',
+    '"fund close" OR "closes fund" OR "final close" UK OR London',
+    '"venture capital" OR "VC fund" raises OR closes London OR UK',
+    '"acquisition" OR "acquires" "private equity" London',
+    '"new CFO" OR "new CEO" OR "appoints" "private equity" UK',
+    '"buyout" OR "LBO" UK OR London fund',
+    '"growth equity" OR "expansion" London private equity',
+    '"hiring" OR "team expansion" PE OR VC London',
+  ],
+  europe: [
+    '"private equity" OR "PE fund" Europe OR Germany OR France closes OR raises',
+    '"fund close" OR "final close" Europe OR DACH OR Benelux',
+    '"venture capital" OR "VC" Berlin OR Paris OR Amsterdam raises',
+    '"acquisition" OR "acquires" Europe private equity',
+    '"buyout" OR "LBO" Germany OR France OR Netherlands',
+    '"new CEO" OR "new CFO" OR "appoints" Europe PE fund',
+    '"expansion" OR "opens office" Europe private equity',
+    '"growth equity" OR "series" Europe raises',
+  ],
+  uae: [
+    '"private equity" OR "PE fund" Dubai OR "Abu Dhabi" OR UAE',
+    '"fund close" OR "raises" MENA OR GCC OR Gulf',
+    '"venture capital" Dubai OR Emirates OR Middle East',
+    '"acquisition" OR "acquires" UAE OR MENA',
+    '"sovereign wealth" OR "SWF" UAE OR ADIA OR Mubadala',
+    '"DIFC" OR "ADGM" fund OR investment',
+    '"new CEO" OR "appoints" Dubai OR UAE finance',
+    '"expansion" UAE OR Middle East PE VC',
+  ],
+  usa: [
+    '"private equity" OR "PE fund" closes OR raises "New York" OR Boston OR Chicago',
+    '"fund close" OR "final close" USA OR "United States" billion',
+    '"venture capital" OR "VC fund" San Francisco OR "Silicon Valley" raises',
+    '"acquisition" OR "acquires" US private equity billion',
+    '"buyout" OR "LBO" USA OR "United States" fund',
+    '"new CEO" OR "new CFO" OR "appoints" US PE fund',
+    '"growth equity" OR "expansion" USA private equity',
+    '"series A" OR "series B" OR "series C" USA raises million',
+  ],
+};
+
+// Time filters for Firecrawl search - last week for freshness
+const TIME_FILTERS = ["qdr:w", "qdr:m"]; // week and month
+
+async function firecrawlDeepSearch(region: string): Promise<any[]> {
+  const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+  if (!firecrawlApiKey) {
+    console.log("FIRECRAWL_API_KEY not configured, skipping deep search");
+    return [];
+  }
+  
+  const queries = FIRECRAWL_SEARCH_QUERIES[region as keyof typeof FIRECRAWL_SEARCH_QUERIES] || [];
+  const allResults: any[] = [];
+  const seenUrls = new Set<string>();
+  
+  console.log(`Running ${queries.length} deep search queries for ${region}...`);
+  
+  for (const query of queries) {
+    for (const timeFilter of TIME_FILTERS) {
+      try {
+        // Firecrawl search with 100 results per query
+        const response = await fetch("https://api.firecrawl.dev/v1/search", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${firecrawlApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query,
+            limit: 100, // 100 results per query = 1600+ total pages per region
+            tbs: timeFilter,
+            scrapeOptions: {
+              formats: ["markdown"],
+            },
+          }),
+        });
+        
+        if (!response.ok) {
+          console.error(`Firecrawl search failed for "${query}": ${response.status}`);
+          continue;
+        }
+        
+        const data = await response.json();
+        const results = data.data || [];
+        
+        console.log(`  Query "${query.slice(0, 40)}..." (${timeFilter}): ${results.length} results`);
+        
+        for (const result of results) {
+          if (result.url && !seenUrls.has(result.url)) {
+            seenUrls.add(result.url);
+            allResults.push({
+              title: result.title || "",
+              url: result.url,
+              description: result.markdown?.slice(0, 500) || result.description || "",
+              published_at: new Date().toISOString(),
+              source: "Firecrawl Search",
+            });
+          }
+        }
+        
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 200));
+        
+      } catch (error) {
+        console.error(`Firecrawl search error for "${query}":`, error);
+      }
+    }
+  }
+  
+  console.log(`Firecrawl deep search collected ${allResults.length} unique results for ${region}`);
+  return allResults;
+}
+
 
 // ============================================================================
 // MAIN HANDLER
@@ -622,7 +740,54 @@ Deno.serve(async (req) => {
           });
         }
       }
+      // FIRECRAWL DEEP SEARCH - 100+ pages per search query
+      console.log(`Running Firecrawl deep search for ${reg}...`);
+      const deepSearchResults = await firecrawlDeepSearch(reg);
       
+      for (const item of deepSearchResults) {
+        const fullText = `${item.title} ${item.description || ""}`;
+        const tierResult = detectTierAndType(fullText);
+        
+        if (!tierResult) continue;
+        
+        const amountData = extractAmount(fullText);
+        const company = extractCompany(item.title, item.description);
+        
+        // STRICT: Detect region and reject if content belongs to different region
+        const validatedRegion = detectRegionFromContent(fullText, reg);
+        if (!validatedRegion) continue;
+        
+        // STRICT: Skip signals without a company name
+        if (!company) continue;
+        
+        let score = tierResult.score;
+        if (amountData) {
+          if (amountData.amount >= 1000) score = Math.min(score + 15, 100);
+          else if (amountData.amount >= 500) score = Math.min(score + 10, 100);
+          else if (amountData.amount >= 100) score = Math.min(score + 5, 100);
+        }
+        
+        allSignals.push({
+          title: item.title.slice(0, 255),
+          company: company,
+          region: validatedRegion,
+          tier: tierResult.tier,
+          score: score,
+          amount: amountData?.amount || null,
+          currency: amountData?.currency || "EUR",
+          signal_type: mapToValidSignalType(tierResult.signalType),
+          description: item.description?.slice(0, 500) || null,
+          url: item.url,
+          source: item.source || "Firecrawl Search",
+          published_at: item.published_at || now.toISOString(),
+          is_high_intent: tierResult.tier === "tier_1",
+          details: {
+            location: validatedRegion === "london" ? "London" : 
+                      validatedRegion === "uae" ? "Dubai" :
+                      validatedRegion === "usa" ? "New York" : "Europe",
+          },
+        });
+      }
     }
 
     console.log(`Total signals collected: ${allSignals.length}`);
