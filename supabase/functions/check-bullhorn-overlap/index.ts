@@ -157,59 +157,42 @@ async function checkContactInBullhorn(
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
     const twoWeeksAgoTimestamp = twoWeeksAgo.getTime();
     
-    // Get most recent note for ClientContact using NoteEntity lookup
-    // NoteEntity links notes to entities via targetEntityID and targetEntityName
-    const noteEntityUrl = `${restUrl}query/NoteEntity?BhRestToken=${bhRestToken}&where=targetEntityID=${contactId} AND targetEntityName='ClientContact'&fields=note&orderBy=-id&count=1`;
-    console.log(`Querying NoteEntity for contact ${contactId}`);
-    const noteEntityResponse = await fetch(noteEntityUrl);
+    // Get notes for ClientContact using the association endpoint
+    // This is the standard way to get notes linked to a ClientContact
+    const notesUrl = `${restUrl}entity/ClientContact/${contactId}/notes?BhRestToken=${bhRestToken}&fields=id,dateAdded,comments,commentingPerson&orderBy=-dateAdded&count=1`;
+    console.log(`Querying notes for ClientContact ${contactId}`);
+    const notesResponse = await fetch(notesUrl);
     
-    if (noteEntityResponse.status === 429) {
+    if (notesResponse.status === 429) {
       await new Promise(resolve => setTimeout(resolve, 500));
       return checkContactInBullhorn(restUrl, bhRestToken, email);
     }
     
-    const noteEntityData = await noteEntityResponse.json();
-    console.log(`NoteEntity response for ${email}:`, JSON.stringify(noteEntityData));
+    const notesData = await notesResponse.json();
+    console.log(`Notes response for ${email}:`, JSON.stringify(notesData));
     
     let lastNoteDate: string | undefined;
     let lastNoteText: string | undefined;
     let lastNoteBy: string | undefined;
     let hasRecentNote = false;
     
-    if (noteEntityData.data && noteEntityData.data.length > 0 && noteEntityData.data[0].note?.id) {
-      const noteId = noteEntityData.data[0].note.id;
+    // The association endpoint returns { data: [...] } format
+    if (notesData.data && notesData.data.length > 0) {
+      const note = notesData.data[0];
+      const noteTimestamp = note.dateAdded;
+      lastNoteDate = new Date(noteTimestamp).toISOString();
       
-      // Now fetch the full note details
-      const latestNoteUrl = `${restUrl}entity/Note/${noteId}?BhRestToken=${bhRestToken}&fields=id,dateAdded,comments,commentingPerson`;
-      console.log(`Fetching note details for noteId ${noteId}`);
-      const latestNoteResponse = await fetch(latestNoteUrl);
+      // Extract first 100 chars of note, strip HTML tags
+      const rawText = (note.comments || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      lastNoteText = rawText.length > 100 ? rawText.substring(0, 100) + '...' : rawText;
       
-      if (latestNoteResponse.status === 429) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return checkContactInBullhorn(restUrl, bhRestToken, email);
+      // Get commentingPerson name if available
+      if (note.commentingPerson) {
+        lastNoteBy = `${note.commentingPerson.firstName || ''} ${note.commentingPerson.lastName || ''}`.trim();
       }
       
-      const latestNoteData = await latestNoteResponse.json();
-      console.log(`Note details for ${email}:`, JSON.stringify(latestNoteData));
-      
-      // entity/Note returns { data: {...} } not { data: [...] }
-      if (latestNoteData.data) {
-        const note = latestNoteData.data;
-        const noteTimestamp = note.dateAdded;
-        lastNoteDate = new Date(noteTimestamp).toISOString();
-        
-        // Extract first 100 chars of note, strip HTML tags
-        const rawText = (note.comments || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-        lastNoteText = rawText.length > 100 ? rawText.substring(0, 100) + '...' : rawText;
-        
-        // Get commentingPerson name if available
-        if (note.commentingPerson) {
-          lastNoteBy = `${note.commentingPerson.firstName || ''} ${note.commentingPerson.lastName || ''}`.trim();
-        }
-        
-        // Check if this note is within the last 2 weeks
-        hasRecentNote = noteTimestamp > twoWeeksAgoTimestamp;
-      }
+      // Check if this note is within the last 2 weeks
+      hasRecentNote = noteTimestamp > twoWeeksAgoTimestamp;
     }
     
     return { 
