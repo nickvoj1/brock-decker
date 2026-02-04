@@ -1865,9 +1865,11 @@ Deno.serve(async (req) => {
 
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
-    const { runId, classifiedContacts } = await req.json() as { 
+    // Accept optional excludedEmails array for contacts user wants to skip
+    const { runId, classifiedContacts, excludedEmails } = await req.json() as { 
       runId: string; 
-      classifiedContacts?: ClassifiedContact[] 
+      classifiedContacts?: ClassifiedContact[];
+      excludedEmails?: string[];
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
@@ -1884,9 +1886,21 @@ Deno.serve(async (req) => {
       throw new Error('Run not found')
     }
 
-    const contacts = run.enriched_data as ApolloContact[]
+    let contacts = run.enriched_data as ApolloContact[]
     if (!contacts || contacts.length === 0) {
       throw new Error('No contacts to export')
+    }
+
+    // Filter out excluded emails (from user's manual removal in UI)
+    if (excludedEmails && Array.isArray(excludedEmails) && excludedEmails.length > 0) {
+      const excludedSet = new Set(excludedEmails.map(e => e.toLowerCase()))
+      const originalCount = contacts.length
+      contacts = contacts.filter(c => !excludedSet.has(c.email?.toLowerCase() || ''))
+      console.log(`Filtered out ${originalCount - contacts.length} excluded emails (user-selected), ${contacts.length} remaining`)
+      
+      if (contacts.length === 0) {
+        throw new Error('All contacts were excluded by user. No contacts to export.')
+      }
     }
 
     // Build a map of email -> pre-classified skills (if AI review was used)
