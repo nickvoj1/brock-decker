@@ -10,6 +10,71 @@ const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const MAX_REQUESTS = 100;
 const WINDOW_MS = 60 * 1000; // 1 minute
 
+// ============================================================================
+// SIGNAL DISPLAY QUALITY FILTERS (used when returning signals to the UI)
+// ============================================================================
+// NOTE: This is intentionally duplicated from scraping-quality logic to ensure
+// old/bad rows in the DB never render in the dashboard.
+const SIGNAL_ACTION_WORDS = [
+  "acquires", "acquired", "acquisition", "buy", "bought", "buyout",
+  "sells", "sold", "sale", "divest", "divests", "divestment",
+  "raises", "raised", "raise", "fundraise", "fundraising",
+  "closes", "closed", "close", "final close", "first close",
+  "fund", "new fund", "launch", "launches",
+  "backs", "backed", "invests", "invested", "investment",
+  "merges", "merged", "merger", "partners", "partnership",
+  "appoints", "appointed", "hires", "hired", "joins",
+  "expands", "expansion", "opens", "opening",
+  "ipo", "lists", "listed",
+  "announces", "announced", "secures", "secured", "leads",
+  "targets", "plans", "seeks", "agrees", "signs", "finalizes",
+];
+
+// Pattern: "Company - Source" with no real content
+const SIGNAL_BAD_TITLE_PATTERN = /^[A-Za-z0-9\s\(\)&',.-]+\s*[-–—]\s*[A-Za-z0-9\s]+$/;
+
+function isRealNewsHeadline(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+
+  const lower = t.toLowerCase();
+  const hasAction = SIGNAL_ACTION_WORDS.some((w) => lower.includes(w));
+  if (!hasAction) return false;
+
+  const wordCount = t.split(/\s+/).filter((w) => w.length > 1).length;
+  if (wordCount < 5) return false;
+
+  if (SIGNAL_BAD_TITLE_PATTERN.test(t)) {
+    const parts = t.split(/\s*[-–—]\s*/);
+    if (
+      parts.length === 2 &&
+      parts[0].split(/\s+/).length <= 4 &&
+      parts[1].split(/\s+/).length <= 3
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isDisplayableSignal(row: any): boolean {
+  // Must have a URL to be actionable news.
+  if (!row?.url || typeof row.url !== "string" || !row.url.startsWith("http")) {
+    return false;
+  }
+
+  const title = String(row?.title || "");
+  const description = typeof row?.description === "string" ? row.description : "";
+
+  // Prefer title as the headline; allow description as fallback if it contains
+  // the real headline and title is weak.
+  if (isRealNewsHeadline(title)) return true;
+  if (description && isRealNewsHeadline(description.slice(0, 160))) return true;
+
+  return false;
+}
+
 function checkRateLimit(profileName: string): boolean {
   const now = Date.now();
   const entry = rateLimitMap.get(profileName);
@@ -1129,15 +1194,20 @@ Deno.serve(async (req) => {
         query = query.eq("region", region);
       }
       
-      const { data: signals, error } = await query;
+      const { data: signalsRaw, error } = await query;
       if (error) throw error;
+
+      // Filter out non-news / unusable rows (e.g. "Company - Source", missing URL)
+      const signals = (signalsRaw || []).filter(isDisplayableSignal);
       
       // Get region and tier counts
-      const { data: allSignals } = await supabase
+      const { data: allSignalsRaw } = await supabase
         .from("signals")
-        .select("region, tier")
+        .select("region, tier, title, description, url")
         .eq("is_dismissed", false)
         .gte("published_at", cutoffDate.toISOString());
+
+      const allSignals = (allSignalsRaw || []).filter(isDisplayableSignal);
       
       const regionCounts: Record<string, number> = {};
       const tierCounts: Record<string, number> = { tier_1: 0, tier_2: 0, tier_3: 0 };
