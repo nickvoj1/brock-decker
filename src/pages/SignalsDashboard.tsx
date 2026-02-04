@@ -59,8 +59,7 @@ import { toast } from "sonner";
 
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
-type StatusFilter = "all" | "high" | "pending" | "validated";
-type SortOption = "score" | "newest" | "amount";
+type SortOption = "newest" | "relevant" | "amount";
 
 const REGION_CONFIG = {
   london: { label: "London", emoji: "🇬🇧", description: "City, Mayfair, Canary Wharf" },
@@ -76,11 +75,10 @@ const TIER_FILTERS: { value: TierFilter; label: string }[] = [
   { value: "tier_3", label: "Tier 3 – Early" },
 ];
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "high", label: "HIGH >90" },
-  { value: "pending", label: "Pending" },
-  { value: "validated", label: "Validated" },
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "newest", label: "Newest" },
+  { value: "relevant", label: "Most Relevant" },
+  { value: "amount", label: "Highest Amount" },
 ];
 
 export default function SignalsDashboard() {
@@ -94,8 +92,7 @@ export default function SignalsDashboard() {
   const [isScraping, setIsScraping] = useState(false);
   const [activeRegion, setActiveRegion] = useState<Region>("london");
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [sortBy, setSortBy] = useState<SortOption>("score");
+  const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [minScore, setMinScore] = useState<number>(0);
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
   
@@ -500,21 +497,12 @@ export default function SignalsDashboard() {
       filtered = filtered.filter((s) => s.tier === tierFilter);
     }
     
-    // Status filter
-    if (statusFilter === "high") {
-      filtered = filtered.filter((s) => (s.score || 0) >= 90);
-    } else if (statusFilter === "pending") {
-      filtered = filtered.filter((s) => !s.user_feedback && !s.validated_region);
-    } else if (statusFilter === "validated") {
-      filtered = filtered.filter((s) => s.validated_region && s.validated_region !== 'REJECTED');
-    }
-    
     if (minScore > 0) {
       filtered = filtered.filter((s) => (s.score || 0) >= minScore);
     }
     
     filtered.sort((a, b) => {
-      if (sortBy === "score") {
+      if (sortBy === "relevant") {
         return (b.score || 0) - (a.score || 0);
       }
       if (sortBy === "newest") {
@@ -527,7 +515,7 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, statusFilter, minScore, sortBy]);
+  }, [signals, activeRegion, tierFilter, minScore, sortBy]);
 
   // Count pending signals for badge
   const pendingCount = useMemo(() => {
@@ -672,35 +660,16 @@ export default function SignalsDashboard() {
             </SelectContent>
           </Select>
 
-          {/* Status Filter - NEW */}
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-            <SelectTrigger className="w-[130px] h-9">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent className="bg-background border">
-              {STATUS_FILTERS.map((filter) => (
-                <SelectItem key={filter.value} value={filter.value}>
-                  <div className="flex items-center gap-2">
-                    {filter.value === "pending" && pendingCount > 0 && (
-                      <Badge variant="destructive" className="h-5 px-1.5 text-xs">
-                        {pendingCount}
-                      </Badge>
-                    )}
-                    {filter.label}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-            <SelectTrigger className="w-[130px] h-9">
+            <SelectTrigger className="w-[140px] h-9">
               <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent className="bg-background border">
-              <SelectItem value="score">By Score</SelectItem>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="amount">By Amount</SelectItem>
+              {SORT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
