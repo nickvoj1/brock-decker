@@ -19,7 +19,8 @@ import {
   RotateCcw,
   Check,
   AlertCircle,
-  XCircle
+  XCircle,
+  Trash2
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useProfileName } from "@/hooks/useProfileName";
 import { SignalFeedbackModal } from "./SignalFeedbackModal";
+import { SignalDismissModal } from "./SignalDismissModal";
 
 interface SignalCardProps {
   signal: Signal;
@@ -134,6 +136,7 @@ export const SignalCard = memo(function SignalCard({
   const [enriching, setEnriching] = useState(false);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [dismissModalOpen, setDismissModalOpen] = useState(false);
   
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-3.5 w-3.5" />;
@@ -269,10 +272,11 @@ export const SignalCard = memo(function SignalCard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-              onClick={() => onDismiss(signal.id)}
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+              onClick={() => setDismissModalOpen(true)}
+              title="Dismiss signal"
             >
-              <X className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" />
             </Button>
           </div>
           
@@ -396,15 +400,27 @@ export const SignalCard = memo(function SignalCard({
             onOpenChange={setFeedbackModalOpen}
             signal={signal}
             profileName={profileName || "Unknown"}
-            onFeedbackSubmitted={(signalId, isApproved) => {
+            onFeedbackSubmitted={(signalId, isApproved, newRegion) => {
               const updatedSignal = {
                 ...signal,
                 user_feedback: isApproved ? 'APPROVE' : 'REJECT',
-                validated_region: isApproved ? signal.region?.toUpperCase() : 'REJECTED',
+                validated_region: isApproved ? signal.region?.toUpperCase() : (newRegion ? newRegion.toUpperCase() : 'REJECTED'),
+                region: newRegion || signal.region,
               };
               if (onSignalUpdated) {
                 onSignalUpdated(updatedSignal);
               }
+            }}
+          />
+          
+          {/* Dismiss Modal with Feedback */}
+          <SignalDismissModal
+            open={dismissModalOpen}
+            onOpenChange={setDismissModalOpen}
+            signal={signal}
+            profileName={profileName || "Unknown"}
+            onDismissed={(signalId) => {
+              onDismiss(signalId);
             }}
           />
           
