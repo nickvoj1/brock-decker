@@ -40,13 +40,17 @@ serve(async (req) => {
     const systemPrompt = isGeneral 
       ? `You are an expert recruitment pitch writer. Your task is to refine and enhance a general pitch email template for the recruiter.
 
+CRITICAL: This is a GENERAL TEMPLATE - NOT tied to any specific candidate or person.
+
 IMPORTANT RULES:
-1. Maintain the same tone, style, and structure as the provided template
-2. Keep placeholder language for candidate-specific details (e.g., "[Candidate Name]", "[specific experience]")
-3. Optimize the pitch for the target industries and locations
-4. Keep the pitch concise and professional
-5. If a subject line template is provided, refine it; otherwise create an appropriate subject template
-6. Focus on what makes candidates valuable for the target industries/locations`
+1. Maintain the same tone, style, and structure as the provided template EXACTLY
+2. DO NOT try to fill in any candidate-specific details - this is a reusable template
+3. Keep ALL placeholder language exactly as-is (e.g., "[Candidate Name]", "[specific experience]", "[their background]")
+4. If the template has no placeholders, do NOT add fake names or specific details - keep it generic
+5. Only optimize the language, flow, and persuasiveness for the target industries/locations
+6. Keep the pitch concise and professional
+7. If a subject line template is provided, keep its placeholder structure; otherwise create a subject template with placeholders
+8. The output should be immediately reusable as a template for multiple candidates`
       : `You are an expert recruitment pitch writer. Your task is to generate a personalized pitch email for a candidate based on their CV and the recruiter's preferred pitch style.
 
 IMPORTANT RULES:
@@ -58,19 +62,25 @@ IMPORTANT RULES:
 6. Focus on the candidate's strengths and how they align with the target industries/locations`;
 
     const userPrompt = isGeneral 
-      ? `Refine this general pitch template for the target context:
+      ? `Refine this general pitch template for the target context. DO NOT personalize it for any specific person.
 
 TARGET CONTEXT:
 ${targetContext}
 
-RECRUITER'S PITCH TEMPLATE:
+RECRUITER'S PITCH TEMPLATE (preserve all placeholders exactly):
 ${preferredPitch}
 
-${subject ? `SUBJECT LINE TEMPLATE: ${subject}` : "Please also generate an appropriate subject line template."}
+${subject ? `SUBJECT LINE TEMPLATE: ${subject}` : "Please also generate an appropriate subject line template with placeholders."}
+
+CRITICAL REMINDERS:
+- This is a TEMPLATE, not a personalized pitch
+- Keep ALL placeholders like [Candidate Name], [their experience], etc. exactly as they are
+- Do NOT invent names, companies, or specific details
+- Only improve the language flow and optimize for the target industries/locations
 
 Please generate:
-1. A subject line template (refine if provided, or create a compelling one with placeholders like [Candidate Name])
-2. The full pitch email body (maintain the style and structure, optimize for target industries/locations, keep placeholders for candidate-specific details)
+1. A subject line template (keep any existing placeholders, or create one with [Candidate Name] placeholder)
+2. The full pitch email body (maintain the structure, keep all placeholders, optimize language only)
 
 Format your response as:
 SUBJECT: [your subject line]
