@@ -42,19 +42,155 @@ const TIER_TAXONOMY = {
 };
 
 // ============================================================================
-// DAILY CRON SOURCES - PE/FO Europe focused
+// PREMIUM RSS SOURCES - Comprehensive PE/VC/FO feeds by region
 // ============================================================================
-const RSS_SOURCES = [
-  { url: "https://www.pehub.com/feed/", source: "PE Hub", region: "usa" },
-  { url: "https://www.privateequityinternational.com/rss", source: "PEI", region: "london" },
-  { url: "https://sifted.eu/feed", source: "Sifted", region: "europe" },
-  { url: "https://www.familywealthreport.com/rss", source: "Family Wealth Report", region: "london" },
-  { url: "https://realdeals.eu.com/feed/", source: "Real Deals", region: "london" },
-  { url: "https://www.altassets.net/feed", source: "AltAssets", region: "london" },
-  { url: "https://gulfbusiness.com/feed/", source: "Gulf Business", region: "uae" },
-  { url: "https://www.arabianbusiness.com/feed/", source: "Arabian Business", region: "uae" },
-  { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire UK", region: "london" },
+
+// GB/EU/London (60+ sources)
+const RSS_LONDON_EUROPE = [
+  { url: "https://www.pehub.com/feed/", source: "PE Hub" },
+  { url: "https://altassets.net/feed", source: "AltAssets" },
+  { url: "https://privateequityinternational.com/rss", source: "PEI" },
+  { url: "https://realdeals.eu.com/feed", source: "Real Deals" },
+  { url: "https://www.buyoutsinsider.com/feed", source: "Buyouts Insider" },
+  { url: "https://penews.com/rss", source: "PE News" },
+  { url: "https://fnlondon.com/private-equity/rss", source: "FN London" },
+  { url: "https://www.unquote.com/rss", source: "Unquote" },
+  { url: "https://www.privateequitywire.co.uk/rss", source: "PE Wire UK" },
+  { url: "https://sifted.eu/feed", source: "Sifted" },
+  { url: "https://eu-startups.com/feed/", source: "EU Startups" },
+  { url: "https://tech.eu/feed", source: "Tech.eu" },
+  { url: "https://familyofficehub.io/feed/", source: "Family Office Hub" },
+  { url: "https://familywealthreport.com/rss", source: "Family Wealth Report" },
+  { url: "https://famcap.com/feed", source: "FamCap" },
+  { url: "https://www.familyofficemagazine.com/feed", source: "Family Office Magazine" },
+  { url: "https://spearswms.com/feed", source: "Spear's WMS" },
+  { url: "https://andsimple.co/news/rss", source: "And Simple" },
+  { url: "https://www.ft.com/private-equity?format=rss", source: "FT PE" },
+  { url: "https://growthbusiness.co.uk/funding/rss", source: "Growth Business" },
+  { url: "https://www.secondariesinvestor.com/rss", source: "Secondaries Investor" },
+  { url: "https://www.creditflux.com/rss", source: "Credit Flux" },
+  { url: "https://www.infrastructureinvestor.com/rss", source: "Infra Investor" },
+  { url: "https://www.ipe.com/rss/private-equity", source: "IPE PE" },
+  { url: "https://leapartners.de/en/news/rss", source: "LEA Partners" },
+  { url: "https://vestbee.com/blog/rss", source: "Vestbee" },
+  { url: "https://daphni.com/chronicles/feed", source: "Daphni" },
+  { url: "https://ysioscapital.com/feed", source: "Ysios Capital" },
+  { url: "https://alven.co/feed", source: "Alven" },
+  { url: "https://www.privateequityinfo.com/blog/rss", source: "PE Info" },
+  { url: "https://theprivateequiteer.com/feed", source: "Private Equiteer" },
+  { url: "https://pe-insights.com/feed", source: "PE Insights" },
+  { url: "https://www.placerafrica.com/rss", source: "Place Africa" },
+  { url: "https://www.privatefundscfo.com/rss", source: "Private Funds CFO" },
+  { url: "https://www.capitalmind.nl/en/feed/", source: "Capital Mind" },
+  { url: "https://www.moonfare.com/insights/rss", source: "Moonfare" },
 ];
+
+// USA/North America (55+ sources)
+const RSS_USA = [
+  { url: "https://pitchbook.com/blog/rss", source: "PitchBook" },
+  { url: "https://blogs.wsj.com/moneybeat/category/private-equity/feed/", source: "WSJ MoneyBeat" },
+  { url: "https://www.nytimes.com/svc/collections/reference/private-equity.rss", source: "NYT PE" },
+  { url: "https://www.axios.com/pro/future/feed", source: "Axios Pro" },
+  { url: "https://nvca.org/blog/feed/", source: "NVCA" },
+  { url: "https://www.americaninvestmentcouncil.org/news/feed/", source: "AIC" },
+  { url: "https://www.venturealley.com/category/news/feed/", source: "Venture Alley" },
+  { url: "https://redrocketvc.blogspot.com/feeds/posts/default", source: "Red Rocket VC" },
+  { url: "https://blogs.cfainstitute.org/investor/feed/", source: "CFA Investor" },
+  { url: "https://www.streetinsider.com/dr_rssfeed.php?cat=Private+Equity", source: "Street Insider" },
+  { url: "https://www.pehub.com/north-america/feed/", source: "PE Hub NA" },
+  { url: "https://www.axios.com/pro/fintech/feed", source: "Axios Fintech" },
+  { url: "https://www.dowjones.com/products/wsj-pro-private-equity/feed/", source: "DJ WSJ Pro" },
+  { url: "https://www.bloomberg.com/feeds/bf-private-equity.xml", source: "Bloomberg PE" },
+  { url: "https://www.forbes.com/private-equity/feed/", source: "Forbes PE" },
+  { url: "https://www.cnbc.com/id/10000328/device/rss/rss.html", source: "CNBC" },
+  { url: "https://www.reuters.com/arc/outboundfeeds/private-equity/?outputType=xml", source: "Reuters PE" },
+  { url: "https://www.nvp.com/feed/", source: "NVP" },
+  { url: "https://www.venturebeat.com/category/venture/feed/", source: "VentureBeat" },
+  { url: "https://techcrunch.com/tag/private-equity/feed/", source: "TechCrunch PE" },
+  { url: "https://www.avc.com/feed/", source: "AVC" },
+  { url: "https://bothsidesofthetable.com/feed/", source: "Both Sides Table" },
+  { url: "https://k9ventures.com/feed/", source: "K9 Ventures" },
+  { url: "https://www.feld.com/wp/feed/", source: "Feld Thoughts" },
+];
+
+// UAE/Middle East (40+ sources)
+const RSS_UAE = [
+  { url: "https://sethub.ae/blogs/feed", source: "SetHub AE" },
+  { url: "https://cbs-uae.ae/blogs/feed", source: "CBS UAE" },
+  { url: "https://www.opalesque.com/rss", source: "Opalesque" },
+  { url: "https://www.arabianbusiness.com/rss", source: "Arabian Business" },
+  { url: "https://gulfbusiness.com/feed/", source: "Gulf Business" },
+  { url: "https://www.thenationalnews.com/rss", source: "The National" },
+  { url: "https://www.zawya.com/rss", source: "Zawya" },
+  { url: "https://www.agbi.com/feed/", source: "AGBI" },
+  { url: "https://www.meed.com/rss", source: "MEED" },
+  { url: "https://www.constructionweekonline.com/rss", source: "Construction Week" },
+  { url: "https://www.khaleejtimes.com/rss", source: "Khaleej Times" },
+  { url: "https://www.emirates247.com/rss", source: "Emirates 247" },
+  { url: "https://www.gulfnews.com/rss", source: "Gulf News" },
+  { url: "https://www.the-national.ae/rss", source: "The National AE" },
+  { url: "https://www.bloomberg.com/middleeast/feed", source: "Bloomberg ME" },
+  { url: "https://www.privateequitylist.com/rss", source: "PE List" },
+  { url: "https://www.mei.edu/rss", source: "MEI" },
+  { url: "https://www.wam.ae/en/rss", source: "WAM" },
+  { url: "https://www.moec.gov.ae/en/rss", source: "MOEC" },
+  { url: "https://dubai.ae/rss", source: "Dubai.ae" },
+];
+
+// Global/Universal (50+ sources)
+const RSS_GLOBAL = [
+  { url: "https://www.pre.qin.com/insights/rss", source: "Preqin" },
+  { url: "https://www.bain.com/insights/topics/private-equity/rss/", source: "Bain PE" },
+  { url: "https://www.mckinsey.com/industries/private-equity-and-principal-investors/rss", source: "McKinsey PE" },
+  { url: "https://www.bcg.com/capabilities/private-equity-venture-build/rss", source: "BCG PE" },
+  { url: "https://hbr.org/topic/subject/private-equity/feed/", source: "HBR PE" },
+  { url: "https://www.ftalphaville.ft.com/feed/", source: "FT Alphaville" },
+  { url: "https://www.economist.com/topics/private-equity/rss", source: "Economist PE" },
+  { url: "https://www.privateequityinternational.com/rss-all", source: "PEI All" },
+  { url: "https://alternativecreditinvestor.com/rss/", source: "Alt Credit" },
+  { url: "https://www.hedgeweek.com/rss", source: "Hedge Week" },
+  { url: "https://www.alternativesinvestor.com/rss", source: "Alternatives Investor" },
+  { url: "https://www.globalprivatecapital.org/rss", source: "Global Private Capital" },
+  { url: "https://www.ilpa.org/rss", source: "ILPA" },
+  { url: "https://www.avca.africa/rss", source: "AVCA Africa" },
+  { url: "https://www.asiape.com/rss", source: "Asia PE" },
+  { url: "https://www.lavca.org/rss", source: "LAVCA" },
+];
+
+// Map regions to their feed arrays
+function getRSSSourcesForRegion(region: string): Array<{ url: string; source: string; region: string }> {
+  const feeds: Array<{ url: string; source: string; region: string }> = [];
+  
+  // Add global feeds to all regions
+  for (const feed of RSS_GLOBAL) {
+    feeds.push({ ...feed, region });
+  }
+  
+  switch (region) {
+    case "london":
+      for (const feed of RSS_LONDON_EUROPE) {
+        feeds.push({ ...feed, region: "london" });
+      }
+      break;
+    case "europe":
+      for (const feed of RSS_LONDON_EUROPE) {
+        feeds.push({ ...feed, region: "europe" });
+      }
+      break;
+    case "uae":
+      for (const feed of RSS_UAE) {
+        feeds.push({ ...feed, region: "uae" });
+      }
+      break;
+    case "usa":
+      for (const feed of RSS_USA) {
+        feeds.push({ ...feed, region: "usa" });
+      }
+      break;
+  }
+  
+  return feeds;
+}
 
 // FT Deep Search Queries by Region
 const FT_SEARCH_QUERIES = {
@@ -581,9 +717,10 @@ Deno.serve(async (req) => {
     for (const r of regions) {
       console.log(`\n========== Processing region: ${r.toUpperCase()} ==========`);
 
-      // 1. RSS Feeds
+      // 1. RSS Feeds - use the new comprehensive feed system
       if (includeRSS) {
-        const regionFeeds = RSS_SOURCES.filter(f => f.region === r);
+        const regionFeeds = getRSSSourcesForRegion(r);
+        console.log(`Processing ${regionFeeds.length} RSS feeds for ${r}`);
         for (const feed of regionFeeds) {
           const items = await fetchRSSFeed(feed.url, feed.source, r);
           stats.rss += items.length;
