@@ -103,7 +103,7 @@ const EXCLUDED_TOPICS = [
 ];
 
 // ============================================================================
-// QUALITY VALIDATION - Strict checks for useful signals
+// QUALITY VALIDATION - Strict checks for REAL news headlines
 // ============================================================================
 const QUALITY_ACTION_WORDS = [
   "acquires", "acquired", "acquisition", "buy", "bought", "buyout",
@@ -114,7 +114,33 @@ const QUALITY_ACTION_WORDS = [
   "expands", "expansion", "opens", "launch", "launches",
   "spin-out", "spinout", "spin-off", "spinoff", "ipo",
   "completes", "announces", "secures", "leads", "joins",
+  "targets", "plans", "seeks", "agrees", "signs", "finalizes",
 ];
+
+// Pattern: "Company - Source" with no real content
+const BAD_TITLE_PATTERN = /^[A-Za-z0-9\s\(\)&',.-]+\s*[-–—]\s*[A-Za-z0-9\s]+$/;
+
+function isRealHeadline(title: string): boolean {
+  // Must contain at least one action word
+  const lowerTitle = title.toLowerCase();
+  const hasAction = QUALITY_ACTION_WORDS.some(word => lowerTitle.includes(word));
+  if (!hasAction) return false;
+  
+  // Must have at least 5 words (real sentences have substance)
+  const wordCount = title.split(/\s+/).filter(w => w.length > 1).length;
+  if (wordCount < 5) return false;
+  
+  // Reject "Company - Source" pattern (e.g., "First Abu Dhabi Bank - Gulf Business")
+  if (BAD_TITLE_PATTERN.test(title)) {
+    const parts = title.split(/\s*[-–—]\s*/);
+    // If both parts are short (likely just names), reject
+    if (parts.length === 2 && parts[0].split(/\s+/).length <= 4 && parts[1].split(/\s+/).length <= 3) {
+      return false;
+    }
+  }
+  
+  return true;
+}
 
 function isQualitySignal(title: string, description: string | undefined, url: string | undefined): {
   isQuality: boolean;
@@ -125,38 +151,31 @@ function isQualitySignal(title: string, description: string | undefined, url: st
     return { isQuality: false, reason: "Missing valid URL" };
   }
 
-  // 2. Title must be meaningful (not just "Company - Source" format)
-  const titleParts = title.split(" - ");
-  if (titleParts.length === 2 && titleParts[0].split(" ").length <= 2 && titleParts[1].split(" ").length <= 3) {
-    return { isQuality: false, reason: "Title is just 'Company - Source' without context" };
+  // 2. Title must be a REAL headline (not just "Company - Source")
+  if (!isRealHeadline(title)) {
+    // Check if description has the real content
+    if (description && isRealHeadline(description.substring(0, 150))) {
+      // Description is the real headline - we could use it
+    } else {
+      return { isQuality: false, reason: "Not a real headline - missing action/context (e.g. 'Company - Source' format)" };
+    }
   }
 
-  // 3. Title must contain at least one action word
-  const lowerTitle = title.toLowerCase();
-  const hasActionWord = QUALITY_ACTION_WORDS.some(word => lowerTitle.includes(word));
-  
-  // Check description as fallback
-  const lowerDesc = (description || "").toLowerCase();
-  const hasActionInDesc = QUALITY_ACTION_WORDS.some(word => lowerDesc.includes(word));
-
-  if (!hasActionWord && !hasActionInDesc) {
-    return { isQuality: false, reason: "No actionable context (missing deal/fund/hire keywords)" };
+  // 3. Title must be at least 30 chars
+  if (title.length < 30) {
+    return { isQuality: false, reason: "Title too short for meaningful news" };
   }
 
-  // 4. Title must be at least 25 chars for meaningful context
-  if (title.length < 25) {
-    return { isQuality: false, reason: "Title too short for meaningful context" };
-  }
-
-  // 5. Description should exist and be meaningful (at least 40 chars)
-  if (!description || description.length < 40) {
-    // Allow if title is very descriptive (50+ chars with action word)
-    if (title.length < 50 || !hasActionWord) {
+  // 4. Description should exist and be meaningful (at least 50 chars)
+  if (!description || description.length < 50) {
+    // Allow if title is very descriptive (has action word and 60+ chars)
+    const hasAction = QUALITY_ACTION_WORDS.some(w => title.toLowerCase().includes(w));
+    if (title.length < 60 || !hasAction) {
       return { isQuality: false, reason: "Missing description and title not detailed enough" };
     }
   }
 
-  return { isQuality: true, reason: "Passed quality checks" };
+  return { isQuality: true, reason: "Real news headline with context" };
 }
 
 // ============================================================================
