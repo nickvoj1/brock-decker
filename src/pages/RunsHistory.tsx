@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw, Sparkles } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw, Sparkles, Database, MessageSquare } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,21 @@ interface ApolloContact {
   location?: string;
 }
 
+interface BullhornContactDetails {
+  lastNoteDate?: string;
+  lastNoteText?: string;
+  lastNoteBy?: string;
+}
+
+interface BullhornOverlapData {
+  existing: number;
+  recentNotes: number;
+  recentNoteEmails: string[];
+  existingEmails: string[];
+  total: number;
+  contactDetails: Record<string, BullhornContactDetails>;
+}
+
 interface EnrichmentRun {
   id: string;
   created_at: string;
@@ -84,7 +99,7 @@ export default function RunsHistory() {
   const [skillsReviewRun, setSkillsReviewRun] = useState<EnrichmentRun | null>(null);
   const [pendingClassifiedContacts, setPendingClassifiedContacts] = useState<any[] | null>(null);
   
-  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, { existing: number; recentNotes: number; recentNoteEmails: string[]; total: number }>>(() => {
+  const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, BullhornOverlapData>>(() => {
     try {
       const stored = localStorage.getItem('bullhorn-overlap-cache');
       return stored ? JSON.parse(stored) : {};
@@ -200,7 +215,9 @@ export default function RunsHistory() {
               existing: data.existingCount, 
               recentNotes: data.recentNoteCount || 0, 
               recentNoteEmails: data.recentNoteEmails || [],
-              total: data.totalCount 
+              existingEmails: data.existingEmails || [],
+              total: data.totalCount,
+              contactDetails: data.contactDetails || {},
             }
           }));
         }
@@ -232,7 +249,9 @@ export default function RunsHistory() {
           existing: data.existingCount, 
           recentNotes: data.recentNoteCount || 0, 
           recentNoteEmails: data.recentNoteEmails || [],
-          total: data.totalCount 
+          existingEmails: data.existingEmails || [],
+          total: data.totalCount,
+          contactDetails: data.contactDetails || {},
         }
       }));
       
@@ -657,17 +676,25 @@ export default function RunsHistory() {
                             <TableHead>Name</TableHead>
                             <TableHead>Title</TableHead>
                             <TableHead>Company</TableHead>
+                            <TableHead>Bullhorn</TableHead>
                             <TableHead>Skills</TableHead>
                             <TableHead>Email</TableHead>
-                            <TableHead>Phone</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {((selectedRun.enriched_data as unknown) as ApolloContact[]).map((contact, i) => {
                             const isRemoved = removedContacts.has(contact.email);
-                             const skills = generateBullhornSkillsString(contact, selectedRunPreferences);
+                            const skills = generateBullhornSkillsString(contact, selectedRunPreferences);
+                            const overlapData = bullhornOverlap[selectedRun.id];
+                            const isInBullhorn = overlapData?.existingEmails?.includes(contact.email);
+                            const hasRecentNote = overlapData?.recentNoteEmails?.includes(contact.email);
+                            const contactDetail = overlapData?.contactDetails?.[contact.email];
+                            
                             return (
-                              <TableRow key={i} className={isRemoved ? 'opacity-40 bg-muted/50' : ''}>
+                              <TableRow 
+                                key={i} 
+                                className={`${isRemoved ? 'opacity-40 bg-muted/50' : ''} ${isInBullhorn ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''} ${hasRecentNote ? 'bg-orange-50/50 dark:bg-orange-950/20' : ''}`}
+                              >
                                 <TableCell>
                                   {isRemoved ? (
                                     <Button
@@ -689,14 +716,52 @@ export default function RunsHistory() {
                                     </Button>
                                   )}
                                 </TableCell>
-                                <TableCell className="font-medium">{contact.name || '-'}</TableCell>
+                                <TableCell className="font-medium">
+                                  <div className="flex items-center gap-2">
+                                    {contact.name || '-'}
+                                    {isInBullhorn && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                                        <Database className="h-3 w-3 mr-0.5" />
+                                        BH
+                                      </span>
+                                    )}
+                                    {hasRecentNote && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300">
+                                        Recent
+                                      </span>
+                                    )}
+                                  </div>
+                                </TableCell>
                                 <TableCell>{contact.title || '-'}</TableCell>
                                 <TableCell>{contact.company || '-'}</TableCell>
-                                <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground" title={skills}>
+                                <TableCell className="max-w-[200px]">
+                                  {isInBullhorn && contactDetail?.lastNoteText ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                        <MessageSquare className="h-3 w-3" />
+                                        {contactDetail.lastNoteDate ? (
+                                          <span title={format(new Date(contactDetail.lastNoteDate), 'MMM d, yyyy HH:mm')}>
+                                            {formatDistanceToNow(new Date(contactDetail.lastNoteDate), { addSuffix: true })}
+                                          </span>
+                                        ) : null}
+                                        {contactDetail.lastNoteBy && (
+                                          <span className="text-muted-foreground/70">by {contactDetail.lastNoteBy}</span>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-muted-foreground truncate" title={contactDetail.lastNoteText}>
+                                        {contactDetail.lastNoteText}
+                                      </p>
+                                    </div>
+                                  ) : isInBullhorn ? (
+                                    <span className="text-xs text-muted-foreground italic">No notes</span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground" title={skills}>
                                   {skills || '-'}
                                 </TableCell>
-                                <TableCell className="text-primary">{contact.email || '-'}</TableCell>
-                                <TableCell>{contact.phone || '-'}</TableCell>
+                                <TableCell className="text-primary text-sm">{contact.email || '-'}</TableCell>
                               </TableRow>
                             );
                           })}

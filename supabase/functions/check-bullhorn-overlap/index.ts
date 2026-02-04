@@ -120,11 +120,20 @@ async function refreshBullhornTokens(supabase: any, refreshToken: string) {
   };
 }
 
+interface ContactCheckResult {
+  email: string;
+  exists: boolean;
+  recentNote: boolean;
+  lastNoteDate?: string;
+  lastNoteText?: string;
+  lastNoteBy?: string;
+}
+
 async function checkContactInBullhorn(
   restUrl: string,
   bhRestToken: string,
   email: string
-): Promise<{ exists: boolean; recentNote: boolean }> {
+): Promise<ContactCheckResult> {
   try {
     // Search for the contact by email
     const searchUrl = `${restUrl}search/ClientContact?BhRestToken=${bhRestToken}&query=email:"${email}"&fields=id&count=1`;
@@ -138,34 +147,61 @@ async function checkContactInBullhorn(
     const data = await response.json();
     
     if (data.count === 0) {
-      return { exists: false, recentNote: false };
+      return { email, exists: false, recentNote: false };
     }
     
     const contactId = data.data[0].id;
     
-    // Check for notes on this contact from the last 2 weeks
+    // Check for notes on this contact from the last 2 weeks AND get the most recent note
     const twoWeeksAgo = new Date();
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
     const twoWeeksAgoTimestamp = twoWeeksAgo.getTime();
     
-    const notesUrl = `${restUrl}query/Note?BhRestToken=${bhRestToken}&where=personReference.id=${contactId} AND dateAdded>${twoWeeksAgoTimestamp}&fields=id,dateAdded&count=1`;
-    const notesResponse = await fetch(notesUrl);
+    // Get most recent note (regardless of date) for display
+    const latestNoteUrl = `${restUrl}query/Note?BhRestToken=${bhRestToken}&where=personReference.id=${contactId}&fields=id,dateAdded,comments,commentingPerson&orderBy=-dateAdded&count=1`;
+    const latestNoteResponse = await fetch(latestNoteUrl);
     
-    if (notesResponse.status === 429) {
+    if (latestNoteResponse.status === 429) {
       await new Promise(resolve => setTimeout(resolve, 500));
-      // Retry the notes check
-      const retryNotesResponse = await fetch(notesUrl);
-      const retryNotesData = await retryNotesResponse.json();
-      return { exists: true, recentNote: (retryNotesData.count || 0) > 0 };
+      return checkContactInBullhorn(restUrl, bhRestToken, email);
     }
     
-    const notesData = await notesResponse.json();
-    const hasRecentNote = (notesData.count || 0) > 0;
+    const latestNoteData = await latestNoteResponse.json();
     
-    return { exists: true, recentNote: hasRecentNote };
+    let lastNoteDate: string | undefined;
+    let lastNoteText: string | undefined;
+    let lastNoteBy: string | undefined;
+    let hasRecentNote = false;
+    
+    if (latestNoteData.data && latestNoteData.data.length > 0) {
+      const note = latestNoteData.data[0];
+      const noteTimestamp = note.dateAdded;
+      lastNoteDate = new Date(noteTimestamp).toISOString();
+      
+      // Extract first 100 chars of note, strip HTML tags
+      const rawText = (note.comments || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      lastNoteText = rawText.length > 100 ? rawText.substring(0, 100) + '...' : rawText;
+      
+      // Get commentingPerson name if available
+      if (note.commentingPerson) {
+        lastNoteBy = `${note.commentingPerson.firstName || ''} ${note.commentingPerson.lastName || ''}`.trim();
+      }
+      
+      // Check if this note is within the last 2 weeks
+      hasRecentNote = noteTimestamp > twoWeeksAgoTimestamp;
+    }
+    
+    return { 
+      email, 
+      exists: true, 
+      recentNote: hasRecentNote,
+      lastNoteDate,
+      lastNoteText,
+      lastNoteBy,
+    };
   } catch (error) {
     console.error(`Error checking contact ${email}:`, error);
-    return { exists: false, recentNote: false };
+    return { email, exists: false, recentNote: false };
   }
 }
 
@@ -199,7 +235,7 @@ serve(async (req) => {
     const contacts = (run.enriched_data as any[]) || [];
     if (contacts.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, existingCount: 0, totalCount: 0, existingEmails: [] }),
+        JSON.stringify({ success: true, existingCount: 0, totalCount: 0, existingEmails: [], contactDetails: {} }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -213,22 +249,28 @@ serve(async (req) => {
     // Check each contact in batches to avoid rate limits
     const existingEmails: string[] = [];
     const recentNoteEmails: string[] = [];
+    const contactDetails: Record<string, { lastNoteDate?: string; lastNoteText?: string; lastNoteBy?: string }> = {};
     const batchSize = 5;
     
     for (let i = 0; i < contacts.length; i += batchSize) {
       const batch = contacts.slice(i, i + batchSize);
       const results = await Promise.all(
         batch.map(async (contact: any) => {
-          if (!contact.email) return { email: null, exists: false, recentNote: false };
-          const result = await checkContactInBullhorn(restUrl, bhRestToken, contact.email);
-          return { email: contact.email, ...result };
+          if (!contact.email) return null;
+          return await checkContactInBullhorn(restUrl, bhRestToken, contact.email);
         })
       );
       
       for (const result of results) {
-        if (result.email) {
+        if (result && result.email) {
           if (result.exists) {
             existingEmails.push(result.email);
+            // Store contact details for UI
+            contactDetails[result.email] = {
+              lastNoteDate: result.lastNoteDate,
+              lastNoteText: result.lastNoteText,
+              lastNoteBy: result.lastNoteBy,
+            };
           }
           if (result.recentNote) {
             recentNoteEmails.push(result.email);
@@ -252,6 +294,7 @@ serve(async (req) => {
         totalCount: contacts.length,
         existingEmails,
         recentNoteEmails,
+        contactDetails,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
