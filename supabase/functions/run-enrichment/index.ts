@@ -744,15 +744,19 @@ Deno.serve(async (req) => {
     const usedEmails = new Set((recentlyUsedContacts || []).map(c => c.email.toLowerCase()))
     console.log(`Excluding ${usedEmails.size} contacts used in the last ${CONTACT_EXCLUSION_DAYS} days`)
 
-    // Add Bullhorn emails to exclusion set (pre-fetched from frontend)
-    // This ensures Apollo searches only return NEW contacts not already in Bullhorn
-    const bullhornExclusionSet = new Set<string>()
+    // Bullhorn email tracking - allows up to 50% of contacts to be from Bullhorn
+    // This ensures we find NEW contacts while still allowing some existing ones
+    const bullhornEmailSet = new Set<string>()
     if (bullhornEmails && Array.isArray(bullhornEmails)) {
       bullhornEmails.forEach((email: string) => {
-        if (email) bullhornExclusionSet.add(email.toLowerCase())
+        if (email) bullhornEmailSet.add(email.toLowerCase())
       })
-      console.log(`Excluding ${bullhornExclusionSet.size} contacts already in Bullhorn CRM`)
+      console.log(`Tracking ${bullhornEmailSet.size} contacts from Bullhorn CRM (max 50% allowed in results)`)
     }
+    
+    // Track Bullhorn vs new contact counts for 50% cap
+    let bullhornContactCount = 0
+    const MAX_BULLHORN_PERCENTAGE = 0.5 // Allow up to 50% from Bullhorn
 
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
@@ -1152,12 +1156,6 @@ Deno.serve(async (req) => {
               if (person.email) {
                 const emailLower = person.email.toLowerCase()
                 
-                // Check for Bullhorn CRM exclusion (find NEW contacts only)
-                if (bullhornExclusionSet.has(emailLower)) {
-                  console.log(`Skipping Bullhorn contact: ${personName} (${person.email})`)
-                  continue
-                }
-                
                 // Check for duplicates and recently used
                 if (usedEmails.has(emailLower)) {
                   console.log(`Skipping recently used contact: ${personName} (${person.email})`)
@@ -1166,6 +1164,17 @@ Deno.serve(async (req) => {
                 if (seenEmails.has(emailLower)) {
                   console.log(`Skipping duplicate: ${personName} (${person.email})`)
                   continue
+                }
+                
+                // Check Bullhorn 50% cap: prefer new contacts, but allow Bullhorn contacts up to 50%
+                const isFromBullhorn = bullhornEmailSet.has(emailLower)
+                if (isFromBullhorn) {
+                  const currentTotal = allContacts.length + contactsWithEmail.length
+                  const maxBullhornAllowed = Math.floor((currentTotal + 1) * MAX_BULLHORN_PERCENTAGE)
+                  if (bullhornContactCount >= maxBullhornAllowed) {
+                    console.log(`Skipping Bullhorn contact (50% cap): ${personName} (${person.email}) - ${bullhornContactCount}/${currentTotal + 1}`)
+                    continue
+                  }
                 }
                 
                 // Add directly without enrichment call
@@ -1180,7 +1189,8 @@ Deno.serve(async (req) => {
                 contactsWithEmail.push(newContact)
                 seenEmails.add(emailLower)
                 companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
-                console.log(`[Direct] Adding contact: ${personName} at ${companyName} (email from search)`)
+                if (isFromBullhorn) bullhornContactCount++
+                console.log(`[Direct] Adding contact: ${personName} at ${companyName} (email from search)${isFromBullhorn ? ' [BULLHORN]' : ''}`)
               } else if (person.id && !seenPersonIds.has(person.id)) {
                 // No email in search results - need to enrich (only if not already seen)
                 seenPersonIds.add(person.id) // Mark as seen to prevent duplicate enrichment
@@ -1296,17 +1306,24 @@ Deno.serve(async (req) => {
                       if (email && fullName && fullName !== 'Unknown') {
                         const emailLower = email.toLowerCase()
                         
-                        // Check if contact is already in Bullhorn
-                        if (bullhornExclusionSet.has(emailLower)) {
-                          console.log(`Skipping Bullhorn contact: ${fullName} (${email})`)
-                        }
                         // Check if this contact was recently used
-                        else if (usedEmails.has(emailLower)) {
+                        if (usedEmails.has(emailLower)) {
                           console.log(`Skipping recently used contact: ${fullName} (${email})`)
                         } else if (seenEmails.has(emailLower)) {
                           // Skip duplicates from other search combinations
                           console.log(`Skipping duplicate from other search: ${fullName} (${email})`)
                         } else {
+                          // Check Bullhorn 50% cap
+                          const isFromBullhorn = bullhornEmailSet.has(emailLower)
+                          if (isFromBullhorn) {
+                            const currentTotal = allContacts.length
+                            const maxBullhornAllowed = Math.floor((currentTotal + 1) * MAX_BULLHORN_PERCENTAGE)
+                            if (bullhornContactCount >= maxBullhornAllowed) {
+                              console.log(`Skipping Bullhorn contact (50% cap): ${fullName} (${email}) - ${bullhornContactCount}/${currentTotal + 1}`)
+                              continue
+                            }
+                          }
+                          
                           const newContact: ApolloContact = {
                             name: fullName,
                             title: jobTitle,
@@ -1324,12 +1341,13 @@ Deno.serve(async (req) => {
                               continue
                             }
                             industryContacts[comboIndustry].push(newContact)
-                            console.log(`[Enriched] Adding contact for ${comboIndustry}: ${fullName} at ${companyName} (${currentCount + 1}/${quota})`)
+                            console.log(`[Enriched] Adding contact for ${comboIndustry}: ${fullName} at ${companyName} (${currentCount + 1}/${quota})${isFromBullhorn ? ' [BULLHORN]' : ''}`)
                           } else {
-                            console.log(`[Enriched] Adding contact: ${fullName} at ${companyName}`)
+                            console.log(`[Enriched] Adding contact: ${fullName} at ${companyName}${isFromBullhorn ? ' [BULLHORN]' : ''}`)
                           }
                           
                           seenEmails.add(emailLower)
+                          if (isFromBullhorn) bullhornContactCount++
                           allContacts.push(newContact)
                         }
                       } else {
@@ -1589,6 +1607,14 @@ Deno.serve(async (req) => {
       console.log(`\n=== RETRY COMPLETE: Found ${allContacts.length} total contacts ===\n`)
     }
     // ============ END SIGNAL RETRY LOOP ============
+
+    // Log Bullhorn ratio summary
+    const newContactCount = allContacts.length - bullhornContactCount
+    console.log(`\n=== SEARCH SUMMARY ===`)
+    console.log(`Total contacts: ${allContacts.length}`)
+    console.log(`New contacts: ${newContactCount} (${allContacts.length > 0 ? Math.round(newContactCount / allContacts.length * 100) : 0}%)`)
+    console.log(`Bullhorn contacts: ${bullhornContactCount} (${allContacts.length > 0 ? Math.round(bullhornContactCount / allContacts.length * 100) : 0}%)`)
+    console.log(`======================\n`)
 
     if (allContacts.length > 0) {
       const contactsToSave = allContacts.map(c => ({
