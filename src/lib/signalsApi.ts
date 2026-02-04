@@ -30,6 +30,14 @@ export interface Signal {
   retrain_flag?: boolean;
   ai_confidence?: number;
   feedback_count?: number;
+  // Surge scraper v2.1 fields
+  detected_region?: string | null;
+  validated_region?: string | null;
+  keywords_count?: number;
+  keywords?: string[];
+  source_urls?: string[];
+  raw_content?: string | null;
+  user_feedback?: string | null;
 }
 
 export interface SignalsResponse {
@@ -189,6 +197,67 @@ export async function scrapeAllSignals(region?: string, options?: { includeAdzun
     return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
 }
+
+// Regional Surge Scraper v2.1 - with geo-validation and self-learning
+export async function runRegionalSurge(region?: string) {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("regional-surge", {
+      body: { region },
+    });
+
+    if (error) {
+      console.error("Regional surge error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Regional surge failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Submit feedback for signal (approve/reject)
+export async function submitSignalFeedback(
+  signalId: string, 
+  action: 'APPROVE' | 'REJECT_NORDIC' | 'REJECT_WRONG_REGION',
+  recruiter: string,
+  reason?: string
+) {
+  try {
+    // Update the signal's user_feedback
+    const { error: updateError } = await supabase
+      .from("signals")
+      .update({
+        user_feedback: action,
+        validated_region: action === 'APPROVE' ? undefined : 'REJECTED',
+      })
+      .eq("id", signalId);
+
+    if (updateError) throw updateError;
+
+    // Log to feedback_log for self-learning
+    const { error: logError } = await supabase
+      .from("feedback_log")
+      .insert({
+        signal_id: signalId,
+        recruiter,
+        action,
+        reason: reason || action,
+      });
+
+    if (logError) {
+      console.error("Failed to log feedback:", logError);
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Submit feedback failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+
 
 // Build Bullhorn note text for a signal
 export function buildBullhornNote(signal: Signal): string {

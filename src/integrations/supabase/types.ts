@@ -200,6 +200,41 @@ export type Database = {
         }
         Relationships: []
       }
+      feedback_log: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          reason: string | null
+          recruiter: string
+          signal_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          reason?: string | null
+          recruiter: string
+          signal_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          reason?: string | null
+          recruiter?: string
+          signal_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_log_signal_id_fkey"
+            columns: ["signal_id"]
+            isOneToOne: false
+            referencedRelation: "signals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generated_pitches: {
         Row: {
           body: string
@@ -409,21 +444,28 @@ export type Database = {
           cv_matches: number | null
           description: string | null
           details: Json | null
+          detected_region: string | null
           dismissed_by: string | null
           feedback_count: number | null
           id: string
           is_dismissed: boolean | null
           is_high_intent: boolean | null
+          keywords: string[] | null
+          keywords_count: number | null
           published_at: string | null
+          raw_content: string | null
           region: string
           retrain_flag: boolean | null
           score: number | null
           signal_type: string | null
           source: string | null
+          source_urls: string[] | null
           tier: string | null
           title: string
           updated_at: string
           url: string | null
+          user_feedback: string | null
+          validated_region: string | null
         }
         Insert: {
           ai_confidence?: number | null
@@ -440,21 +482,28 @@ export type Database = {
           cv_matches?: number | null
           description?: string | null
           details?: Json | null
+          detected_region?: string | null
           dismissed_by?: string | null
           feedback_count?: number | null
           id?: string
           is_dismissed?: boolean | null
           is_high_intent?: boolean | null
+          keywords?: string[] | null
+          keywords_count?: number | null
           published_at?: string | null
+          raw_content?: string | null
           region: string
           retrain_flag?: boolean | null
           score?: number | null
           signal_type?: string | null
           source?: string | null
+          source_urls?: string[] | null
           tier?: string | null
           title: string
           updated_at?: string
           url?: string | null
+          user_feedback?: string | null
+          validated_region?: string | null
         }
         Update: {
           ai_confidence?: number | null
@@ -471,21 +520,28 @@ export type Database = {
           cv_matches?: number | null
           description?: string | null
           details?: Json | null
+          detected_region?: string | null
           dismissed_by?: string | null
           feedback_count?: number | null
           id?: string
           is_dismissed?: boolean | null
           is_high_intent?: boolean | null
+          keywords?: string[] | null
+          keywords_count?: number | null
           published_at?: string | null
+          raw_content?: string | null
           region?: string
           retrain_flag?: boolean | null
           score?: number | null
           signal_type?: string | null
           source?: string | null
+          source_urls?: string[] | null
           tier?: string | null
           title?: string
           updated_at?: string
           url?: string | null
+          user_feedback?: string | null
+          validated_region?: string | null
         }
         Relationships: []
       }
