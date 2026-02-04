@@ -631,12 +631,26 @@ async function firecrawlDeepSearch(region: string): Promise<any[]> {
         console.log(`  Query "${query.slice(0, 40)}..." (${timeFilter}): ${results.length} results`);
         
         for (const result of results) {
-          if (result.url && !seenUrls.has(result.url)) {
-            seenUrls.add(result.url);
+          // EXTRACT URL from multiple possible fields (Firecrawl response structure varies)
+          const extractedUrl = result.url || 
+                              result.sourceURL || 
+                              result.metadata?.sourceURL || 
+                              result.metadata?.url ||
+                              result.link ||
+                              null;
+          
+          // STRICT: Skip results without a valid URL
+          if (!extractedUrl || !extractedUrl.startsWith("http")) {
+            console.log(`  Skipping result without valid URL: ${(result.title || "").slice(0, 40)}...`);
+            continue;
+          }
+          
+          if (!seenUrls.has(extractedUrl)) {
+            seenUrls.add(extractedUrl);
             allResults.push({
-              title: result.title || "",
-              url: result.url,
-              description: result.markdown?.slice(0, 500) || result.description || "",
+              title: result.title || result.metadata?.title || "",
+              url: extractedUrl,
+              description: result.markdown?.slice(0, 500) || result.description || result.metadata?.description || "",
               published_at: new Date().toISOString(),
               source: "Firecrawl Search",
             });
@@ -718,6 +732,12 @@ Deno.serve(async (req) => {
             continue;
           }
           
+          // STRICT: Skip signals without a URL (must be linkable)
+          if (!item.url || !item.url.startsWith("http")) {
+            console.log(`Skipping signal without valid URL: ${item.title.slice(0, 40)}...`);
+            continue;
+          }
+          
           allSignals.push({
             title: item.title.slice(0, 255),
             company: company,
@@ -759,6 +779,9 @@ Deno.serve(async (req) => {
         
         // STRICT: Skip signals without a company name
         if (!company) continue;
+        
+        // STRICT: Skip signals without a valid URL (must be linkable)
+        if (!item.url || !item.url.startsWith("http")) continue;
         
         let score = tierResult.score;
         if (amountData) {
