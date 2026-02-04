@@ -732,14 +732,17 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // Build Bullhorn exclusion set (pre-fetched from frontend)
-    const bullhornExclusionSet = new Set<string>()
+    // Bullhorn email tracking - allows up to 50% of contacts to be from Bullhorn
+    const bullhornEmailSet = new Set<string>()
     if (bullhornEmails && Array.isArray(bullhornEmails)) {
       bullhornEmails.forEach((email: string) => {
-        if (email) bullhornExclusionSet.add(email.toLowerCase())
+        if (email) bullhornEmailSet.add(email.toLowerCase())
       })
-      console.log(`Excluding ${bullhornExclusionSet.size} contacts already in Bullhorn CRM`)
+      console.log(`Tracking ${bullhornEmailSet.size} contacts from Bullhorn CRM (max 50% allowed in results)`)
     }
+    
+    // Track Bullhorn vs new contact counts for 50% cap
+    const MAX_BULLHORN_PERCENTAGE = 0.5
 
     // Fetch the signal
     const { data: signal, error: signalError } = await supabase
@@ -862,12 +865,13 @@ Deno.serve(async (req) => {
     const TARGET_MIN_CONTACTS = 10
     const MAX_PER_COMPANY = 10 // Allow more contacts per company for exhaustive search
     const allContacts: ApolloContact[] = []
-    // Pre-populate seenEmails with Bullhorn contacts to exclude them from search results
-    const seenEmails = new Set<string>(bullhornExclusionSet)
+    // Don't pre-populate seenEmails with Bullhorn - we'll filter with 50% cap instead
+    const seenEmails = new Set<string>()
     const seenPersonIds = new Set<string>()
     const categoriesTried: string[] = []
     const categoriesWithResults: string[] = []
     let usedStrategy = 'none'
+    let bullhornContactCount = 0
     
     // Check if targeting legal sector (include law firms if so)
     const includeLawFirms = hasLegalIntent(aiAnalysis)
@@ -910,7 +914,23 @@ Deno.serve(async (req) => {
 
         if (contacts.length > 0) {
           console.log(`  Found ${contacts.length} contacts in ${categoryName} with ${strategy.name}`)
-          allContacts.push(...contacts)
+          
+          // Apply 50% Bullhorn cap to returned contacts
+          for (const contact of contacts) {
+            const isFromBullhorn = bullhornEmailSet.has(contact.email.toLowerCase())
+            if (isFromBullhorn) {
+              const currentTotal = allContacts.length
+              const maxBullhornAllowed = Math.floor((currentTotal + 1) * MAX_BULLHORN_PERCENTAGE)
+              if (bullhornContactCount >= maxBullhornAllowed) {
+                console.log(`  Skipping Bullhorn contact (50% cap): ${contact.name} (${contact.email})`)
+                continue
+              }
+              bullhornContactCount++
+              console.log(`  Adding Bullhorn contact: ${contact.name} [${bullhornContactCount}/${currentTotal + 1}]`)
+            }
+            allContacts.push(contact)
+          }
+          
           categoryFoundContacts = true
           usedStrategy = strategy.name
           
@@ -925,13 +945,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Log credit usage summary
+    // Log credit usage and Bullhorn summary
     const directContacts = allContacts.length - globalCreditsUsed
-    console.log(`\n=== CREDIT USAGE SUMMARY ===`)
+    const newContactCount = allContacts.length - bullhornContactCount
+    console.log(`\n=== SEARCH SUMMARY ===`)
     console.log(`Total contacts: ${allContacts.length}`)
+    console.log(`New contacts: ${newContactCount} (${allContacts.length > 0 ? Math.round(newContactCount / allContacts.length * 100) : 0}%)`)
+    console.log(`Bullhorn contacts: ${bullhornContactCount} (${allContacts.length > 0 ? Math.round(bullhornContactCount / allContacts.length * 100) : 0}%)`)
     console.log(`Direct (free): ${Math.max(0, directContacts)}`)
     console.log(`Enriched (paid): ${globalCreditsUsed} credits`)
-    console.log(`============================\n`)
+    console.log(`======================\n`)
     
     console.log(`Search complete: ${allContacts.length} contacts found across ${categoriesWithResults.length} categories`)
     console.log(`Categories with results: ${categoriesWithResults.join(', ')}`)
