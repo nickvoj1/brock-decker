@@ -5,6 +5,45 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Apollo API base URL
+const APOLLO_API_BASE = "https://api.apollo.io/v1";
+
+// Company watchlist - curated PE/VC firms to poll for job postings via Apollo
+const COMPANY_WATCHLIST = [
+  // Top PE firms
+  { name: "Blackstone", domain: "blackstone.com" },
+  { name: "KKR", domain: "kkr.com" },
+  { name: "Carlyle Group", domain: "carlyle.com" },
+  { name: "Apollo Global", domain: "apollo.com" },
+  { name: "TPG", domain: "tpg.com" },
+  { name: "Warburg Pincus", domain: "warburgpincus.com" },
+  { name: "EQT", domain: "eqtgroup.com" },
+  { name: "CVC Capital", domain: "cvc.com" },
+  { name: "Advent International", domain: "adventinternational.com" },
+  { name: "Cinven", domain: "cinven.com" },
+  { name: "Permira", domain: "permira.com" },
+  { name: "BC Partners", domain: "bcpartners.com" },
+  { name: "Apax Partners", domain: "apax.com" },
+  { name: "Bridgepoint", domain: "bridgepoint.eu" },
+  { name: "PAI Partners", domain: "paipartners.com" },
+  { name: "Ardian", domain: "ardian.com" },
+  { name: "Intermediate Capital Group", domain: "icgam.com" },
+  { name: "Hg Capital", domain: "hgcapital.com" },
+  { name: "Vista Equity", domain: "vistaequitypartners.com" },
+  { name: "Thoma Bravo", domain: "thomabravo.com" },
+  // VC firms
+  { name: "Sequoia Capital", domain: "sequoiacap.com" },
+  { name: "Andreessen Horowitz", domain: "a16z.com" },
+  { name: "Accel", domain: "accel.com" },
+  { name: "Index Ventures", domain: "indexventures.com" },
+  { name: "Balderton Capital", domain: "balderton.com" },
+  { name: "Atomico", domain: "atomico.com" },
+  { name: "General Catalyst", domain: "generalcatalyst.com" },
+  { name: "Insight Partners", domain: "insightpartners.com" },
+  { name: "Northzone", domain: "northzone.com" },
+  { name: "Lightspeed Venture", domain: "lsvp.com" },
+];
+
 // PE/VC/Finance company career pages - curated list with accurate regions
 const CAREER_PAGES: Record<string, { url: string; company: string; region: string; location: string }[]> = {
   london: [
@@ -420,125 +459,318 @@ async function scrapeCareerPage(
   }
 }
 
+// ============================================================================
+// APOLLO JOB POSTINGS - Poll companies via Apollo API
+// ============================================================================
+
+interface ApolloJobSignal {
+  company: string;
+  company_apollo_id: string;
+  job_title: string;
+  job_description: string;
+  job_url: string;
+  location: string;
+  region: string;
+  contacts: Array<{
+    name: string;
+    title: string;
+    email: string | null;
+    linkedin_url: string | null;
+  }>;
+  contacts_count: number;
+  score: number;
+  tier: string;
+}
+
+async function fetchApolloJobSignals(
+  apolloApiKey: string,
+  supabase: any,
+  region?: string
+): Promise<{ jobsFound: number; jobsInserted: number; errors: string[] }> {
+  const companies = [...COMPANY_WATCHLIST];
+  
+  // Also add companies from recent signals
+  const { data: signalCompanies } = await supabase
+    .from("signals")
+    .select("company")
+    .not("company", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(30);
+  
+  if (signalCompanies) {
+    const existingNames = new Set(companies.map(c => c.name.toLowerCase()));
+    for (const s of signalCompanies) {
+      if (s.company && !existingNames.has(s.company.toLowerCase())) {
+        companies.push({ 
+          name: s.company, 
+          domain: guessDomain(s.company) 
+        });
+        existingNames.add(s.company.toLowerCase());
+      }
+    }
+  }
+  
+  console.log(`[APOLLO] Polling ${companies.length} companies for TA activity...`);
+  
+  let jobsFound = 0;
+  let jobsInserted = 0;
+  const errors: string[] = [];
+  
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < companies.length; i += BATCH_SIZE) {
+    const batch = companies.slice(i, i + BATCH_SIZE);
+    
+    const batchResults = await Promise.allSettled(
+      batch.map(async (company) => {
+        try {
+          // Search for company organization in Apollo
+          const orgSearchRes = await fetch(`${APOLLO_API_BASE}/mixed_companies/search`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_key: apolloApiKey,
+              q_organization_name: company.name,
+              page: 1,
+              per_page: 1,
+            }),
+          });
+          
+          if (!orgSearchRes.ok) {
+            return { company: company.name, jobs: 0 };
+          }
+          
+          const orgData = await orgSearchRes.json();
+          const org = orgData.organizations?.[0] || orgData.accounts?.[0];
+          
+          if (!org?.id) {
+            return { company: company.name, jobs: 0 };
+          }
+          
+          // Search for TA/HR people at this org
+          const peopleRes = await fetch(`${APOLLO_API_BASE}/mixed_people/search`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_key: apolloApiKey,
+              q_organization_ids: [org.id],
+              person_titles: ["Talent Acquisition", "Recruiter", "HR Director", "Head of People", "HR Business Partner"],
+              page: 1,
+              per_page: 5,
+            }),
+          });
+          
+          if (!peopleRes.ok) {
+            return { company: company.name, jobs: 0 };
+          }
+          
+          const peopleData = await peopleRes.json();
+          const recruiters = peopleData.people || [];
+          
+          if (recruiters.length === 0) {
+            return { company: company.name, jobs: 0 };
+          }
+          
+          // Determine region from org location
+          const detectedRegion = detectRegionFromLocation(org.city || org.country || "");
+          if (region && detectedRegion !== region) {
+            return { company: company.name, jobs: 0 };
+          }
+          
+          // Create job signal
+          const jobSignal: ApolloJobSignal = {
+            company: company.name,
+            company_apollo_id: org.id,
+            job_title: `Active Hiring - ${company.name}`,
+            job_description: `${company.name} has ${recruiters.length} active TA professionals, indicating ongoing hiring.`,
+            job_url: org.website_url || `https://${company.domain}/careers`,
+            location: org.city || org.country || "Global",
+            region: detectedRegion,
+            contacts: recruiters.slice(0, 3).map((r: any) => ({
+              name: r.name || `${r.first_name} ${r.last_name}`,
+              title: r.title || "Talent Acquisition",
+              email: r.email,
+              linkedin_url: r.linkedin_url,
+            })),
+            contacts_count: Math.min(recruiters.length, 3),
+            score: 40 + Math.min(recruiters.length * 10, 30) + (org.estimated_num_employees > 100 ? 15 : 5),
+            tier: recruiters.length >= 5 ? "tier_1" : recruiters.length >= 2 ? "tier_2" : "tier_3",
+          };
+          
+          jobsFound++;
+          
+          // Upsert to job_signals table
+          const { error: insertError } = await supabase
+            .from("job_signals")
+            .upsert({
+              ...jobSignal,
+              source: "apollo_jobs",
+              posted_at: new Date().toISOString(),
+            }, {
+              onConflict: "company,job_title,COALESCE(job_url, '')",
+              ignoreDuplicates: false,
+            });
+          
+          if (!insertError) {
+            jobsInserted++;
+          }
+          
+          return { company: company.name, jobs: 1 };
+        } catch (err) {
+          errors.push(`${company.name}: ${err instanceof Error ? err.message : "Unknown"}`);
+          return { company: company.name, jobs: 0 };
+        }
+      })
+    );
+    
+    // Rate limiting
+    if (i + BATCH_SIZE < companies.length) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+  
+  return { jobsFound, jobsInserted, errors };
+}
+
+function guessDomain(companyName: string): string {
+  return companyName.toLowerCase().replace(/[^a-z0-9]/g, "") + ".com";
+}
+
+function detectRegionFromLocation(location: string): string {
+  const loc = location.toLowerCase();
+  
+  for (const [region, keywords] of Object.entries(REGION_LOCATIONS)) {
+    if (keywords.some(kw => loc.includes(kw))) {
+      return region;
+    }
+  }
+  
+  return "europe";
+}
+
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { region } = await req.json();
+    const { region, mode = "both" } = await req.json();
     
-    const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
-    if (!firecrawlApiKey) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Firecrawl connector not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get career pages for the requested region(s)
-    const regions = region ? [region] : ["london", "europe", "uae", "usa"];
-    const allPages: CareerPageConfig[] = [];
     
-    for (const r of regions) {
-      const pages = CAREER_PAGES[r] || [];
-      allPages.push(...pages);
-    }
+    const results = {
+      success: true,
+      // Career page scraping results
+      scrapedPages: 0,
+      signalsFound: 0,
+      signalsInserted: 0,
+      // Apollo job results
+      apolloJobsFound: 0,
+      apolloJobsInserted: 0,
+      errors: [] as string[],
+    };
     
-    console.log(`Scraping ${allPages.length} career pages across ${regions.join(", ")}`);
-    
-    // Scrape in batches to avoid rate limiting
-    const BATCH_SIZE = 3;
-    const allSignals: JobSignal[] = [];
-    
-    for (let i = 0; i < allPages.length; i += BATCH_SIZE) {
-      const batch = allPages.slice(i, i + BATCH_SIZE);
-      
-      const batchResults = await Promise.allSettled(
-        batch.map(page => scrapeCareerPage(firecrawlApiKey, page))
-      );
-      
-      for (const result of batchResults) {
-        if (result.status === "fulfilled") {
-          allSignals.push(...result.value);
-        }
-      }
-      
-      // Small delay between batches
-      if (i + BATCH_SIZE < allPages.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-    
-    console.log(`Found ${allSignals.length} qualified job signals total`);
-    
-    // Insert signals into database (upsert to avoid duplicates)
-    let insertedCount = 0;
-    const errors: string[] = [];
-    
-    for (const signal of allSignals) {
-      try {
-        // Check for existing signal with same company + region + type within 7 days
-        const { data: existing } = await supabase
-          .from("signals")
-          .select("id")
-          .eq("company", signal.company)
-          .eq("region", signal.region)
-          .eq("signal_type", "hiring")
-          .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-          .limit(1);
+    // Mode 1: Career page scraping (existing)
+    if (mode === "both" || mode === "career") {
+      const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+      if (firecrawlApiKey) {
+        const regions = region ? [region] : ["london", "europe", "uae", "usa"];
+        const allPages: CareerPageConfig[] = [];
         
-        if (existing && existing.length > 0) {
-          console.log(`Skipping duplicate: ${signal.company} (${signal.region})`);
-          continue;
+        for (const r of regions) {
+          const pages = CAREER_PAGES[r] || [];
+          allPages.push(...pages);
         }
         
-        const { error: insertError } = await supabase.from("signals").insert({
-          title: signal.title,
-          company: signal.company,
-          description: signal.description,
-          url: signal.url,
-          region: signal.region,
-          signal_type: "hiring",
-          tier: signal.tier,
-          score: signal.score,
-          source: "Career Page Scraper",
-          is_high_intent: signal.tier === "tier_1",
-          published_at: new Date().toISOString(),
-          details: {
-            location: signal.location,
-            positions: signal.position,
-            scraped_at: new Date().toISOString(),
-          },
-        });
+        console.log(`[CAREER] Scraping ${allPages.length} career pages...`);
         
-        if (insertError) {
-          console.error(`Error inserting signal for ${signal.company}:`, insertError);
-          errors.push(`${signal.company}: ${insertError.message}`);
-        } else {
-          insertedCount++;
+        const BATCH_SIZE = 3;
+        const allSignals: JobSignal[] = [];
+        
+        for (let i = 0; i < allPages.length; i += BATCH_SIZE) {
+          const batch = allPages.slice(i, i + BATCH_SIZE);
+          
+          const batchResults = await Promise.allSettled(
+            batch.map(page => scrapeCareerPage(firecrawlApiKey, page))
+          );
+          
+          for (const result of batchResults) {
+            if (result.status === "fulfilled") {
+              allSignals.push(...result.value);
+            }
+          }
+          
+          if (i + BATCH_SIZE < allPages.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
-      } catch (err) {
-        console.error(`Error processing signal for ${signal.company}:`, err);
+        
+        results.scrapedPages = allPages.length;
+        results.signalsFound = allSignals.length;
+        
+        // Insert to signals table
+        for (const signal of allSignals) {
+          const { data: existing } = await supabase
+            .from("signals")
+            .select("id")
+            .eq("company", signal.company)
+            .eq("region", signal.region)
+            .eq("signal_type", "hiring")
+            .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+            .limit(1);
+          
+          if (existing && existing.length > 0) continue;
+          
+          const { error: insertError } = await supabase.from("signals").insert({
+            title: signal.title,
+            company: signal.company,
+            description: signal.description,
+            url: signal.url,
+            region: signal.region,
+            signal_type: "hiring",
+            tier: signal.tier,
+            score: signal.score,
+            source: "Career Page Scraper",
+            is_high_intent: signal.tier === "tier_1",
+            published_at: new Date().toISOString(),
+            details: { location: signal.location, positions: signal.position },
+          });
+          
+          if (!insertError) results.signalsInserted++;
+        }
       }
     }
     
-    console.log(`Inserted ${insertedCount} new job signals`);
+    // Mode 2: Apollo job postings (new)
+    if (mode === "both" || mode === "apollo") {
+      const { data: apiSettings } = await supabase
+        .from("api_settings")
+        .select("setting_value")
+        .eq("setting_key", "apollo_api_key")
+        .single();
+      
+      if (apiSettings?.setting_value) {
+        const apolloResults = await fetchApolloJobSignals(
+          apiSettings.setting_value,
+          supabase,
+          region
+        );
+        results.apolloJobsFound = apolloResults.jobsFound;
+        results.apolloJobsInserted = apolloResults.jobsInserted;
+        results.errors.push(...apolloResults.errors);
+      }
+    }
     
-    return new Response(
-      JSON.stringify({
-        success: true,
-        scrapedPages: allPages.length,
-        signalsFound: allSignals.length,
-        signalsInserted: insertedCount,
-        errors: errors.length > 0 ? errors : undefined,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.log(`[COMPLETE] Career: ${results.signalsInserted}, Apollo: ${results.apolloJobsInserted}`);
+    
+    return new Response(JSON.stringify(results), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
     
   } catch (error) {
     console.error("Job signals fetch error:", error);

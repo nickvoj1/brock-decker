@@ -137,10 +137,10 @@ export async function refreshSignals(profileName: string, region?: string) {
 }
 
 // Scrape job postings from PE/VC career pages
-export async function scrapeJobSignals(region?: string) {
+export async function scrapeJobSignals(region?: string, mode: "both" | "career" | "apollo" = "both") {
   try {
     const { data: response, error } = await supabase.functions.invoke("fetch-job-signals", {
-      body: { region },
+      body: { region, mode },
     });
 
     if (error) {
@@ -151,6 +151,104 @@ export async function scrapeJobSignals(region?: string) {
     return response;
   } catch (err) {
     console.error("Scrape job signals failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Job signal contact interface
+export interface JobSignalContact {
+  name: string;
+  title: string;
+  email: string | null;
+  linkedin_url: string | null;
+}
+
+// Job signal interface
+export interface JobSignal {
+  id: string;
+  company: string;
+  company_apollo_id?: string;
+  job_title: string;
+  job_description?: string;
+  job_url?: string;
+  location?: string;
+  region: string;
+  posted_at?: string;
+  contacts: JobSignalContact[];
+  contacts_count: number;
+  score: number;
+  tier: string;
+  signal_type: string;
+  source: string;
+  is_dismissed: boolean;
+  bullhorn_note_added: boolean;
+  created_at: string;
+}
+
+// Fetch job signals from job_signals table
+export async function getJobSignals(region?: string): Promise<{ success: boolean; error?: string; data: JobSignal[] }> {
+  try {
+    let query = supabase
+      .from("job_signals")
+      .select("*")
+      .eq("is_dismissed", false)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    
+    if (region) {
+      query = query.eq("region", region);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error("Get job signals error:", error);
+      return { success: false, error: error.message, data: [] };
+    }
+    
+    // Map database records to JobSignal interface
+    const jobSignals: JobSignal[] = (data || []).map((row: any) => ({
+      id: row.id,
+      company: row.company,
+      company_apollo_id: row.company_apollo_id,
+      job_title: row.job_title,
+      job_description: row.job_description,
+      job_url: row.job_url,
+      location: row.location,
+      region: row.region,
+      posted_at: row.posted_at,
+      contacts: (row.contacts || []) as JobSignalContact[],
+      contacts_count: row.contacts_count || 0,
+      score: row.score || 50,
+      tier: row.tier || "tier_2",
+      signal_type: row.signal_type || "hiring",
+      source: row.source || "apollo_jobs",
+      is_dismissed: row.is_dismissed || false,
+      bullhorn_note_added: row.bullhorn_note_added || false,
+      created_at: row.created_at,
+    }));
+    
+    return { success: true, data: jobSignals };
+  } catch (err) {
+    console.error("Get job signals failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error", data: [] };
+  }
+}
+
+// Dismiss a job signal
+export async function dismissJobSignal(jobId: string, profileName: string) {
+  try {
+    const { error } = await supabase
+      .from("job_signals")
+      .update({ is_dismissed: true, dismissed_by: profileName })
+      .eq("id", jobId);
+    
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    
+    return { success: true };
+  } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
   }
 }

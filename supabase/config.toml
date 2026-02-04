@@ -65,3 +65,6 @@ verify_jwt = false
 
 [functions.regional-surge]
 verify_jwt = false
+
+[functions.fetch-job-signals]
+verify_jwt = false
