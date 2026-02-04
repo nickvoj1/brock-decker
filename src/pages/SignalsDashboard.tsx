@@ -12,7 +12,9 @@ import {
   Search,
   RotateCcw,
   Zap,
-  AlertCircle
+  AlertCircle,
+  ChevronDown,
+  MoreHorizontal
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,6 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -266,28 +275,36 @@ export default function SignalsDashboard() {
     }
   };
 
-  // Run the regional surge scraper v2.1
+  // Primary action: Fetch & Enrich signals (combines surge + AI enrichment)
   const handleRegionalSurge = async () => {
     if (!profileName) return;
     
     setIsSurgeRunning(true);
-    toast.info(`Running Surge Scraper v2.1 for ${activeRegion.toUpperCase()}...`, { duration: 30000 });
+    toast.info(`Fetching signals for ${REGION_CONFIG[activeRegion].label}...`, { duration: 30000 });
     
     try {
+      // Step 1: Run the surge scraper
       const response = await runRegionalSurge(activeRegion);
       if (response.success) {
-        const { validated, rejected, pending, byRegion } = response;
+        const { validated, rejected, pending } = response;
         toast.success(
-          `Surge complete: ${validated} validated, ${pending} pending, ${rejected} rejected`,
-          { duration: 5000 }
+          `Found ${validated} new signals (${pending} pending review)`,
+          { duration: 3000 }
         );
+        
+        // Step 2: Auto-enrich any unenriched signals
+        const enrichResult = await enrichSignalsWithAI();
+        if (enrichResult.success && enrichResult.enriched > 0) {
+          toast.success(`AI enriched ${enrichResult.enriched} signals with insights`, { duration: 3000 });
+        }
+        
         await fetchSignals();
       } else {
-        toast.error(response.error || "Surge scraper failed");
+        toast.error(response.error || "Failed to fetch signals");
       }
     } catch (error) {
-      console.error("Regional surge error:", error);
-      toast.error("Failed to run surge scraper");
+      console.error("Fetch signals error:", error);
+      toast.error("Failed to fetch signals");
     } finally {
       setIsSurgeRunning(false);
     }
@@ -551,47 +568,48 @@ export default function SignalsDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Primary Action: Fetch & Enrich */}
             <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportCSV}
-              disabled={filteredSignals.length === 0}
-            >
-              <Download className="h-4 w-4" />
-              <span className="hidden sm:inline ml-1">Export</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleScrapeJobs}
-              disabled={isScraping || isRefreshing}
-            >
-              <Search className={`h-4 w-4 ${isScraping ? "animate-pulse" : ""}`} />
-              <span className="hidden sm:inline ml-1">{isScraping ? "Scraping..." : "Jobs"}</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleEnrichWithAI}
-              disabled={isRefreshing || isScraping || isSurgeRunning}
-            >
-              <Wand2 className="h-4 w-4" />
-              <span className="hidden sm:inline ml-1">AI</span>
-            </Button>
-            <Button
-              variant="default"
               size="sm"
               onClick={handleRegionalSurge}
               disabled={isSurgeRunning || isRefreshing || isScraping}
-              className="bg-primary hover:bg-primary/90"
+              className="gap-1.5"
             >
-              <Zap className={`h-4 w-4 ${isSurgeRunning ? "animate-pulse" : ""}`} />
-              <span className="hidden sm:inline ml-1">{isSurgeRunning ? "Surging..." : "Surge"}</span>
+              {isSurgeRunning || isRefreshing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+              {isSurgeRunning ? "Fetching..." : "Fetch Signals"}
             </Button>
-            <Button size="sm" variant="outline" onClick={handleRefresh} disabled={isRefreshing || isScraping || isSurgeRunning}>
-              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline ml-1">Refresh</span>
-            </Button>
+            
+            {/* More Options Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={handleRefresh} disabled={isRefreshing || isScraping || isSurgeRunning}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+                  Quick Refresh
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleScrapeJobs} disabled={isScraping || isRefreshing}>
+                  <Search className="h-4 w-4 mr-2" />
+                  Scrape Job Pages
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleEnrichWithAI} disabled={isRefreshing || isScraping || isSurgeRunning}>
+                  <Wand2 className="h-4 w-4 mr-2" />
+                  AI Enrich Only
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleExportCSV} disabled={filteredSignals.length === 0}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -634,7 +652,7 @@ export default function SignalsDashboard() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>High Intent (Tier 1)</span>
-                  <span className="font-medium text-red-500">{tierCounts.tier_1 || 0}</span>
+                  <span className="font-medium text-destructive">{tierCounts.tier_1 || 0}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>This Region</span>
