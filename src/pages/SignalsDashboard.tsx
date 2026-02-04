@@ -10,7 +10,9 @@ import {
   Briefcase,
   Check,
   Search,
-  RotateCcw
+  RotateCcw,
+  Zap,
+  AlertCircle
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,6 +43,8 @@ import {
   exportSignalsToCSV,
   enrichSignalsWithAI,
   scrapeJobSignals,
+  runRegionalSurge,
+  submitSignalFeedback,
   Signal 
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
@@ -55,6 +59,7 @@ import { toast } from "sonner";
 
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
+type StatusFilter = "all" | "high" | "pending" | "validated";
 type SortOption = "score" | "newest" | "amount";
 
 const REGION_CONFIG = {
@@ -71,6 +76,13 @@ const TIER_FILTERS: { value: TierFilter; label: string }[] = [
   { value: "tier_3", label: "Tier 3 – Early" },
 ];
 
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "high", label: "HIGH >90" },
+  { value: "pending", label: "Pending" },
+  { value: "validated", label: "Validated" },
+];
+
 export default function SignalsDashboard() {
   const navigate = useNavigate();
   const profileName = useProfileName();
@@ -82,8 +94,10 @@ export default function SignalsDashboard() {
   const [isScraping, setIsScraping] = useState(false);
   const [activeRegion, setActiveRegion] = useState<Region>("london");
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("score");
   const [minScore, setMinScore] = useState<number>(0);
+  const [isSurgeRunning, setIsSurgeRunning] = useState(false);
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -252,6 +266,61 @@ export default function SignalsDashboard() {
       toast.error("Failed to enrich signals");
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Run the regional surge scraper v2.1
+  const handleRegionalSurge = async () => {
+    if (!profileName) return;
+    
+    setIsSurgeRunning(true);
+    toast.info(`Running Surge Scraper v2.1 for ${activeRegion.toUpperCase()}...`, { duration: 30000 });
+    
+    try {
+      const response = await runRegionalSurge(activeRegion);
+      if (response.success) {
+        const { validated, rejected, pending, byRegion } = response;
+        toast.success(
+          `Surge complete: ${validated} validated, ${pending} pending, ${rejected} rejected`,
+          { duration: 5000 }
+        );
+        await fetchSignals();
+      } else {
+        toast.error(response.error || "Surge scraper failed");
+      }
+    } catch (error) {
+      console.error("Regional surge error:", error);
+      toast.error("Failed to run surge scraper");
+    } finally {
+      setIsSurgeRunning(false);
+    }
+  };
+
+  // Handle feedback for pending signals
+  const handleSignalFeedback = async (signalId: string, action: 'APPROVE' | 'REJECT_NORDIC' | 'REJECT_WRONG_REGION') => {
+    if (!profileName) return;
+    
+    try {
+      const result = await submitSignalFeedback(signalId, action, profileName);
+      if (result.success) {
+        // Update local state
+        setSignals((prev) =>
+          prev.map((s) =>
+            s.id === signalId
+              ? { ...s, user_feedback: action, validated_region: action === 'APPROVE' ? s.region?.toUpperCase() : 'REJECTED' }
+              : s
+          )
+        );
+        
+        if (action === 'APPROVE') {
+          toast.success("Signal approved - region validated");
+        } else {
+          toast.success("Signal rejected - added to self-learning filter");
+        }
+      }
+    } catch (error) {
+      console.error("Feedback error:", error);
+      toast.error("Failed to submit feedback");
     }
   };
 
@@ -431,6 +500,15 @@ export default function SignalsDashboard() {
       filtered = filtered.filter((s) => s.tier === tierFilter);
     }
     
+    // Status filter
+    if (statusFilter === "high") {
+      filtered = filtered.filter((s) => (s.score || 0) >= 90);
+    } else if (statusFilter === "pending") {
+      filtered = filtered.filter((s) => !s.user_feedback && !s.validated_region);
+    } else if (statusFilter === "validated") {
+      filtered = filtered.filter((s) => s.validated_region && s.validated_region !== 'REJECTED');
+    }
+    
     if (minScore > 0) {
       filtered = filtered.filter((s) => (s.score || 0) >= minScore);
     }
@@ -449,7 +527,12 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, minScore, sortBy]);
+  }, [signals, activeRegion, tierFilter, statusFilter, minScore, sortBy]);
+
+  // Count pending signals for badge
+  const pendingCount = useMemo(() => {
+    return signals.filter(s => s.region === activeRegion && !s.user_feedback && !s.validated_region && !s.is_dismissed).length;
+  }, [signals, activeRegion]);
 
   if (!profileName) {
     return (
@@ -502,12 +585,22 @@ export default function SignalsDashboard() {
               variant="outline"
               size="sm"
               onClick={handleEnrichWithAI}
-              disabled={isRefreshing || isScraping}
+              disabled={isRefreshing || isScraping || isSurgeRunning}
             >
               <Wand2 className="h-4 w-4" />
               <span className="hidden sm:inline ml-1">AI</span>
             </Button>
-            <Button size="sm" onClick={handleRefresh} disabled={isRefreshing || isScraping}>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={handleRegionalSurge}
+              disabled={isSurgeRunning || isRefreshing || isScraping}
+              className="bg-primary hover:bg-primary/90"
+            >
+              <Zap className={`h-4 w-4 ${isSurgeRunning ? "animate-pulse" : ""}`} />
+              <span className="hidden sm:inline ml-1">{isSurgeRunning ? "Surging..." : "Surge"}</span>
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleRefresh} disabled={isRefreshing || isScraping || isSurgeRunning}>
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline ml-1">Refresh</span>
             </Button>
@@ -574,6 +667,27 @@ export default function SignalsDashboard() {
               {TIER_FILTERS.map((filter) => (
                 <SelectItem key={filter.value} value={filter.value}>
                   {filter.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Status Filter - NEW */}
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+            <SelectTrigger className="w-[130px] h-9">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent className="bg-background border">
+              {STATUS_FILTERS.map((filter) => (
+                <SelectItem key={filter.value} value={filter.value}>
+                  <div className="flex items-center gap-2">
+                    {filter.value === "pending" && pendingCount > 0 && (
+                      <Badge variant="destructive" className="h-5 px-1.5 text-xs">
+                        {pendingCount}
+                      </Badge>
+                    )}
+                    {filter.label}
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>

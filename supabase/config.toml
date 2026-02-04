@@ -62,3 +62,6 @@ verify_jwt = false
 
 [functions.retrain-signal]
 verify_jwt = false
+
+[functions.regional-surge]
+verify_jwt = false

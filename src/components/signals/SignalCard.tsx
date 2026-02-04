@@ -16,14 +16,19 @@ import {
   ChevronUp,
   Briefcase,
   Sparkles,
-  RotateCcw
+  RotateCcw,
+  Check,
+  AlertCircle,
+  XCircle
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Signal } from "@/lib/signalsApi";
+import { Signal, submitSignalFeedback } from "@/lib/signalsApi";
 import { formatDistanceToNow } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useProfileName } from "@/hooks/useProfileName";
 
 interface SignalCardProps {
   signal: Signal;
@@ -33,6 +38,7 @@ interface SignalCardProps {
   onRetrain?: (signal: Signal) => void;
   taSearchLoading: boolean;
   onSignalUpdated?: (signal: Signal) => void;
+  onFeedback?: (signalId: string, action: 'APPROVE' | 'REJECT_NORDIC' | 'REJECT_WRONG_REGION') => void;
 }
 
 const TIER_CONFIG = {
@@ -120,15 +126,23 @@ export const SignalCard = memo(function SignalCard({
   onRetrain,
   taSearchLoading,
   onSignalUpdated,
+  onFeedback,
 }: SignalCardProps) {
+  const profileName = useProfileName();
   const [showInsight, setShowInsight] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
   
   const tierConfig = TIER_CONFIG[signal.tier as keyof typeof TIER_CONFIG] || TIER_CONFIG.tier_2;
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-3.5 w-3.5" />;
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
   const sector = detectSector(signal);
   const sectorColor = sector ? SECTOR_COLORS[sector] : null;
+  
+  // Determine if signal needs validation
+  const isPending = !signal.user_feedback && !signal.validated_region;
+  const isValidated = signal.validated_region && signal.validated_region !== 'REJECTED';
+  const isRejected = signal.validated_region === 'REJECTED';
   
   // Extract location from details if available
   const location = (signal.details as Record<string, unknown>)?.location as string | undefined;
@@ -159,6 +173,35 @@ export const SignalCard = memo(function SignalCard({
       setEnriching(false);
     }
   };
+
+  const handleFeedback = async (action: 'APPROVE' | 'REJECT_NORDIC' | 'REJECT_WRONG_REGION') => {
+    if (!profileName) return;
+    
+    setFeedbackLoading(true);
+    try {
+      const result = await submitSignalFeedback(signal.id, action, profileName);
+      if (result.success) {
+        // Update local signal state
+        const updatedSignal = {
+          ...signal,
+          user_feedback: action,
+          validated_region: action === 'APPROVE' ? signal.region?.toUpperCase() : 'REJECTED',
+        };
+        if (onSignalUpdated) {
+          onSignalUpdated(updatedSignal);
+        }
+        if (onFeedback) {
+          onFeedback(signal.id, action);
+        }
+        toast.success(action === 'APPROVE' ? "Signal approved" : "Signal rejected - added to self-learning");
+      }
+    } catch (e) {
+      console.error("Feedback error:", e);
+      toast.error("Failed to submit feedback");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  };
   
   return (
     <Card className="group border-border/40 hover:border-primary/30 transition-all duration-200 hover:shadow-md overflow-hidden">
@@ -185,6 +228,19 @@ export const SignalCard = memo(function SignalCard({
               
               {/* Badge Row */}
               <div className="flex items-center gap-1.5 flex-wrap">
+                {/* Status Badge - Pending/Validated */}
+                {isPending && (
+                  <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400 text-xs">
+                    <AlertCircle className="h-3 w-3 mr-1" />
+                    Pending
+                  </Badge>
+                )}
+                {isValidated && (
+                  <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400 text-xs">
+                    <Check className="h-3 w-3 mr-1" />
+                    Validated
+                  </Badge>
+                )}
                 {sector && sectorColor && (
                   <Badge variant="secondary" className={`${sectorColor} border-0 text-xs font-medium`}>
                     {sector}
@@ -197,6 +253,12 @@ export const SignalCard = memo(function SignalCard({
                   <Badge variant="secondary" className="flex items-center gap-1 text-xs">
                     {signalIcon}
                     <span>{formatSignalType(signal.signal_type)}</span>
+                  </Badge>
+                )}
+                {/* AI Confidence */}
+                {signal.ai_confidence !== undefined && signal.ai_confidence > 0 && (
+                  <Badge variant="outline" className="text-xs text-muted-foreground">
+                    {signal.ai_confidence}% conf
                   </Badge>
                 )}
               </div>
@@ -291,6 +353,48 @@ export const SignalCard = memo(function SignalCard({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+          
+          {/* Pending Signal Action Row */}
+          {isPending && (
+            <div className="flex items-center gap-2 p-2 bg-orange-50 dark:bg-orange-900/10 rounded-lg border border-orange-200/50 dark:border-orange-800/30">
+              <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
+              <span className="text-xs text-orange-800 dark:text-orange-200 flex-1">
+                Pending validation – is this signal correctly classified for {signal.region?.toUpperCase()}?
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleFeedback('APPROVE')}
+                  disabled={feedbackLoading}
+                  className="h-7 text-xs bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
+                >
+                  {feedbackLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
+                  {signal.region?.toUpperCase()} ✓
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleFeedback('REJECT_NORDIC')}
+                  disabled={feedbackLoading}
+                  className="h-7 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
+                >
+                  <XCircle className="h-3 w-3 mr-1" />
+                  Nordic ✗
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleFeedback('REJECT_WRONG_REGION')}
+                  disabled={feedbackLoading}
+                  className="h-7 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
+                >
+                  <XCircle className="h-3 w-3 mr-1" />
+                  Wrong Region
+                </Button>
+              </div>
             </div>
           )}
           
