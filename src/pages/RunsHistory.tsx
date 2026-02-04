@@ -97,6 +97,7 @@ export default function RunsHistory() {
   
   // Skills review modal state
   const [skillsReviewRun, setSkillsReviewRun] = useState<EnrichmentRun | null>(null);
+  const [skillsReviewExcludedEmails, setSkillsReviewExcludedEmails] = useState<string[]>([]);
   const [pendingClassifiedContacts, setPendingClassifiedContacts] = useState<any[] | null>(null);
   
   const [bullhornOverlap, setBullhornOverlap] = useState<Record<string, BullhornOverlapData>>(() => {
@@ -140,10 +141,10 @@ export default function RunsHistory() {
   });
 
   const exportTooBullhornMutation = useMutation({
-    mutationFn: async ({ runId, classifiedContacts }: { runId: string; classifiedContacts?: any[] }) => {
+    mutationFn: async ({ runId, classifiedContacts, excludedEmails }: { runId: string; classifiedContacts?: any[]; excludedEmails?: string[] }) => {
       setExportingRunId(runId);
       const { data, error } = await supabase.functions.invoke('export-to-bullhorn', {
-        body: { runId, classifiedContacts }
+        body: { runId, classifiedContacts, excludedEmails }
       });
       if (error) throw error;
       if (!data.success) throw new Error(data.error);
@@ -173,17 +174,22 @@ export default function RunsHistory() {
   });
 
   // Handle opening skills review modal
-  const openSkillsReview = (run: EnrichmentRun) => {
+  const openSkillsReview = (run: EnrichmentRun, excludedEmails: string[] = []) => {
     setSkillsReviewRun(run);
+    setSkillsReviewExcludedEmails(excludedEmails);
   };
 
   // Handle confirming AI-classified skills and exporting
   const handleSkillsReviewConfirm = (classifiedContacts: any[]) => {
     if (!skillsReviewRun) return;
+    const runId = skillsReviewRun.id;
+    const excludedEmails = skillsReviewExcludedEmails;
     setSkillsReviewRun(null);
+    setSkillsReviewExcludedEmails([]);
     exportTooBullhornMutation.mutate({ 
-      runId: skillsReviewRun.id, 
-      classifiedContacts 
+      runId, 
+      classifiedContacts,
+      excludedEmails: excludedEmails.length > 0 ? excludedEmails : undefined
     });
   };
 
@@ -784,8 +790,9 @@ export default function RunsHistory() {
                   <Button
                     variant="outline"
                     onClick={() => {
+                      const excludedEmails = Array.from(removedContacts);
                       setSelectedRun(null);
-                      openSkillsReview(selectedRun);
+                      openSkillsReview(selectedRun, excludedEmails);
                     }}
                     disabled={getContactCount(selectedRun, removedContacts) === 0 || exportingRunId === selectedRun.id}
                     className="flex-1 text-purple-600 border-purple-300 hover:bg-purple-50"
@@ -805,7 +812,7 @@ export default function RunsHistory() {
                   ) : (
                     <Button
                       variant="outline"
-                      onClick={() => exportTooBullhornMutation.mutate({ runId: selectedRun.id })}
+                      onClick={() => exportTooBullhornMutation.mutate({ runId: selectedRun.id, excludedEmails: Array.from(removedContacts) })}
                       disabled={getContactCount(selectedRun, removedContacts) === 0 || exportingRunId === selectedRun.id}
                       className="flex-1"
                     >
