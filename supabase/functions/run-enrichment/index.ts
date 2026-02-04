@@ -665,7 +665,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { runId } = await req.json()
+    const { runId, bullhornEmails } = await req.json()
 
     console.log('Starting enrichment run:', runId)
 
@@ -743,6 +743,16 @@ Deno.serve(async (req) => {
     
     const usedEmails = new Set((recentlyUsedContacts || []).map(c => c.email.toLowerCase()))
     console.log(`Excluding ${usedEmails.size} contacts used in the last ${CONTACT_EXCLUSION_DAYS} days`)
+
+    // Add Bullhorn emails to exclusion set (pre-fetched from frontend)
+    // This ensures Apollo searches only return NEW contacts not already in Bullhorn
+    const bullhornExclusionSet = new Set<string>()
+    if (bullhornEmails && Array.isArray(bullhornEmails)) {
+      bullhornEmails.forEach((email: string) => {
+        if (email) bullhornExclusionSet.add(email.toLowerCase())
+      })
+      console.log(`Excluding ${bullhornExclusionSet.size} contacts already in Bullhorn CRM`)
+    }
 
     // Search for hiring contacts based on industries
     const allContacts: ApolloContact[] = []
@@ -1142,6 +1152,12 @@ Deno.serve(async (req) => {
               if (person.email) {
                 const emailLower = person.email.toLowerCase()
                 
+                // Check for Bullhorn CRM exclusion (find NEW contacts only)
+                if (bullhornExclusionSet.has(emailLower)) {
+                  console.log(`Skipping Bullhorn contact: ${personName} (${person.email})`)
+                  continue
+                }
+                
                 // Check for duplicates and recently used
                 if (usedEmails.has(emailLower)) {
                   console.log(`Skipping recently used contact: ${personName} (${person.email})`)
@@ -1279,8 +1295,13 @@ Deno.serve(async (req) => {
                       // Only add if we got an email and a valid name
                       if (email && fullName && fullName !== 'Unknown') {
                         const emailLower = email.toLowerCase()
+                        
+                        // Check if contact is already in Bullhorn
+                        if (bullhornExclusionSet.has(emailLower)) {
+                          console.log(`Skipping Bullhorn contact: ${fullName} (${email})`)
+                        }
                         // Check if this contact was recently used
-                        if (usedEmails.has(emailLower)) {
+                        else if (usedEmails.has(emailLower)) {
                           console.log(`Skipping recently used contact: ${fullName} (${email})`)
                         } else if (seenEmails.has(emailLower)) {
                           // Skip duplicates from other search combinations

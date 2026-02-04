@@ -724,13 +724,22 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { signalId, profileName } = await req.json()
+    const { signalId, profileName, bullhornEmails } = await req.json()
 
     console.log('Signal auto-search starting:', { signalId, profileName })
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
+
+    // Build Bullhorn exclusion set (pre-fetched from frontend)
+    const bullhornExclusionSet = new Set<string>()
+    if (bullhornEmails && Array.isArray(bullhornEmails)) {
+      bullhornEmails.forEach((email: string) => {
+        if (email) bullhornExclusionSet.add(email.toLowerCase())
+      })
+      console.log(`Excluding ${bullhornExclusionSet.size} contacts already in Bullhorn CRM`)
+    }
 
     // Fetch the signal
     const { data: signal, error: signalError } = await supabase
@@ -853,7 +862,8 @@ Deno.serve(async (req) => {
     const TARGET_MIN_CONTACTS = 10
     const MAX_PER_COMPANY = 10 // Allow more contacts per company for exhaustive search
     const allContacts: ApolloContact[] = []
-    const seenEmails = new Set<string>()
+    // Pre-populate seenEmails with Bullhorn contacts to exclude them from search results
+    const seenEmails = new Set<string>(bullhornExclusionSet)
     const seenPersonIds = new Set<string>()
     const categoriesTried: string[] = []
     const categoriesWithResults: string[] = []
