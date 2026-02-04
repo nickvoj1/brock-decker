@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 // Apollo API base URL
-const APOLLO_API_BASE = "https://api.apollo.io/v1";
+const APOLLO_API_BASE = "https://api.apollo.io/api/v1";
 
 // Company watchlist - curated PE/VC firms to poll for job postings via Apollo
 const COMPANY_WATCHLIST = [
@@ -487,15 +487,16 @@ async function fetchApolloJobSignals(
   supabase: any,
   region?: string
 ): Promise<{ jobsFound: number; jobsInserted: number; errors: string[] }> {
+  // Build company list from watchlist + signal companies
   const companies = [...COMPANY_WATCHLIST];
   
-  // Also add companies from recent signals
+  // Add companies from recent signals
   const { data: signalCompanies } = await supabase
     .from("signals")
     .select("company")
     .not("company", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(30);
+    .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+    .limit(50);
   
   if (signalCompanies) {
     const existingNames = new Set(companies.map(c => c.name.toLowerCase()));
@@ -510,7 +511,7 @@ async function fetchApolloJobSignals(
     }
   }
   
-  console.log(`[APOLLO] Polling ${companies.length} companies for TA activity...`);
+  console.log(`[APOLLO] Polling ${companies.length} companies for job postings...`);
   
   let jobsFound = 0;
   let jobsInserted = 0;
@@ -523,111 +524,227 @@ async function fetchApolloJobSignals(
     const batchResults = await Promise.allSettled(
       batch.map(async (company) => {
         try {
-          // Search for company organization in Apollo
-          const orgSearchRes = await fetch(`${APOLLO_API_BASE}/mixed_companies/search`, {
+          // Step 1: Search for people at this company using domain (more reliable)
+          // Using q_organization_domains like run-enrichment does
+          const searchParams = new URLSearchParams({
+            q_organization_domains: company.domain,
+            per_page: "5",
+            page: "1",
+          });
+          
+          const orgSearchRes = await fetch(`${APOLLO_API_BASE}/mixed_people/api_search?${searchParams.toString()}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              api_key: apolloApiKey,
-              q_organization_name: company.name,
-              page: 1,
-              per_page: 1,
-            }),
+            headers: { 
+              "Content-Type": "application/json",
+              "x-api-key": apolloApiKey,
+            },
           });
           
           if (!orgSearchRes.ok) {
+            const errText = await orgSearchRes.text();
+            console.log(`[APOLLO] Company search failed for ${company.name}: ${orgSearchRes.status} - ${errText.slice(0, 100)}`);
             return { company: company.name, jobs: 0 };
           }
           
           const orgData = await orgSearchRes.json();
-          const org = orgData.organizations?.[0] || orgData.accounts?.[0];
+          const people = orgData.people || [];
           
-          if (!org?.id) {
+          if (people.length === 0) {
+            console.log(`[APOLLO] No people found for ${company.name} (${company.domain})`);
             return { company: company.name, jobs: 0 };
           }
           
-          // Search for TA/HR people at this org
-          const peopleRes = await fetch(`${APOLLO_API_BASE}/mixed_people/search`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              api_key: apolloApiKey,
-              q_organization_ids: [org.id],
-              person_titles: ["Talent Acquisition", "Recruiter", "HR Director", "Head of People", "HR Business Partner"],
-              page: 1,
-              per_page: 5,
-            }),
+          // Get organization info from first person
+          const org = people[0]?.organization || { id: null, name: company.name, city: null, country: null, website_url: null };
+          console.log(`[APOLLO] Found ${people.length} people at ${company.name} (${org.id || 'no org id'})`);
+          
+          // Step 2: Create job signals from people found at the company
+          // Group by title to identify active positions
+          let jobPostings: any[] = [];
+          
+          // Group people by normalized title
+          const titleGroups = new Map<string, any[]>();
+          const targetTitles = ["associate", "senior associate", "vice president", "vp", "principal", "director", "managing director", "partner", "investment manager", "analyst", "investment analyst"];
+          
+          for (const person of people) {
+            const title = person.title || "";
+            const normalizedTitle = title.split(",")[0].trim();
+            const lowerTitle = normalizedTitle.toLowerCase();
+            
+            // Only group relevant PE/VC titles
+            const isRelevant = targetTitles.some(t => lowerTitle.includes(t));
+            if (isRelevant && normalizedTitle) {
+              if (!titleGroups.has(normalizedTitle)) {
+                titleGroups.set(normalizedTitle, []);
+              }
+              titleGroups.get(normalizedTitle)!.push(person);
+            }
+          }
+          
+          console.log(`[APOLLO] Found ${titleGroups.size} distinct role types at ${company.name}`);
+          
+          // Convert to job postings format
+          for (const [title, persons] of titleGroups) {
+            jobPostings.push({
+              title: title,
+              location: persons[0]?.city || org?.city || "Global",
+              description: `${company.name} has ${persons.length} ${title} professional(s). Active hiring potential.`,
+              url: org?.website_url || `https://${company.domain}/careers`,
+              contacts: persons.slice(0, 3).map((p: any) => ({
+                name: p.name || `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+                title: p.title,
+                email: p.email,
+                linkedin_url: p.linkedin_url,
+              })),
+            });
+          }
+          
+          // Step 3: Find TA contacts for the company using domain
+          const taParams = new URLSearchParams({
+            q_organization_domains: company.domain,
+            person_titles: "Talent Acquisition,Talent Partner,Recruiter,Senior Recruiter,Head of Talent,HR Director,Head of People,HR Business Partner,People Partner,Recruitment Manager,Talent Manager,HR Manager",
+            page: "1",
+            per_page: "5",
           });
           
-          if (!peopleRes.ok) {
-            return { company: company.name, jobs: 0 };
-          }
+          const taRes = await fetch(`${APOLLO_API_BASE}/mixed_people/api_search?${taParams.toString()}`, {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "x-api-key": apolloApiKey,
+            },
+          });
           
-          const peopleData = await peopleRes.json();
-          const recruiters = peopleData.people || [];
-          
-          if (recruiters.length === 0) {
-            return { company: company.name, jobs: 0 };
+          let taContacts: any[] = [];
+          if (taRes.ok) {
+            const taData = await taRes.json();
+            taContacts = (taData.people || []).slice(0, 3).map((r: any) => ({
+              name: r.name || `${r.first_name || ''} ${r.last_name || ''}`.trim(),
+              title: r.title || "Talent Acquisition",
+              email: r.email,
+              linkedin_url: r.linkedin_url,
+            }));
+            console.log(`[APOLLO] Found ${taContacts.length} TA contacts at ${company.name}`);
           }
           
           // Determine region from org location
           const detectedRegion = detectRegionFromLocation(org.city || org.country || "");
-          if (region && detectedRegion !== region) {
-            return { company: company.name, jobs: 0 };
+          
+          // Step 4: Create job signals for each posting
+          let companyJobsInserted = 0;
+          
+          if (jobPostings.length > 0) {
+            for (const job of jobPostings.slice(0, 5)) {
+              const jobLocation = job.location || org.city || org.country || "Global";
+              const jobRegion = detectRegionFromLocation(jobLocation) || detectedRegion;
+              
+              // Apply region filter more loosely - only skip if completely wrong region
+              if (region && jobRegion !== region) {
+                // Allow if target is europe and job is london (or vice versa)
+                const allowedCrossover = 
+                  (region === "europe" && jobRegion === "london") ||
+                  (region === "london" && jobRegion === "europe");
+                if (!allowedCrossover) {
+                  continue;
+                }
+              }
+              
+              const jobContacts = job.contacts || taContacts;
+              const score = 40 + Math.min(jobContacts.length * 10, 30) + (org.estimated_num_employees > 100 ? 15 : 5);
+              const tier = jobContacts.length >= 3 ? "tier_1" : jobContacts.length >= 1 ? "tier_2" : "tier_3";
+              
+              const { error: insertError } = await supabase
+                .from("job_signals")
+                .upsert({
+                  company: company.name,
+                  company_apollo_id: org.id,
+                  job_title: job.title || `Open Position at ${company.name}`,
+                  job_description: job.description || `${company.name} is actively hiring.`,
+                  job_url: job.url || org.website_url || `https://${company.domain}/careers`,
+                  location: jobLocation,
+                  region: jobRegion || region || "europe",
+                  posted_at: job.posted_at || new Date().toISOString(),
+                  contacts: jobContacts,
+                  contacts_count: jobContacts.length,
+                  score,
+                  tier,
+                  source: "apollo_jobs",
+                  signal_type: "hiring",
+                }, {
+                  onConflict: "company,job_title",
+                  ignoreDuplicates: false,
+                });
+              
+              if (!insertError) {
+                companyJobsInserted++;
+                jobsInserted++;
+              } else {
+                console.log(`[APOLLO] Insert error for ${company.name}/${job.title}: ${insertError.message}`);
+              }
+            }
+            
+            jobsFound += Math.min(jobPostings.length, 5);
+          } else if (taContacts.length > 0) {
+            // Fallback: Create a single "Active Hiring" signal if we found TA contacts but no specific jobs
+            const jobRegion = detectedRegion || region || "europe";
+            
+            // Apply region filter
+            if (region && jobRegion !== region) {
+              const allowedCrossover = 
+                (region === "europe" && jobRegion === "london") ||
+                (region === "london" && jobRegion === "europe");
+              if (!allowedCrossover) {
+                return { company: company.name, jobs: 0 };
+              }
+            }
+            
+            const { error: insertError } = await supabase
+              .from("job_signals")
+              .upsert({
+                company: company.name,
+                company_apollo_id: org.id,
+                job_title: `Active Hiring - ${company.name}`,
+                job_description: `${company.name} has ${taContacts.length} active TA professionals, indicating ongoing hiring activity.`,
+                job_url: org.website_url || `https://${company.domain}/careers`,
+                location: org.city || org.country || "Global",
+                region: jobRegion,
+                posted_at: new Date().toISOString(),
+                contacts: taContacts,
+                contacts_count: taContacts.length,
+                score: 40 + Math.min(taContacts.length * 10, 30) + (org.estimated_num_employees > 100 ? 15 : 5),
+                tier: taContacts.length >= 3 ? "tier_1" : taContacts.length >= 1 ? "tier_2" : "tier_3",
+                source: "apollo_jobs",
+                signal_type: "hiring",
+              }, {
+                onConflict: "company,job_title",
+                ignoreDuplicates: false,
+              });
+            
+            if (!insertError) {
+              companyJobsInserted++;
+              jobsInserted++;
+              jobsFound++;
+            }
           }
           
-          // Create job signal
-          const jobSignal: ApolloJobSignal = {
-            company: company.name,
-            company_apollo_id: org.id,
-            job_title: `Active Hiring - ${company.name}`,
-            job_description: `${company.name} has ${recruiters.length} active TA professionals, indicating ongoing hiring.`,
-            job_url: org.website_url || `https://${company.domain}/careers`,
-            location: org.city || org.country || "Global",
-            region: detectedRegion,
-            contacts: recruiters.slice(0, 3).map((r: any) => ({
-              name: r.name || `${r.first_name} ${r.last_name}`,
-              title: r.title || "Talent Acquisition",
-              email: r.email,
-              linkedin_url: r.linkedin_url,
-            })),
-            contacts_count: Math.min(recruiters.length, 3),
-            score: 40 + Math.min(recruiters.length * 10, 30) + (org.estimated_num_employees > 100 ? 15 : 5),
-            tier: recruiters.length >= 5 ? "tier_1" : recruiters.length >= 2 ? "tier_2" : "tier_3",
-          };
-          
-          jobsFound++;
-          
-          // Upsert to job_signals table
-          const { error: insertError } = await supabase
-            .from("job_signals")
-            .upsert({
-              ...jobSignal,
-              source: "apollo_jobs",
-              posted_at: new Date().toISOString(),
-            }, {
-              onConflict: "company,job_title,COALESCE(job_url, '')",
-              ignoreDuplicates: false,
-            });
-          
-          if (!insertError) {
-            jobsInserted++;
-          }
-          
-          return { company: company.name, jobs: 1 };
+          console.log(`[APOLLO] ${company.name}: ${companyJobsInserted} jobs inserted`);
+          return { company: company.name, jobs: companyJobsInserted };
         } catch (err) {
-          errors.push(`${company.name}: ${err instanceof Error ? err.message : "Unknown"}`);
+          const errMsg = `${company.name}: ${err instanceof Error ? err.message : "Unknown"}`;
+          console.error(`[APOLLO] Error: ${errMsg}`);
+          errors.push(errMsg);
           return { company: company.name, jobs: 0 };
         }
       })
     );
     
-    // Rate limiting
+    // Rate limiting - be more conservative with Apollo
     if (i + BATCH_SIZE < companies.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
   
+  console.log(`[APOLLO] Complete: ${jobsFound} found, ${jobsInserted} inserted`);
   return { jobsFound, jobsInserted, errors };
 }
 
