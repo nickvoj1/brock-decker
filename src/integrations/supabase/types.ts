@@ -282,6 +282,86 @@ export type Database = {
           },
         ]
       }
+      job_signals: {
+        Row: {
+          bullhorn_note_added: boolean | null
+          company: string
+          company_apollo_id: string | null
+          contacts: Json | null
+          contacts_count: number | null
+          created_at: string
+          dismissed_by: string | null
+          id: string
+          is_dismissed: boolean | null
+          job_description: string | null
+          job_title: string
+          job_url: string | null
+          location: string | null
+          parent_signal_id: string | null
+          posted_at: string | null
+          region: string
+          score: number | null
+          signal_type: string | null
+          source: string | null
+          tier: string | null
+          updated_at: string
+        }
+        Insert: {
+          bullhorn_note_added?: boolean | null
+          company: string
+          company_apollo_id?: string | null
+          contacts?: Json | null
+          contacts_count?: number | null
+          created_at?: string
+          dismissed_by?: string | null
+          id?: string
+          is_dismissed?: boolean | null
+          job_description?: string | null
+          job_title: string
+          job_url?: string | null
+          location?: string | null
+          parent_signal_id?: string | null
+          posted_at?: string | null
+          region: string
+          score?: number | null
+          signal_type?: string | null
+          source?: string | null
+          tier?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bullhorn_note_added?: boolean | null
+          company?: string
+          company_apollo_id?: string | null
+          contacts?: Json | null
+          contacts_count?: number | null
+          created_at?: string
+          dismissed_by?: string | null
+          id?: string
+          is_dismissed?: boolean | null
+          job_description?: string | null
+          job_title?: string
+          job_url?: string | null
+          location?: string | null
+          parent_signal_id?: string | null
+          posted_at?: string | null
+          region?: string
+          score?: number | null
+          signal_type?: string | null
+          source?: string | null
+          tier?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_signals_parent_signal_id_fkey"
+            columns: ["parent_signal_id"]
+            isOneToOne: false
+            referencedRelation: "signals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pitch_templates: {
         Row: {
           body_template: string

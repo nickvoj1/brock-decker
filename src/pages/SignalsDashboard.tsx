@@ -54,7 +54,10 @@ import {
   scrapeJobSignals,
   runRegionalSurge,
   submitSignalFeedback,
-  Signal 
+  getJobSignals,
+  dismissJobSignal,
+  Signal,
+  JobSignal 
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
 import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
@@ -63,12 +66,14 @@ import { SignalsTierChart } from "@/components/signals/SignalsTierChart";
 import { SignalsRegionMap } from "@/components/signals/SignalsRegionMap";
 import { SignalAccuracyChart } from "@/components/signals/SignalAccuracyChart";
 import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
+import { JobSignalCard } from "@/components/signals/JobSignalCard";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
 type SortOption = "newest" | "relevant" | "amount";
+type TabView = "signals" | "jobs";
 
 const REGION_CONFIG = {
   london: { label: "London", emoji: "🇬🇧", description: "City, Mayfair, Canary Wharf" },
@@ -94,6 +99,7 @@ export default function SignalsDashboard() {
   const navigate = useNavigate();
   const profileName = useProfileName();
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [jobSignals, setJobSignals] = useState<JobSignal[]>([]);
   const [regionCounts, setRegionCounts] = useState<Record<string, number>>({});
   const [tierCounts, setTierCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -104,6 +110,8 @@ export default function SignalsDashboard() {
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [minScore, setMinScore] = useState<number>(0);
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabView>("signals");
+  const [isJobsLoading, setIsJobsLoading] = useState(false);
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -128,10 +136,18 @@ export default function SignalsDashboard() {
   useEffect(() => {
     if (profileName) {
       fetchSignals();
+      fetchJobSignals();
       setupRealtimeSubscription();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileName]);
+  
+  // Fetch job signals when region changes
+  useEffect(() => {
+    if (activeTab === "jobs" && profileName) {
+      fetchJobSignals();
+    }
+  }, [activeRegion, activeTab, profileName]);
 
   const setupRealtimeSubscription = useCallback(() => {
     const channel = supabase
@@ -193,6 +209,22 @@ export default function SignalsDashboard() {
       toast.error("Failed to load signals");
     } finally {
       setIsLoading(false);
+    }
+  };
+  
+  const fetchJobSignals = async () => {
+    if (!profileName) return;
+    
+    setIsJobsLoading(true);
+    try {
+      const response = await getJobSignals(activeRegion);
+      if (response.success && response.data) {
+        setJobSignals(response.data);
+      }
+    } catch (error) {
+      console.error("Error fetching job signals:", error);
+    } finally {
+      setIsJobsLoading(false);
     }
   };
 
@@ -679,100 +711,183 @@ export default function SignalsDashboard() {
           </Card>
         </div>
 
-        {/* Filters Row - Simplified */}
-        <div className="flex flex-wrap items-center gap-3 py-2 px-1">
-          <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
-            <SelectTrigger className="w-[160px] h-9">
-              <SelectValue placeholder="Tier" />
-            </SelectTrigger>
-            <SelectContent className="bg-background border">
-              {TIER_FILTERS.map((filter) => (
-                <SelectItem key={filter.value} value={filter.value}>
-                  {filter.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Tabs: Signals vs Jobs */}
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
+          <TabsList className="grid w-full max-w-xs grid-cols-2">
+            <TabsTrigger value="signals" className="gap-1.5">
+              <Sparkles className="h-4 w-4" />
+              Signals
+            </TabsTrigger>
+            <TabsTrigger value="jobs" className="gap-1.5">
+              <Briefcase className="h-4 w-4" />
+              Jobs ({jobSignals.length})
+            </TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="signals" className="mt-4 space-y-4">
+            {/* Filters Row - Signals */}
+            <div className="flex flex-wrap items-center gap-3 py-2 px-1">
+              <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
+                <SelectTrigger className="w-[160px] h-9">
+                  <SelectValue placeholder="Tier" />
+                </SelectTrigger>
+                <SelectContent className="bg-background border">
+                  {TIER_FILTERS.map((filter) => (
+                    <SelectItem key={filter.value} value={filter.value}>
+                      {filter.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-          <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-            <SelectTrigger className="w-[140px] h-9">
-              <SelectValue placeholder="Sort" />
-            </SelectTrigger>
-            <SelectContent className="bg-background border">
-              {SORT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+                <SelectTrigger className="w-[140px] h-9">
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent className="bg-background border">
+                  {SORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5">
-            <span className="text-xs text-muted-foreground">
-              Score ≥ {minScore}
-            </span>
-            <Slider
-              value={[minScore]}
-              onValueChange={(v) => setMinScore(v[0])}
-              max={100}
-              step={10}
-              className="w-20"
-            />
-          </div>
-
-          <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
-            <Filter className="h-3 w-3" />
-            {filteredSignals.length} results
-          </span>
-        </div>
-
-        {/* Signal List */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : filteredSignals.length === 0 ? (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                <Sparkles className="h-6 w-6 text-muted-foreground" />
+              <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5">
+                <span className="text-xs text-muted-foreground">
+                  Score ≥ {minScore}
+                </span>
+                <Slider
+                  value={[minScore]}
+                  onValueChange={(v) => setMinScore(v[0])}
+                  max={100}
+                  step={10}
+                  className="w-20"
+                />
               </div>
-              <h3 className="text-lg font-medium mb-1">No signals in {REGION_CONFIG[activeRegion].label}</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Fetch new signals or adjust your filters
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={handleScrapeJobs} disabled={isScraping}>
-                  <Search className="h-4 w-4 mr-1" />
-                  Scrape Jobs
-                </Button>
-                <Button onClick={handleRefresh} disabled={isRefreshing}>
-                  <RefreshCw className="h-4 w-4 mr-1" />
-                  Fetch News
-                </Button>
+
+              <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
+                <Filter className="h-3 w-3" />
+                {filteredSignals.length} results
+              </span>
+            </div>
+
+            {/* Signal List */}
+            {isLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {filteredSignals.map((signal) => (
-              <SignalCard
-                key={signal.id}
-                signal={signal}
-                onDismiss={handleDismiss}
-                onTAContacts={handleTAContacts}
-                onCVMatches={handleCVMatches}
-                onRetrain={handleRetrain}
-                taSearchLoading={taSearchLoading[signal.id] || false}
-                onSignalUpdated={(updated) => {
-                  setSignals((prev) =>
-                    prev.map((s) => (s.id === updated.id ? updated : s))
-                  );
+            ) : filteredSignals.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="flex flex-col items-center justify-center py-16">
+                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                    <Sparkles className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-medium mb-1">No signals in {REGION_CONFIG[activeRegion].label}</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Fetch new signals or adjust your filters
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={handleScrapeJobs} disabled={isScraping}>
+                      <Search className="h-4 w-4 mr-1" />
+                      Scrape Jobs
+                    </Button>
+                    <Button onClick={handleRefresh} disabled={isRefreshing}>
+                      <RefreshCw className="h-4 w-4 mr-1" />
+                      Fetch News
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {filteredSignals.map((signal) => (
+                  <SignalCard
+                    key={signal.id}
+                    signal={signal}
+                    onDismiss={handleDismiss}
+                    onTAContacts={handleTAContacts}
+                    onCVMatches={handleCVMatches}
+                    onRetrain={handleRetrain}
+                    taSearchLoading={taSearchLoading[signal.id] || false}
+                    onSignalUpdated={(updated) => {
+                      setSignals((prev) =>
+                        prev.map((s) => (s.id === updated.id ? updated : s))
+                      );
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+          
+          {/* Jobs Tab */}
+          <TabsContent value="jobs" className="mt-4 space-y-4">
+            <div className="flex items-center justify-between py-2">
+              <span className="text-sm text-muted-foreground">
+                {jobSignals.length} job signals in {REGION_CONFIG[activeRegion].label}
+              </span>
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={async () => {
+                  setIsJobsLoading(true);
+                  toast.info("Fetching job signals via Apollo...");
+                  const result = await scrapeJobSignals(activeRegion, "apollo");
+                  if (result.success) {
+                    toast.success(`Found ${result.apolloJobsInserted || 0} new job signals`);
+                    await fetchJobSignals();
+                  } else {
+                    toast.error(result.error || "Failed to fetch jobs");
+                  }
+                  setIsJobsLoading(false);
                 }}
-              />
-            ))}
-          </div>
-        )}
+                disabled={isJobsLoading}
+              >
+                {isJobsLoading ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                )}
+                Fetch Jobs
+              </Button>
+            </div>
+            
+            {isJobsLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : jobSignals.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="flex flex-col items-center justify-center py-16">
+                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
+                    <Briefcase className="h-6 w-6 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-medium mb-1">No job signals yet</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Fetch job postings from PE/VC companies
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {jobSignals.map((job) => (
+                  <JobSignalCard 
+                    key={job.id} 
+                    job={job} 
+                    onDismiss={async (id) => {
+                      const result = await dismissJobSignal(id, profileName || "");
+                      if (result.success) {
+                        setJobSignals(prev => prev.filter(j => j.id !== id));
+                        toast.success("Job signal dismissed");
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* CV Matches Modal */}
