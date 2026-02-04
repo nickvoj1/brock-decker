@@ -15,7 +15,7 @@ const FT_COOKIES = {
 
 const REGION_COOKIES: Record<string, string> = {
   london: "GB",
-  europe: "GB",  // Default to GB, content will determine Europe
+  europe: "GB",
   uae: "AE",
   usa: "US",
 };
@@ -53,6 +53,7 @@ const RSS_SOURCES = [
   { url: "https://www.altassets.net/feed", source: "AltAssets", region: "london" },
   { url: "https://gulfbusiness.com/feed/", source: "Gulf Business", region: "uae" },
   { url: "https://www.arabianbusiness.com/feed/", source: "Arabian Business", region: "uae" },
+  { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire UK", region: "london" },
 ];
 
 // FT Deep Search Queries by Region
@@ -102,6 +103,63 @@ const EXCLUDED_TOPICS = [
 ];
 
 // ============================================================================
+// QUALITY VALIDATION - Strict checks for useful signals
+// ============================================================================
+const QUALITY_ACTION_WORDS = [
+  "acquires", "acquired", "acquisition", "buy", "bought", "buyout",
+  "sell", "sold", "sells", "sale", "exit", "exits",
+  "raises", "raised", "close", "closes", "closed", "fund",
+  "invest", "invests", "invested", "investment", "backs", "backed",
+  "merger", "merges", "deal", "appoints", "hires", "names",
+  "expands", "expansion", "opens", "launch", "launches",
+  "spin-out", "spinout", "spin-off", "spinoff", "ipo",
+  "completes", "announces", "secures", "leads", "joins",
+];
+
+function isQualitySignal(title: string, description: string | undefined, url: string | undefined): {
+  isQuality: boolean;
+  reason: string;
+} {
+  // 1. URL is mandatory
+  if (!url || !url.startsWith("http")) {
+    return { isQuality: false, reason: "Missing valid URL" };
+  }
+
+  // 2. Title must be meaningful (not just "Company - Source" format)
+  const titleParts = title.split(" - ");
+  if (titleParts.length === 2 && titleParts[0].split(" ").length <= 2 && titleParts[1].split(" ").length <= 3) {
+    return { isQuality: false, reason: "Title is just 'Company - Source' without context" };
+  }
+
+  // 3. Title must contain at least one action word
+  const lowerTitle = title.toLowerCase();
+  const hasActionWord = QUALITY_ACTION_WORDS.some(word => lowerTitle.includes(word));
+  
+  // Check description as fallback
+  const lowerDesc = (description || "").toLowerCase();
+  const hasActionInDesc = QUALITY_ACTION_WORDS.some(word => lowerDesc.includes(word));
+
+  if (!hasActionWord && !hasActionInDesc) {
+    return { isQuality: false, reason: "No actionable context (missing deal/fund/hire keywords)" };
+  }
+
+  // 4. Title must be at least 25 chars for meaningful context
+  if (title.length < 25) {
+    return { isQuality: false, reason: "Title too short for meaningful context" };
+  }
+
+  // 5. Description should exist and be meaningful (at least 40 chars)
+  if (!description || description.length < 40) {
+    // Allow if title is very descriptive (50+ chars with action word)
+    if (title.length < 50 || !hasActionWord) {
+      return { isQuality: false, reason: "Missing description and title not detailed enough" };
+    }
+  }
+
+  return { isQuality: true, reason: "Passed quality checks" };
+}
+
+// ============================================================================
 // SIGNAL TYPE MAPPING - Map to valid DB values
 // ============================================================================
 function mapToValidSignalType(type: string): string {
@@ -131,7 +189,6 @@ async function scrapeWithFirecrawl(
   regionCookie: string
 ): Promise<{ markdown: string; title: string; url: string } | null> {
   try {
-    // Build cookie string for FT
     const cookieString = Object.entries({
       ...FT_COOKIES,
       region: regionCookie
@@ -175,8 +232,6 @@ async function firecrawlDeepSearch(
   firecrawlApiKey: string,
   region: string
 ): Promise<any[]> {
-  const regionCookie = REGION_COOKIES[region] || "GB";
-  
   try {
     const response = await fetch("https://api.firecrawl.dev/v1/search", {
       method: "POST",
@@ -185,7 +240,7 @@ async function firecrawlDeepSearch(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        query: `${query} site:ft.com OR site:pehub.com OR site:pitchbook.com`,
+        query: `${query} site:ft.com OR site:pehub.com OR site:pitchbook.com OR site:privateequitywire.co.uk`,
         limit: 25,
         scrapeOptions: {
           formats: ["markdown"],
@@ -252,9 +307,19 @@ async function fetchRSSFeed(feedUrl: string, source: string, region: string): Pr
       const isExcluded = EXCLUDED_TOPICS.some(topic => fullText.includes(topic));
       
       if (isPERelevant && !isExcluded) {
+        const cleanTitle = cleanHtml(title);
+        const cleanDesc = cleanHtml(description).substring(0, 500);
+        
+        // Apply quality check at RSS level too
+        const quality = isQualitySignal(cleanTitle, cleanDesc, link);
+        if (!quality.isQuality) {
+          console.log(`RSS quality skip (${source}): ${quality.reason} - "${cleanTitle.substring(0, 50)}"`);
+          continue;
+        }
+        
         items.push({
-          title: cleanHtml(title),
-          description: cleanHtml(description).substring(0, 500),
+          title: cleanTitle,
+          description: cleanDesc,
           url: link,
           source,
           region,
@@ -263,7 +328,7 @@ async function fetchRSSFeed(feedUrl: string, source: string, region: string): Pr
       }
     }
     
-    console.log(`RSS ${source}: Found ${items.length} relevant PE signals`);
+    console.log(`RSS ${source}: Found ${items.length} quality PE signals`);
   } catch (error) {
     console.error(`RSS error for ${source}:`, error);
   }
@@ -316,11 +381,22 @@ ${JSON.stringify(TIER_TAXONOMY, null, 2)}
 TRAINING FEEDBACK (learn from these user corrections):
 ${feedbackContext || "No feedback yet - use default classification rules."}
 
+QUALITY RULES - IMPORTANT:
+- Score 8-10: Clear deal/fund action with amount (e.g. "CVC to sell FineToday to Bain Capital for $1.29bn")
+- Score 6-7: Clear deal/fund action without amount (e.g. "EQT backs healthcare platform expansion")
+- Score 4-5: General hiring/office news with PE context
+- Score 1-3: Vague or non-actionable (e.g. "Permira updates website", general market commentary)
+
+REJECT (score 1-2) if:
+- Just a company name with source (e.g. "Permira - FT Private Equity")
+- Generic industry news without specific company action
+- No clear hiring/deal/investment trigger
+
 Your task:
 1. Classify the signal into tier_1, tier_2, or tier_3
 2. Assign a signal_type from the tier's types list
 3. Rate your confidence 0-100
-4. Score RELEVANCE 1-10 based on PE/FO hiring value (10 = €500M fund close, 1 = general news)
+4. Score RELEVANCE 1-10 based on PE/FO hiring value
 5. Generate a 1-sentence insight explaining WHY this is a hiring signal
 6. Generate a 1-sentence TA pitch for reaching out
 
@@ -348,9 +424,11 @@ Respond ONLY with valid JSON:
           { role: "user", content: `Classify this PE/FO signal:
 Title: ${signal.title}
 Description: ${signal.description}
-Source: ${signal.source}` }
+Source: ${signal.source}
+
+Be STRICT - if this lacks actionable deal/hire context, score it LOW (1-3).` }
         ],
-        temperature: 0.3,
+        temperature: 0.2,
       }),
     });
 
@@ -391,15 +469,21 @@ function ruleBasedClassify(signal: { title: string; description: string }): {
 } {
   const text = `${signal.title} ${signal.description}`.toLowerCase();
   
-  // Tier 1 - Fund closes, acquisitions
-  if (text.includes("closes fund") || text.includes("final close") || /€\d+|£\d+|\$\d+/.test(text)) {
-    return { tier: "tier_1", signalType: "funding", confidence: 80, relevanceScore: 9, insight: "Fund close indicates immediate team buildout", pitch: "Reach out about portfolio hiring needs" };
+  // Detect amounts for higher scoring
+  const hasAmount = /€\d+|£\d+|\$\d+|\d+\s*(million|billion|m\b|bn\b)/i.test(text);
+  
+  // Tier 1 - Fund closes, acquisitions with clear context
+  if ((text.includes("closes fund") || text.includes("final close") || text.includes("raises")) && hasAmount) {
+    return { tier: "tier_1", signalType: "funding", confidence: 85, relevanceScore: 9, insight: "Fund close with disclosed amount indicates immediate team buildout", pitch: "Reach out about portfolio hiring needs" };
+  }
+  if ((text.includes("acquires") || text.includes("acquisition") || text.includes("buyout") || text.includes("sell") || text.includes("sale")) && hasAmount) {
+    return { tier: "tier_1", signalType: "expansion", confidence: 80, relevanceScore: 9, insight: "Major transaction creates integration and expansion roles", pitch: "Discuss post-deal integration talent" };
   }
   if (text.includes("acquires") || text.includes("acquisition") || text.includes("buyout")) {
-    return { tier: "tier_1", signalType: "expansion", confidence: 75, relevanceScore: 8, insight: "Acquisition creates integration roles", pitch: "Discuss post-merger integration talent" };
+    return { tier: "tier_1", signalType: "expansion", confidence: 70, relevanceScore: 7, insight: "Acquisition creates integration roles", pitch: "Discuss post-merger integration talent" };
   }
-  if (text.includes("new ceo") || text.includes("new cfo") || text.includes("appoints")) {
-    return { tier: "tier_1", signalType: "c_suite", confidence: 80, relevanceScore: 8, insight: "C-suite change drives team restructuring", pitch: "Connect about building new leadership team" };
+  if (text.includes("new ceo") || text.includes("new cfo") || text.includes("appoints") || text.includes("names")) {
+    return { tier: "tier_1", signalType: "c_suite", confidence: 75, relevanceScore: 7, insight: "C-suite change drives team restructuring", pitch: "Connect about building new leadership team" };
   }
   
   // Tier 2 - Office expansion, departures
@@ -409,9 +493,17 @@ function ruleBasedClassify(signal: { title: string; description: string }): {
   if (text.includes("departs") || text.includes("leaves") || text.includes("exits")) {
     return { tier: "tier_2", signalType: "c_suite", confidence: 55, relevanceScore: 6, insight: "Senior departure creates backfill need", pitch: "Present replacement candidates" };
   }
+  if (text.includes("backs") || text.includes("invests") || text.includes("investment")) {
+    return { tier: "tier_2", signalType: "funding", confidence: 60, relevanceScore: 6, insight: "Investment activity signals growth", pitch: "Discuss talent for portfolio growth" };
+  }
   
-  // Tier 3 - General
-  return { tier: "tier_3", signalType: "expansion", confidence: 40, relevanceScore: 4, insight: "General market activity", pitch: "Monitor for stronger signals" };
+  // Tier 3 - General (but only if has some context)
+  if (QUALITY_ACTION_WORDS.some(w => text.includes(w))) {
+    return { tier: "tier_3", signalType: "expansion", confidence: 45, relevanceScore: 5, insight: "General market activity worth monitoring", pitch: "Monitor for stronger signals" };
+  }
+  
+  // Very low score for vague signals
+  return { tier: "tier_3", signalType: "expansion", confidence: 20, relevanceScore: 2, insight: "Vague signal - needs verification", pitch: "Low priority" };
 }
 
 // ============================================================================
@@ -419,7 +511,7 @@ function ruleBasedClassify(signal: { title: string; description: string }): {
 // ============================================================================
 function extractCompany(text: string): string {
   const patterns = [
-    /([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:closes|acquires|announces|launches|raises|completes)/i,
+    /([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:closes|acquires|announces|launches|raises|completes|to\s+sell|to\s+buy)/i,
     /([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:Partners|Capital|Group|Ventures|Equity|Holdings|Fund|Advisors)/i,
     /^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:to|has|is|announces|completes)/i,
   ];
@@ -454,7 +546,7 @@ Deno.serve(async (req) => {
 
     const regions = targetRegion ? [targetRegion] : ["london", "europe", "uae", "usa"];
     const allSignals: any[] = [];
-    const stats = { rss: 0, firecrawl: 0, classified: 0, inserted: 0, skipped: 0 };
+    const stats = { rss: 0, firecrawl: 0, classified: 0, inserted: 0, skipped: 0, qualityRejected: 0 };
 
     // Fetch feedback for RAG context
     const { data: feedbackData } = await supabase
@@ -483,12 +575,21 @@ Deno.serve(async (req) => {
       // 2. Firecrawl Deep Search with FT cookies
       if (includeFirecrawl && firecrawlApiKey) {
         const queries = FT_SEARCH_QUERIES[r as keyof typeof FT_SEARCH_QUERIES] || [];
-        for (const query of queries.slice(0, 4)) { // Limit to 4 queries per region
+        for (const query of queries.slice(0, 4)) {
           const results = await firecrawlDeepSearch(query, firecrawlApiKey, r);
           
-          // Filter for valid URLs and PE relevance
+          // Filter for valid URLs and PE relevance with quality check
           const validResults = results.filter(res => {
             if (!res.url || !res.url.startsWith("http")) return false;
+            
+            // Apply quality check
+            const quality = isQualitySignal(res.title, res.description, res.url);
+            if (!quality.isQuality) {
+              console.log(`Firecrawl quality skip: ${quality.reason} - "${res.title?.substring(0, 50)}"`);
+              stats.qualityRejected++;
+              return false;
+            }
+            
             const fullText = `${res.title} ${res.description}`.toLowerCase();
             const isPERelevant = PE_FILTER_KEYWORDS.some(kw => fullText.includes(kw));
             const isExcluded = EXCLUDED_TOPICS.some(topic => fullText.includes(topic));
@@ -515,10 +616,18 @@ Deno.serve(async (req) => {
     console.log(`Unique signals after dedup: ${uniqueSignals.length}`);
 
     // Classify and insert signals
-    for (const signal of uniqueSignals.slice(0, 100)) { // Limit for performance
+    for (const signal of uniqueSignals.slice(0, 100)) {
       // STRICT: Skip signals without valid URL
       if (!signal.url || !signal.url.startsWith("http")) {
         stats.skipped++;
+        continue;
+      }
+
+      // Final quality gate before classification
+      const finalQuality = isQualitySignal(signal.title, signal.description, signal.url);
+      if (!finalQuality.isQuality) {
+        console.log(`Final quality skip: ${finalQuality.reason} - "${signal.title?.substring(0, 50)}"`);
+        stats.qualityRejected++;
         continue;
       }
 
@@ -557,7 +666,7 @@ Deno.serve(async (req) => {
         ai_confidence: classification.confidence,
         ai_insight: classification.insight,
         ai_pitch: classification.pitch,
-        score: classification.relevanceScore * 10, // Scale 1-10 to 10-100
+        score: classification.relevanceScore * 10,
         published_at: signal.published_at || new Date().toISOString(),
       };
 
@@ -581,14 +690,14 @@ Deno.serve(async (req) => {
           date: today,
           region: r,
           total_signals: stats.inserted,
-          accuracy_percentage: 75, // Default
+          accuracy_percentage: 75,
         }, { onConflict: "date,region" });
     }
 
     const summary = {
       success: true,
       stats,
-      message: `FT Multi-Region PE Scraper: RSS=${stats.rss}, Firecrawl=${stats.firecrawl}, Classified=${stats.classified}, Inserted=${stats.inserted}, Skipped=${stats.skipped}`,
+      message: `FT Multi-Region PE Scraper v2.2: RSS=${stats.rss}, Firecrawl=${stats.firecrawl}, Quality Rejected=${stats.qualityRejected}, Classified=${stats.classified}, Inserted=${stats.inserted}, Skipped=${stats.skipped}`,
     };
 
     console.log("\n========== SCRAPE COMPLETE ==========");
