@@ -19,9 +19,6 @@
        throw new Error('RAPIDAPI_KEY is not configured');
      }
  
-     const url = new URL(req.url);
-     const action = url.searchParams.get('action') || 'search';
- 
      // Parse request body for POST requests
      let body: Record<string, unknown> = {};
      if (req.method === 'POST') {
@@ -32,49 +29,55 @@
        }
      }
  
+    const url = new URL(req.url);
+    
+    // Determine which endpoint to use based on date filter
+    const postedAfter = body.posted_after as string || url.searchParams.get('posted_after') || '7days';
+    let endpoint = '/active-jobs-db-7-days';
+    if (postedAfter === '24hours' || postedAfter === '24h') {
+      endpoint = '/active-jobs-db-24h';
+    }
+    
      // Build query parameters for the API
      const queryParams = new URLSearchParams();
  
-     // Keywords - default to PE/VC related
+    // Title filter - use title_filter parameter per API docs
      const keyword = body.keyword as string || url.searchParams.get('keyword') || '';
      if (keyword) {
-       queryParams.set('keyword', keyword);
+      queryParams.set('title_filter', keyword);
      }
  
-     // Location filter
+    // Location filter - use location_filter per API docs
      const location = body.location as string || url.searchParams.get('location') || '';
      if (location) {
-       queryParams.set('location', location);
+      queryParams.set('location_filter', location);
      }
  
-     // Salary minimum
+    // Salary minimum - use salary_min per API docs
      const salaryMin = body.salary_min as string || url.searchParams.get('salary_min') || '';
      if (salaryMin) {
        queryParams.set('salary_min', salaryMin);
      }
  
-     // Remote filter
+    // Remote filter - set to 'true' for remote only
      const remote = body.remote as string || url.searchParams.get('remote') || '';
      if (remote === 'true') {
        queryParams.set('remote', 'true');
      }
  
-     // Posted after filter (e.g., "7days", "24hours", "30days")
-     const postedAfter = body.posted_after as string || url.searchParams.get('posted_after') || '';
-     if (postedAfter) {
-       queryParams.set('posted_after', postedAfter);
-     }
- 
-     // Page/limit for pagination
-     const page = body.page as string || url.searchParams.get('page') || '1';
+    // Limit and offset for pagination (API returns max 100 per request)
      const limit = body.limit as string || url.searchParams.get('limit') || '50';
-     queryParams.set('page', page);
      queryParams.set('limit', limit);
+    
+    const offset = body.offset as string || url.searchParams.get('offset') || '0';
+    if (parseInt(offset) > 0) {
+      queryParams.set('offset', offset);
+    }
  
-     console.log(`[fantastic-jobs] Fetching jobs with params:`, Object.fromEntries(queryParams));
+    console.log(`[fantastic-jobs] Fetching jobs from ${endpoint} with params:`, Object.fromEntries(queryParams));
  
      // Call the fantastic.jobs API
-     const apiUrl = `${BASE_URL}/active-jobs?${queryParams.toString()}`;
+    const apiUrl = `${BASE_URL}${endpoint}?${queryParams.toString()}`;
      console.log(`[fantastic-jobs] API URL: ${apiUrl}`);
  
      const response = await fetch(apiUrl, {
@@ -92,7 +95,7 @@
      }
  
      const data = await response.json();
-     console.log(`[fantastic-jobs] Received ${Array.isArray(data) ? data.length : 'unknown'} jobs`);
+    console.log(`[fantastic-jobs] Received ${Array.isArray(data) ? data.length : (data.jobs?.length || 'unknown')} jobs`);
  
      // Normalize the response to a consistent format
      const jobs = Array.isArray(data) ? data : (data.jobs || data.results || []);
@@ -100,18 +103,18 @@
      // Map jobs to our expected format
      const normalizedJobs = jobs.map((job: Record<string, unknown>, index: number) => ({
        id: job.id || job.job_id || `job-${index}`,
-       title: job.title || job.job_title || 'Untitled Position',
-       company: job.company || job.company_name || job.employer || 'Unknown Company',
+      title: job.title || job.job_title || job.name || 'Untitled Position',
+      company: job.company || job.company_name || job.employer || job.organization || 'Unknown Company',
        location: job.location || job.city || job.country || 'Remote',
        salary: job.salary || job.salary_range || job.compensation || null,
        salary_min: job.salary_min || job.min_salary || null,
        salary_max: job.salary_max || job.max_salary || null,
        currency: job.currency || job.salary_currency || 'EUR',
-       posted_at: job.posted_at || job.date_posted || job.created_at || new Date().toISOString(),
-       apply_url: job.apply_url || job.url || job.application_url || job.link || null,
-       description: job.description || job.job_description || '',
+      posted_at: job.date_posted || job.posted_at || job.created_at || job.date || new Date().toISOString(),
+      apply_url: job.url || job.apply_url || job.application_url || job.link || job.final_url || null,
+      description: job.description || job.job_description || job.text_description || '',
        remote: job.remote || job.is_remote || false,
-       job_type: job.job_type || job.employment_type || 'Full-time',
+      job_type: job.job_type || job.employment_type || job.type || 'Full-time',
        source: 'fantastic.jobs',
      }));
  
@@ -119,7 +122,7 @@
        success: true,
        jobs: normalizedJobs,
        total: normalizedJobs.length,
-       page: parseInt(page),
+      offset: parseInt(offset),
        limit: parseInt(limit),
      }), {
        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
