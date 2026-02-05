@@ -5,9 +5,11 @@
    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
  };
  
-// User's subscribed API host (custom application)
-const RAPIDAPI_HOST = 'fantastic-jobs-default-application-11540375.p.rapidapi.com';
-const BASE_URL = `https://${RAPIDAPI_HOST}`;
+// RapidAPI hosts:
+// - The official "Active Jobs DB" API uses the API slug as the host.
+// - Some subscriptions expose a per-user "default application" host.
+const OFFICIAL_HOST = 'active-jobs-db.p.rapidapi.com';
+const LEGACY_APP_HOST = 'fantastic-jobs-default-application-11540375.p.rapidapi.com';
  
  serve(async (req) => {
    if (req.method === 'OPTIONS') {
@@ -32,25 +34,28 @@ const BASE_URL = `https://${RAPIDAPI_HOST}`;
  
     const url = new URL(req.url);
     
-    // Try multiple endpoint formats since this is a custom RapidAPI app
-    // The user's original code used /active-jobs
-    const endpoint = '/active-jobs';
+     // Active Jobs DB endpoints (per RapidAPI docs)
+     // NOTE: We'll still try legacy endpoints as fallback.
+     const primaryEndpoints = ['/active-jobs-db-7-days', '/active-jobs-db-24h'];
+     const legacyEndpoints = ['/active-jobs', '/jobs', '/search', '/api/jobs'];
+     const endpointsToTry = [...primaryEndpoints, ...legacyEndpoints];
     
      // Build query parameters for the API
      const queryParams = new URLSearchParams();
  
-    // Title filter - use title_filter parameter per API docs
-     const keyword = body.keyword as string || url.searchParams.get('keyword') || '';
-     if (keyword) {
-      // Try both formats - API might use 'keyword' or 'title_filter'
-      queryParams.set('keyword', keyword);
-     }
+     // Title filter (RapidAPI docs: title_filter). Keep legacy 'keyword' too.
+      const keyword = (body.keyword as string) || url.searchParams.get('keyword') || '';
+      if (keyword) {
+        queryParams.set('title_filter', keyword);
+        queryParams.set('keyword', keyword);
+      }
  
-    // Location filter - use location_filter per API docs
-     const location = body.location as string || url.searchParams.get('location') || '';
-     if (location) {
-      queryParams.set('location', location);
-     }
+     // Location filter (RapidAPI docs: location_filter). Keep legacy 'location' too.
+      const location = (body.location as string) || url.searchParams.get('location') || '';
+      if (location) {
+        queryParams.set('location_filter', location);
+        queryParams.set('location', location);
+      }
  
     // Salary minimum - use salary_min per API docs
      const salaryMin = body.salary_min as string || url.searchParams.get('salary_min') || '';
@@ -64,98 +69,85 @@ const BASE_URL = `https://${RAPIDAPI_HOST}`;
        queryParams.set('remote', 'true');
      }
  
-    // Limit and offset for pagination (API returns max 100 per request)
-     const limit = body.limit as string || url.searchParams.get('limit') || '50';
-     queryParams.set('limit', limit);
-    
-    const offset = body.offset as string || url.searchParams.get('offset') || '';
-    if (offset && parseInt(offset) > 0) {
-      queryParams.set('offset', offset);
-    }
-    
-    // Add page parameter for pagination
-    const page = body.page as string || url.searchParams.get('page') || '1';
-    queryParams.set('page', page);
+     // Pagination: docs use offset + limit (limit typically 10-100, but docs mention up to 500 for some endpoints)
+      const limit = (body.limit as string) || url.searchParams.get('limit') || '50';
+      queryParams.set('limit', limit);
+     
+     const offset = (body.offset as string) || url.searchParams.get('offset') || '0';
+     queryParams.set('offset', offset);
  
-    console.log(`[fantastic-jobs] Fetching jobs from ${endpoint} with params:`, Object.fromEntries(queryParams));
- 
-     // Call the fantastic.jobs API
-    const apiUrl = `${BASE_URL}${endpoint}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-     console.log(`[fantastic-jobs] API URL: ${apiUrl}`);
- 
-     const response = await fetch(apiUrl, {
-       method: 'GET',
-       headers: {
-         'X-RapidAPI-Key': rapidApiKey,
-         'X-RapidAPI-Host': RAPIDAPI_HOST,
-       },
-     });
- 
-     if (!response.ok) {
-       const errorText = await response.text();
-       console.error(`[fantastic-jobs] API error: ${response.status} - ${errorText}`);
-      
-      // If 404, try alternate endpoint formats
-      if (response.status === 404) {
-        // Try /jobs endpoint
-        const altEndpoints = ['/jobs', '/search', '/api/jobs'];
-        
-        for (const altEndpoint of altEndpoints) {
-          console.log(`[fantastic-jobs] Trying alternate endpoint: ${altEndpoint}`);
-          const altUrl = `${BASE_URL}${altEndpoint}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-          
-          const altResponse = await fetch(altUrl, {
-            method: 'GET',
-            headers: {
-              'X-RapidAPI-Key': rapidApiKey,
-              'X-RapidAPI-Host': RAPIDAPI_HOST,
-            },
-          });
-          
-          if (altResponse.ok) {
-            const altData = await altResponse.json();
-            const jobs = Array.isArray(altData) ? altData : (altData.jobs || altData.results || altData.data || []);
-            console.log(`[fantastic-jobs] Alt endpoint ${altEndpoint} succeeded with ${jobs.length} jobs`);
-            return new Response(JSON.stringify({
-              success: true,
-              jobs: normalizeJobs(jobs),
-              total: jobs.length,
-              offset: parseInt(offset || '0'),
-              limit: parseInt(limit),
-            }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
-          }
-        }
-      }
-      
-      // Check for rate limiting
-      if (response.status === 429) {
-        return new Response(JSON.stringify({
-          success: false,
-          error: 'Rate limit exceeded. Please wait a moment and try again.',
-          jobs: [],
-          rateLimited: true,
-        }), {
-          status: 429,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-      
-      throw new Error(`API request failed: ${response.status} - ${errorText.substring(0, 200)}`);
+     console.log(`[fantastic-jobs] Fetch params:`, Object.fromEntries(queryParams));
+
+     // Call RapidAPI with a *small* fallback matrix to avoid burning quota.
+     let lastStatus = 500;
+     let lastErrorText = '';
+     let data: unknown = null;
+
+     const attemptPlans: Array<{ host: string; endpoints: string[] }> = [
+       { host: OFFICIAL_HOST, endpoints: primaryEndpoints },
+       { host: LEGACY_APP_HOST, endpoints: legacyEndpoints },
+     ];
+
+     for (const plan of attemptPlans) {
+       for (const endpoint of plan.endpoints) {
+         const apiUrl = `https://${plan.host}${endpoint}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+         console.log(`[fantastic-jobs] Trying: ${apiUrl}`);
+
+         const res = await fetch(apiUrl, {
+           method: 'GET',
+           headers: {
+             'X-RapidAPI-Key': rapidApiKey,
+             'X-RapidAPI-Host': plan.host,
+           },
+         });
+
+         if (res.ok) {
+           data = await res.json();
+           console.log(`[fantastic-jobs] Success via host=${plan.host} endpoint=${endpoint}`);
+           lastErrorText = '';
+           lastStatus = 200;
+           break;
+         }
+
+         lastStatus = res.status;
+         lastErrorText = await res.text();
+         console.error(`[fantastic-jobs] Upstream error via host=${plan.host} endpoint=${endpoint}: ${res.status} - ${lastErrorText}`);
+
+         // If rate limited, stop trying alternatives.
+         if (res.status === 429) {
+           return new Response(
+             JSON.stringify({
+               success: false,
+               error: 'Rate limit exceeded. Please wait a moment and try again.',
+               jobs: [],
+               rateLimited: true,
+             }),
+             {
+               status: 429,
+               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+             },
+           );
+         }
+       }
+
+       if (lastStatus === 200 && data) break;
      }
- 
-     const data = await response.json();
-    console.log(`[fantastic-jobs] Received ${Array.isArray(data) ? data.length : (data.jobs?.length || 'unknown')} jobs`);
- 
-    const jobs = Array.isArray(data) ? data : (data.jobs || data.results || []);
+
+     if (!data) {
+       // Keep error concise and consistent with existing frontend handling.
+       throw new Error(`API request failed: ${lastStatus} - ${lastErrorText.substring(0, 200)}`);
+     }
+
+     console.log(`[fantastic-jobs] Received ${Array.isArray(data) ? data.length : ((data as any)?.jobs?.length || 'unknown')} jobs`);
+
+     const jobs = Array.isArray(data) ? data : (((data as any).jobs) || ((data as any).results) || ((data as any).data) || []);
  
      return new Response(JSON.stringify({
        success: true,
       jobs: normalizeJobs(jobs),
       total: jobs.length,
-      offset: parseInt(body.offset as string || url.searchParams.get('offset') || '0'),
-      limit: parseInt(body.limit as string || url.searchParams.get('limit') || '50'),
+       offset: parseInt((body.offset as string) || url.searchParams.get('offset') || '0'),
+       limit: parseInt((body.limit as string) || url.searchParams.get('limit') || '50'),
      }), {
        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
      });
