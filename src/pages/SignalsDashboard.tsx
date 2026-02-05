@@ -67,13 +67,14 @@ import { SignalsRegionMap } from "@/components/signals/SignalsRegionMap";
 import { SignalAccuracyChart } from "@/components/signals/SignalAccuracyChart";
 import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
 import { JobSignalCard } from "@/components/signals/JobSignalCard";
+ import { FantasticJobsBoard } from "@/components/jobs/FantasticJobsBoard";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
 type SortOption = "newest" | "relevant" | "amount";
-type TabView = "signals" | "jobs";
+type TabView = "signals" | "jobs" | "jobboard";
 
 const REGION_CONFIG = {
   london: { label: "London", emoji: "🇬🇧", description: "City, Mayfair, Canary Wharf" },
@@ -713,14 +714,18 @@ export default function SignalsDashboard() {
 
         {/* Tabs: Signals vs Jobs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
-          <TabsList className="grid w-full max-w-xs grid-cols-2">
+          <TabsList className="grid w-full max-w-md grid-cols-3">
             <TabsTrigger value="signals" className="gap-1.5">
               <Sparkles className="h-4 w-4" />
               Signals
             </TabsTrigger>
             <TabsTrigger value="jobs" className="gap-1.5">
               <Briefcase className="h-4 w-4" />
-              Jobs ({jobSignals.length})
+              Apollo Jobs
+            </TabsTrigger>
+            <TabsTrigger value="jobboard" className="gap-1.5">
+              <Search className="h-4 w-4" />
+              Job Board
             </TabsTrigger>
           </TabsList>
           
@@ -886,6 +891,11 @@ export default function SignalsDashboard() {
                 ))}
               </div>
             )}
+          </TabsContent>
+          
+          {/* Job Board Tab - fantastic.jobs */}
+          <TabsContent value="jobboard" className="mt-4">
+            <FantasticJobsBoard />
           </TabsContent>
         </Tabs>
       </div>
