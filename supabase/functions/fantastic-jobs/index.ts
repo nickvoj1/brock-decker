@@ -5,11 +5,9 @@
    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
  };
  
-// RapidAPI hosts:
-// - The official "Active Jobs DB" API uses the API slug as the host.
-// - Some subscriptions expose a per-user "default application" host.
+// RapidAPI host for the "Active Jobs DB" product.
+// Ref: RapidAPI playground examples use https://active-jobs-db.p.rapidapi.com/<endpoint>
 const OFFICIAL_HOST = 'active-jobs-db.p.rapidapi.com';
-const LEGACY_APP_HOST = 'fantastic-jobs-default-application-11540375.p.rapidapi.com';
  
  serve(async (req) => {
    if (req.method === 'OPTIONS') {
@@ -34,11 +32,17 @@ const LEGACY_APP_HOST = 'fantastic-jobs-default-application-11540375.p.rapidapi.
  
     const url = new URL(req.url);
     
-     // Active Jobs DB endpoints (per RapidAPI docs)
-     // NOTE: We'll still try legacy endpoints as fallback.
-     const primaryEndpoints = ['/active-jobs-db-7-days', '/active-jobs-db-24h'];
-     const legacyEndpoints = ['/active-jobs', '/jobs', '/search', '/api/jobs'];
-     const endpointsToTry = [...primaryEndpoints, ...legacyEndpoints];
+     // Active Jobs DB endpoints (confirmed via RapidAPI playground curl snippet)
+     // - Hourly: /active-ats-1h
+     // - 24h:    /active-ats-24h
+     // - 7 days: /active-ats-7d
+     const postedAfter = (body.posted_after as string) || url.searchParams.get('posted_after') || '7days';
+     const endpoint =
+       postedAfter === '24hours' || postedAfter === '24h'
+         ? '/active-ats-24h'
+         : postedAfter === '1hour' || postedAfter === '1h'
+           ? '/active-ats-1h'
+           : '/active-ats-7d';
     
      // Build query parameters for the API
      const queryParams = new URLSearchParams();
@@ -76,67 +80,42 @@ const LEGACY_APP_HOST = 'fantastic-jobs-default-application-11540375.p.rapidapi.
      const offset = (body.offset as string) || url.searchParams.get('offset') || '0';
      queryParams.set('offset', offset);
  
-     console.log(`[fantastic-jobs] Fetch params:`, Object.fromEntries(queryParams));
+      console.log(`[fantastic-jobs] Endpoint: ${endpoint}`);
+      console.log(`[fantastic-jobs] Fetch params:`, Object.fromEntries(queryParams));
 
-     // Call RapidAPI with a *small* fallback matrix to avoid burning quota.
-     let lastStatus = 500;
-     let lastErrorText = '';
-     let data: unknown = null;
+      const apiUrl = `https://${OFFICIAL_HOST}${endpoint}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+      console.log(`[fantastic-jobs] API URL: ${apiUrl}`);
 
-     const attemptPlans: Array<{ host: string; endpoints: string[] }> = [
-       { host: OFFICIAL_HOST, endpoints: primaryEndpoints },
-       { host: LEGACY_APP_HOST, endpoints: legacyEndpoints },
-     ];
+      const res = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'X-RapidAPI-Key': rapidApiKey,
+          'X-RapidAPI-Host': OFFICIAL_HOST,
+        },
+      });
 
-     for (const plan of attemptPlans) {
-       for (const endpoint of plan.endpoints) {
-         const apiUrl = `https://${plan.host}${endpoint}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-         console.log(`[fantastic-jobs] Trying: ${apiUrl}`);
+      if (res.status === 429) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Rate limit exceeded. Please wait a moment and try again.',
+            jobs: [],
+            rateLimited: true,
+          }),
+          {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          },
+        );
+      }
 
-         const res = await fetch(apiUrl, {
-           method: 'GET',
-           headers: {
-             'X-RapidAPI-Key': rapidApiKey,
-             'X-RapidAPI-Host': plan.host,
-           },
-         });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[fantastic-jobs] Upstream error: ${res.status} - ${errorText}`);
+        throw new Error(`API request failed: ${res.status} - ${errorText.substring(0, 200)}`);
+      }
 
-         if (res.ok) {
-           data = await res.json();
-           console.log(`[fantastic-jobs] Success via host=${plan.host} endpoint=${endpoint}`);
-           lastErrorText = '';
-           lastStatus = 200;
-           break;
-         }
-
-         lastStatus = res.status;
-         lastErrorText = await res.text();
-         console.error(`[fantastic-jobs] Upstream error via host=${plan.host} endpoint=${endpoint}: ${res.status} - ${lastErrorText}`);
-
-         // If rate limited, stop trying alternatives.
-         if (res.status === 429) {
-           return new Response(
-             JSON.stringify({
-               success: false,
-               error: 'Rate limit exceeded. Please wait a moment and try again.',
-               jobs: [],
-               rateLimited: true,
-             }),
-             {
-               status: 429,
-               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-             },
-           );
-         }
-       }
-
-       if (lastStatus === 200 && data) break;
-     }
-
-     if (!data) {
-       // Keep error concise and consistent with existing frontend handling.
-       throw new Error(`API request failed: ${lastStatus} - ${lastErrorText.substring(0, 200)}`);
-     }
+      const data = await res.json();
 
      console.log(`[fantastic-jobs] Received ${Array.isArray(data) ? data.length : ((data as any)?.jobs?.length || 'unknown')} jobs`);
 
