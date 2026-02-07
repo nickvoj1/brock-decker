@@ -44,37 +44,29 @@ async function enrichSignalWithAI(signal: SignalData): Promise<AIEnrichmentResul
     ? `${signal.currency === "EUR" ? "€" : signal.currency === "GBP" ? "£" : "$"}${signal.amount >= 1000 ? `${(signal.amount / 1000).toFixed(1)}B` : `${signal.amount}M`}`
     : "Not disclosed";
 
-  const prompt = `You are a PE/VC recruitment intelligence analyst at Brock & Decker.
+  const prompt = `You are a PE/VC recruitment intelligence analyst at Brock & Decker. Analyze this signal quickly and accurately.
 
-SIGNAL DATA:
-- Company: ${signal.company || "Unknown"}
-- Headline: ${signal.title}
-- Description: ${signal.description || "No additional details"}
-- Signal Type: ${signal.signal_type?.replace(/_/g, " ") || "General"}
-- Deal Size: ${amountStr}
-- Region: ${signal.region}
-- Job Postings Found: ${jobCount}
-- Senior Roles Found: ${seniorRoleCount}
-- Is PE/VC Firm: ${isPEVC ? "Yes" : "Likely portfolio company or other"}
-- Job Titles: ${jobTitles}
+SIGNAL:
+Company: ${signal.company || "Unknown"} | Type: ${signal.signal_type?.replace(/_/g, " ") || "General"}
+Headline: ${signal.title}
+${signal.description ? `Details: ${signal.description.slice(0, 300)}` : ""}
+Region: ${signal.region} | Deal Size: ${amountStr}
+Jobs: ${jobCount} posted (${seniorRoleCount} senior) | PE/VC Firm: ${isPEVC ? "Yes" : "No"}
+${jobTitles !== "Not specified" ? `Roles: ${jobTitles}` : ""}
 
-TASK: Analyze this signal for PE/VC recruitment opportunity. Provide:
-
-1. TIER (tier_1, tier_2, or tier_3):
-   - tier_1: Immediate hiring intent - fund close, acquisition, new CEO/CFO, confirmed expansion
-   - tier_2: Medium intent - office expansion, senior departures, growth signals
-   - tier_3: Early interest - general hiring, industry presence, networking opportunity
-
-2. INSIGHT (1-2 sentences): Explain WHY this company is likely hiring. Connect the dots between the news/signal and recruitment needs. Be specific about the business driver (e.g., "Post-€500M fund close → expanding investment team", "New CHRO suggests talent strategy overhaul").
-
-3. PITCH (1 sentence): Specific TA outreach recommendation for a Brock & Decker recruiter. Name the target role (VP Talent, CHRO, Head of HR) and suggest a specific angle (e.g., "Target VP Talent with Bullhorn spec for 3 senior analyst roles").
-
-OUTPUT FORMAT (JSON only):
+CLASSIFY AND RESPOND WITH JSON ONLY:
 {
-  "tier": "tier_1",
-  "insight": "Post-€500M fund close signals portfolio expansion. 5 PE analyst roles posted indicate immediate need for investment professionals.",
-  "pitch": "Target new CHRO with Bullhorn spec for 3 senior investment roles; position as specialized PE recruiter."
-}`;
+  "tier": "tier_1|tier_2|tier_3",
+  "insight": "1-2 sentences: WHY this company is hiring NOW (connect signal to recruitment need)",
+  "pitch": "1 sentence: Specific outreach angle for Brock & Decker recruiter"
+}
+
+TIER RULES:
+- tier_1: Fund close, acquisition, new CEO/CFO, confirmed expansion, immediate hiring intent
+- tier_2: Office expansion, senior departures, growth signals, medium intent
+- tier_3: General hiring, industry presence, early interest
+
+Be concise. No markdown.`;
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -88,6 +80,7 @@ OUTPUT FORMAT (JSON only):
         { role: "system", content: "You are a PE/VC recruitment analyst. Always respond with valid JSON only, no markdown." },
         { role: "user", content: prompt },
       ],
+      temperature: 0.1,
     }),
   });
 
@@ -173,39 +166,66 @@ Deno.serve(async (req) => {
       );
     }
     
-    console.log(`Enriching ${signals.length} signals with AI...`);
+    console.log(`Enriching ${signals.length} signals with AI (parallel batches)...`);
     
     let enrichedCount = 0;
     const errors: string[] = [];
     
-    // Process signals sequentially to avoid rate limits
-    for (const signal of signals) {
-      try {
-        const enrichment = await enrichSignalWithAI(signal as SignalData);
-        
-        const { error: updateError } = await supabase
-          .from("signals")
-          .update({
-            tier: enrichment.tier,
-            ai_insight: enrichment.insight,
-            ai_pitch: enrichment.pitch,
-            ai_enriched_at: new Date().toISOString(),
-          })
-          .eq("id", signal.id);
-        
-        if (updateError) {
-          console.error(`Error updating signal ${signal.id}:`, updateError);
-          errors.push(`${signal.id}: ${updateError.message}`);
+    // Process signals in parallel batches of 5 for speed
+    const BATCH_SIZE = 5;
+    const signalBatches: SignalData[][] = [];
+    
+    for (let i = 0; i < signals.length; i += BATCH_SIZE) {
+      signalBatches.push(signals.slice(i, i + BATCH_SIZE) as SignalData[]);
+    }
+    
+    for (const batch of signalBatches) {
+      // Process batch in parallel
+      const batchResults = await Promise.allSettled(
+        batch.map(async (signal) => {
+          try {
+            const enrichment = await enrichSignalWithAI(signal);
+            
+            const { error: updateError } = await supabase
+              .from("signals")
+              .update({
+                tier: enrichment.tier,
+                ai_insight: enrichment.insight,
+                ai_pitch: enrichment.pitch,
+                ai_enriched_at: new Date().toISOString(),
+              })
+              .eq("id", signal.id);
+            
+            if (updateError) {
+              throw new Error(updateError.message);
+            }
+            
+            console.log(`Enriched: ${signal.company || signal.title.slice(0, 30)}`);
+            return { success: true, id: signal.id };
+          } catch (e) {
+            const errorMsg = e instanceof Error ? e.message : "Unknown error";
+            console.error(`Error enriching ${signal.id}:`, errorMsg);
+            return { success: false, id: signal.id, error: errorMsg };
+          }
+        })
+      );
+      
+      // Count results
+      for (const result of batchResults) {
+        if (result.status === 'fulfilled') {
+          if (result.value.success) {
+            enrichedCount++;
+          } else {
+            errors.push(`${result.value.id}: ${result.value.error}`);
+          }
         } else {
-          enrichedCount++;
-          console.log(`Enriched signal: ${signal.company || signal.title.slice(0, 30)}`);
+          errors.push(`Batch error: ${result.reason}`);
         }
-        
-        // Small delay to avoid rate limits
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      } catch (e) {
-        console.error(`Error enriching signal ${signal.id}:`, e);
-        errors.push(`${signal.id}: ${e instanceof Error ? e.message : "Unknown error"}`);
+      }
+      
+      // Small delay between batches to avoid rate limits
+      if (signalBatches.indexOf(batch) < signalBatches.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
     

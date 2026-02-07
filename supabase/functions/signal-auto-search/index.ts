@@ -29,34 +29,31 @@ async function analyzeSignalWithAI(signal: {
     return null
   }
 
-  const prompt = `Analyze this business signal and extract information for finding hiring contacts at the company.
+  const prompt = `Analyze this signal for finding hiring contacts. Return JSON ONLY.
 
 SIGNAL:
 Title: ${signal.title}
-${signal.description ? `Description: ${signal.description}` : ''}
-${signal.company ? `Company (from source): ${signal.company}` : ''}
-${signal.signal_type ? `Signal Type: ${signal.signal_type}` : ''}
-${signal.region ? `Region: ${signal.region}` : ''}
+${signal.description ? `Description: ${signal.description.slice(0, 200)}` : ''}
+${signal.company ? `Company: ${signal.company}` : ''}
+${signal.signal_type ? `Type: ${signal.signal_type}` : ''} | Region: ${signal.region || 'Unknown'}
 ${signal.amount ? `Amount: ${signal.amount}` : ''}
 
-TASK: Return a JSON object with:
-1. "companyName": The exact company name mentioned (clean, no suffixes like Ltd/Inc unless part of brand)
-2. "companyVariants": Array of alternative names people might use (abbreviations, common names, parent company). Example: ["McKinsey", "McKinsey & Company", "McKinsey & Co"]
-3. "industry": The company's industry (e.g., "Private Equity", "Technology", "Healthcare", "Financial Services")
-4. "prioritizedCategories": Order these 5 categories by relevance to the signal type (most likely to hire first):
-   - "HR & Recruiting" (always relevant for hiring)
-   - "Senior Leadership" (for major expansions, fundraises)
-   - "Finance & Investment" (for funding rounds, M&A)
-   - "Legal & Compliance" (for acquisitions, regulatory news)
-   - "Strategy & Operations" (for expansions, new markets)
-5. "searchKeywords": 2-3 industry keywords to help find the company on Apollo (e.g., ["private equity", "investment management"])
-6. "confidence": 0-1 score for how confident you are in the company identification
+RETURN:
+{
+  "companyName": "exact company name (no Ltd/Inc)",
+  "companyVariants": ["abbreviations", "alt names"],
+  "industry": "company industry",
+  "prioritizedCategories": ["HR & Recruiting", "Senior Leadership", "Finance & Investment", "Legal & Compliance", "Strategy & Operations"],
+  "searchKeywords": ["2-3 industry keywords"],
+  "confidence": 0.0-1.0
+}
 
-For a fund close or fundraise, prioritize: Finance → Leadership → HR
-For hiring/expansion news, prioritize: HR → Leadership → Strategy
-For M&A or acquisition, prioritize: Legal → Leadership → Finance
+Priority rules:
+- Fund/fundraise → Finance, Leadership, HR
+- Hiring/expansion → HR, Leadership, Strategy
+- M&A/acquisition → Legal, Leadership, Finance
 
-Return ONLY valid JSON, no markdown or explanation.`
+JSON only, no markdown.`
 
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -66,7 +63,7 @@ Return ONLY valid JSON, no markdown or explanation.`
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'google/gemini-3-flash-preview',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.1,
       }),
