@@ -441,8 +441,18 @@ Deno.serve(async (req) => {
       );
     }
 
-    // === API SETTINGS ===
+    // === API SETTINGS (Admin only) ===
+    const ADMIN_PROFILE = "Nikita Vojevoda";
+    
     if (action === "get-api-settings") {
+      // Verify admin access
+      if (profileName !== ADMIN_PROFILE) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Access denied. Admin only." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+      
       const { data: settings, error } = await supabase
         .from("api_settings")
         .select("setting_key, is_configured");
@@ -462,6 +472,14 @@ Deno.serve(async (req) => {
     }
 
     if (action === "save-api-setting") {
+      // Verify admin access
+      if (profileName !== ADMIN_PROFILE) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Access denied. Admin only." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+      
       const { settingKey, settingValue } = data;
       if (!settingKey) {
         return new Response(

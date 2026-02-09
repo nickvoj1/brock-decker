@@ -24,10 +24,10 @@ const navItems = [
   { title: "Previous CVs", url: "/previous-cvs", icon: Users },
   { title: "Generate Mail", url: "/generate-mail", icon: Mail },
   { title: "Runs History", url: "/history", icon: History },
-  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 const adminItems = [
+  { title: "Settings", url: "/settings", icon: Settings },
   { title: "Admin Panel", url: "/admin", icon: ShieldCheck },
 ];
 
