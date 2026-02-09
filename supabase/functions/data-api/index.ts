@@ -59,18 +59,30 @@ function isRealNewsHeadline(text: string): boolean {
 }
 
 function isDisplayableSignal(row: any): boolean {
-  // Must have a URL to be actionable news.
-  if (!row?.url || typeof row.url !== "string" || !row.url.startsWith("http")) {
+  // Must have a company name to be actionable
+  if (!row?.company || typeof row.company !== "string" || row.company.trim().length < 2) {
     return false;
   }
 
   const title = String(row?.title || "");
-  const description = typeof row?.description === "string" ? row.description : "";
+  
+  // If has URL and is a real news headline, show it
+  if (row?.url && typeof row.url === "string" && row.url.startsWith("http")) {
+    if (isRealNewsHeadline(title)) return true;
+    const description = typeof row?.description === "string" ? row.description : "";
+    if (description && isRealNewsHeadline(description.slice(0, 160))) return true;
+  }
+  
+  // If no URL but has a valid company + title pattern "Company - Source", still show it
+  // These are scraped signals that reference real companies
+  if (title.includes(" - ") && row.company) {
+    return true;
+  }
 
-  // Prefer title as the headline; allow description as fallback if it contains
-  // the real headline and title is weak.
-  if (isRealNewsHeadline(title)) return true;
-  if (description && isRealNewsHeadline(description.slice(0, 160))) return true;
+  // Allow signals with URLs even if headline check fails (user may still find them useful)
+  if (row?.url && typeof row.url === "string" && row.url.startsWith("http")) {
+    return true;
+  }
 
   return false;
 }
@@ -1271,7 +1283,7 @@ Deno.serve(async (req) => {
     // === SIGNALS ===
     if (action === "get-signals") {
       const { region } = data || {};
-      const cutoffDate = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000); // 14 days
+      const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days lookback
       
       let query = supabase
         .from("signals")
