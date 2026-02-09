@@ -9,7 +9,6 @@ import {
   Search,
   CheckCircle,
   Upload as UploadIcon,
-  X
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,11 +37,10 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useProfileName } from "@/hooks/useProfileName";
-import { getTeamDashboardStats, TeamMemberStats, HourlyDataPoint } from "@/lib/dataApi";
-import { format, startOfDay, eachHourOfInterval } from "date-fns";
+import { getTeamDashboardStats, TeamMemberStats, ChartDataPoint } from "@/lib/dataApi";
 import {
-  LineChart,
-  Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -53,20 +51,16 @@ import {
 type TimeFilter = 'today' | 'week' | 'all';
 
 interface AggregatedStats {
-  totalContactsToday: number;
-  myContactsToday: number;
-  teamContactsToday: number;
-  totalContactsAll: number;
   totalRuns: number;
   avgSuccessRate: number;
   bullhornExported: number;
+  totalContacts: number;
 }
-
 
 export default function TeamDashboard() {
   const profileName = useProfileName();
   const [teamStats, setTeamStats] = useState<TeamMemberStats[]>([]);
-  const [hourlyData, setHourlyData] = useState<HourlyDataPoint[]>([]);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('today');
   const [showMyOnly, setShowMyOnly] = useState(false);
@@ -78,17 +72,17 @@ export default function TeamDashboard() {
     } else {
       setIsLoading(false);
     }
-  }, [profileName]);
+  }, [profileName, timeFilter]);
 
   const fetchTeamData = async () => {
     if (!profileName) return;
     
     setIsLoading(true);
     try {
-      const response = await getTeamDashboardStats(profileName);
+      const response = await getTeamDashboardStats(profileName, timeFilter);
       if (response.success && response.data) {
         setTeamStats(response.data.stats || []);
-        setHourlyData(response.data.hourlyData || []);
+        setChartData(response.data.chartData || []);
       }
     } catch (error) {
       console.error('Error fetching team data:', error);
@@ -97,23 +91,49 @@ export default function TeamDashboard() {
     }
   };
 
+  // Calculate aggregated stats based on time filter
   const aggregatedStats = useMemo((): AggregatedStats => {
-    const myStats = teamStats.find(s => s.profile_name === profileName);
-    
-    const totalSuccessRate = teamStats.length > 0 
-      ? teamStats.reduce((sum, s) => sum + s.success_rate, 0) / teamStats.length
-      : 0;
-
-    return {
-      totalContactsToday: teamStats.reduce((sum, s) => sum + (s.contacts_today || 0), 0),
-      myContactsToday: myStats?.contacts_today || 0,
-      teamContactsToday: teamStats.reduce((sum, s) => sum + (s.contacts_today || 0), 0) - (myStats?.contacts_today || 0),
-      totalContactsAll: teamStats.reduce((sum, s) => sum + (s.total_contacts || 0), 0),
-      totalRuns: teamStats.reduce((sum, s) => sum + (s.total_runs || 0), 0),
-      avgSuccessRate: Math.round(totalSuccessRate),
-      bullhornExported: teamStats.reduce((sum, s) => sum + (s.bullhorn_exported || 0), 0),
+    const getRuns = (s: TeamMemberStats) => {
+      switch (timeFilter) {
+        case 'today': return s.runs_today || 0;
+        case 'week': return s.runs_week || 0;
+        default: return s.total_runs || 0;
+      }
     };
-  }, [teamStats, profileName]);
+
+    const getSuccessRate = (s: TeamMemberStats) => {
+      switch (timeFilter) {
+        case 'today': return s.success_rate_today || 0;
+        case 'week': return s.success_rate_week || 0;
+        default: return s.success_rate || 0;
+      }
+    };
+
+    const getBullhorn = (s: TeamMemberStats) => {
+      switch (timeFilter) {
+        case 'today': return s.bullhorn_exported_today || 0;
+        case 'week': return s.bullhorn_exported_week || 0;
+        default: return s.bullhorn_exported || 0;
+      }
+    };
+
+    const getContacts = (s: TeamMemberStats) => {
+      switch (timeFilter) {
+        case 'today': return s.contacts_today || 0;
+        case 'week': return s.contacts_week || 0;
+        default: return s.total_contacts || 0;
+      }
+    };
+
+    const totalRuns = teamStats.reduce((sum, s) => sum + getRuns(s), 0);
+    const avgSuccessRate = teamStats.length > 0 
+      ? Math.round(teamStats.reduce((sum, s) => sum + getSuccessRate(s), 0) / teamStats.length)
+      : 0;
+    const bullhornExported = teamStats.reduce((sum, s) => sum + getBullhorn(s), 0);
+    const totalContacts = teamStats.reduce((sum, s) => sum + getContacts(s), 0);
+
+    return { totalRuns, avgSuccessRate, bullhornExported, totalContacts };
+  }, [teamStats, timeFilter]);
 
   const filteredStats = useMemo(() => {
     let filtered = [...teamStats];
@@ -122,35 +142,20 @@ export default function TeamDashboard() {
       filtered = filtered.filter(s => s.profile_name === profileName);
     }
     
-    // Sort by contacts based on time filter
+    // Sort by runs based on time filter
     filtered.sort((a, b) => {
-      const getContactCount = (s: TeamMemberStats) => {
+      const getRunCount = (s: TeamMemberStats) => {
         switch (timeFilter) {
-          case 'today': return s.contacts_today || 0;
-          case 'week': return s.contacts_week || 0;
-          default: return s.total_contacts || 0;
+          case 'today': return s.runs_today || 0;
+          case 'week': return s.runs_week || 0;
+          default: return s.total_runs || 0;
         }
       };
-      return getContactCount(b) - getContactCount(a);
+      return getRunCount(b) - getRunCount(a);
     });
     
     return filtered;
   }, [teamStats, timeFilter, showMyOnly, profileName]);
-
-  // Use real hourly data from API, or fallback to empty array
-  const chartData = useMemo(() => {
-    if (hourlyData.length > 0) {
-      return hourlyData;
-    }
-    // Fallback: generate empty hourly slots if no data yet
-    const now = new Date();
-    const startOfToday = startOfDay(now);
-    const hours = eachHourOfInterval({ start: startOfToday, end: now });
-    return hours.map((hour) => ({
-      hour: format(hour, 'HH:00'),
-      contacts: 0,
-    }));
-  }, [hourlyData]);
 
   const getContactCount = (stats: TeamMemberStats): number => {
     switch (timeFilter) {
@@ -165,6 +170,30 @@ export default function TeamDashboard() {
       case 'today': return stats.runs_today || 0;
       case 'week': return stats.runs_week || 0;
       default: return stats.total_runs || 0;
+    }
+  };
+
+  const getChartTitle = (): string => {
+    switch (timeFilter) {
+      case 'today': return 'Runs per Hour';
+      case 'week': return 'Runs per Day';
+      default: return 'Runs per Week';
+    }
+  };
+
+  const getChartDescription = (): string => {
+    switch (timeFilter) {
+      case 'today': return "Today's search activity";
+      case 'week': return 'Last 7 days activity';
+      default: return 'Weekly activity overview';
+    }
+  };
+
+  const getTimeLabel = (): string => {
+    switch (timeFilter) {
+      case 'today': return 'Today';
+      case 'week': return 'This Week';
+      default: return 'All Time';
     }
   };
 
@@ -193,56 +222,75 @@ export default function TeamDashboard() {
       description="Team recruitment metrics & Apollo contacts"
     >
       <div className="space-y-6">
-        {/* KPI Grid - Apollo Contacts Focus */}
-        <div className="grid gap-4 md:grid-cols-3">
+        {/* KPI Grid - Time-period responsive stats */}
+        <div className="grid gap-4 md:grid-cols-4">
           <Card className="bg-primary/5 border-primary/20 animate-slide-up" style={{ animationDelay: '0ms' }}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-primary">Contacts Found Today</CardTitle>
-              <Users className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-primary">
-                {isLoading ? '-' : aggregatedStats.totalContactsToday.toLocaleString()}
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Total Runs ({getTimeLabel()})</p>
+                  <p className="text-2xl font-bold text-primary">
+                    {isLoading ? '-' : aggregatedStats.totalRuns}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Search className="h-5 w-5 text-primary" />
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {aggregatedStats.totalContactsAll.toLocaleString()} total all time
-              </p>
             </CardContent>
           </Card>
 
           <Card className="bg-success/5 border-success/20 animate-slide-up" style={{ animationDelay: '50ms' }}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-success">My Contacts</CardTitle>
-              <Search className="h-4 w-4 text-success" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-success">
-                {isLoading ? '-' : aggregatedStats.myContactsToday.toLocaleString()}
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Avg Success Rate</p>
+                  <p className="text-2xl font-bold text-success">
+                    {isLoading ? '-' : `${aggregatedStats.avgSuccessRate}%`}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
+                  <TrendingUp className="h-5 w-5 text-success" />
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Found today via Apollo
-              </p>
             </CardContent>
           </Card>
 
-          <Card className="bg-accent/50 border-accent animate-slide-up" style={{ animationDelay: '100ms' }}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Team Contacts</CardTitle>
-              <Users className="h-4 w-4 text-accent-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {isLoading ? '-' : aggregatedStats.teamContactsToday.toLocaleString()}
+          <Card className="animate-slide-up" style={{ animationDelay: '100ms' }}>
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Bullhorn Exports</p>
+                  <p className="text-2xl font-bold">
+                    {isLoading ? '-' : aggregatedStats.bullhornExported}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
+                  <UploadIcon className="h-5 w-5 text-success" />
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Other team members today
-              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="animate-slide-up" style={{ animationDelay: '150ms' }}>
+            <CardContent className="pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Contacts ({getTimeLabel()})</p>
+                  <p className="text-2xl font-bold">
+                    {isLoading ? '-' : aggregatedStats.totalContacts.toLocaleString()}
+                  </p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <CheckCircle className="h-5 w-5 text-primary" />
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
 
         {/* Filters */}
-        <Card className="animate-slide-up" style={{ animationDelay: '150ms' }}>
+        <Card className="animate-slide-up" style={{ animationDelay: '200ms' }}>
           <CardContent className="pt-4">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
@@ -277,13 +325,13 @@ export default function TeamDashboard() {
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Leaderboard Table */}
-          <Card className="lg:col-span-2 animate-slide-up" style={{ animationDelay: '200ms' }}>
+          <Card className="lg:col-span-2 animate-slide-up" style={{ animationDelay: '250ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Trophy className="h-4 w-4 text-warning" />
-                Leaderboard - Apollo Contacts
+                Leaderboard - Runs & Contacts
               </CardTitle>
-              <CardDescription>Contacts found per recruiter</CardDescription>
+              <CardDescription>Performance per recruiter</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -301,8 +349,8 @@ export default function TeamDashboard() {
                       <TableRow>
                         <TableHead className="w-[40px]">#</TableHead>
                         <TableHead>Recruiter</TableHead>
-                        <TableHead className="text-center">Contacts</TableHead>
                         <TableHead className="text-center">Runs</TableHead>
+                        <TableHead className="text-center">Contacts</TableHead>
                         <TableHead className="text-center">Avg/Run</TableHead>
                         <TableHead className="text-center" title="% of runs with 10+ contacts">Yield</TableHead>
                         <TableHead className="text-center">Bullhorn</TableHead>
@@ -335,11 +383,11 @@ export default function TeamDashboard() {
                             </TableCell>
                             <TableCell className="text-center">
                               <span className="font-bold text-primary">
-                                {getContactCount(stats).toLocaleString()}
+                                {getRunCount(stats)}
                               </span>
                             </TableCell>
                             <TableCell className="text-center">
-                              {getRunCount(stats)}
+                              {getContactCount(stats).toLocaleString()}
                             </TableCell>
                             <TableCell className="text-center">
                               {stats.avg_contacts_per_run || 0}
@@ -381,106 +429,56 @@ export default function TeamDashboard() {
             </CardContent>
           </Card>
 
-          {/* Contacts per Hour Chart */}
-          <Card className="animate-slide-up" style={{ animationDelay: '250ms' }}>
+          {/* Runs Chart - Changes based on time filter */}
+          <Card className="animate-slide-up" style={{ animationDelay: '300ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
-                Contacts / Hour
+                {getChartTitle()}
               </CardTitle>
-              <CardDescription>Today's Apollo activity</CardDescription>
+              <CardDescription>{getChartDescription()}</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="hour" 
-                      tick={{ fontSize: 10 }} 
-                      className="text-muted-foreground"
-                      interval={2}
-                    />
-                    <YAxis 
-                      tick={{ fontSize: 10 }} 
-                      className="text-muted-foreground"
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'hsl(var(--background))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="contacts" 
-                      stroke="hsl(var(--primary))" 
-                      strokeWidth={2}
-                      dot={false}
-                      activeDot={{ r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Quick Stats Row */}
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card className="animate-slide-up" style={{ animationDelay: '300ms' }}>
-            <CardContent className="pt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Total Runs</p>
-                  <p className="text-xl font-bold">{aggregatedStats.totalRuns}</p>
-                </div>
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Search className="h-5 w-5 text-primary" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="animate-slide-up" style={{ animationDelay: '350ms' }}>
-            <CardContent className="pt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Avg Success Rate</p>
-                  <p className="text-xl font-bold">{aggregatedStats.avgSuccessRate}%</p>
-                </div>
-                <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
-                  <TrendingUp className="h-5 w-5 text-success" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="animate-slide-up" style={{ animationDelay: '400ms' }}>
-            <CardContent className="pt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Bullhorn Exports</p>
-                  <p className="text-xl font-bold">{aggregatedStats.bullhornExported}</p>
-                </div>
-                <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
-                  <UploadIcon className="h-5 w-5 text-success" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="animate-slide-up" style={{ animationDelay: '450ms' }}>
-            <CardContent className="pt-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">All Time Contacts</p>
-                  <p className="text-xl font-bold">{aggregatedStats.totalContactsAll.toLocaleString()}</p>
-                </div>
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <CheckCircle className="h-5 w-5 text-primary" />
-                </div>
+                {isLoading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  </div>
+                ) : chartData.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    <p className="text-sm">No data available</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis 
+                        dataKey="label" 
+                        tick={{ fontSize: 10 }} 
+                        className="text-muted-foreground"
+                        interval={timeFilter === 'today' ? 2 : 0}
+                      />
+                      <YAxis 
+                        tick={{ fontSize: 10 }} 
+                        className="text-muted-foreground"
+                        allowDecimals={false}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'hsl(var(--background))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px',
+                        }}
+                        formatter={(value: number) => [value, 'Runs']}
+                      />
+                      <Bar 
+                        dataKey="runs" 
+                        fill="hsl(var(--primary))" 
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </CardContent>
           </Card>
