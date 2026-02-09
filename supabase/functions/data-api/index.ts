@@ -1056,6 +1056,8 @@ Deno.serve(async (req) => {
 
     // === TEAM DASHBOARD STATS ===
     if (action === "get-team-dashboard-stats") {
+      const { timeFilter = 'today' } = data || {};
+      
       // Get stats from enrichment_runs (Apollo contacts found)
       const { data: runs, error: runsError } = await supabase
         .from("enrichment_runs")
@@ -1077,8 +1079,12 @@ Deno.serve(async (req) => {
         total_contacts: number;
         contacts_today: number;
         contacts_week: number;
-        high_yield_runs: number; // Runs with 10+ contacts
+        high_yield_runs: number;
+        high_yield_runs_today: number;
+        high_yield_runs_week: number;
         bullhorn_exported: number;
+        bullhorn_exported_today: number;
+        bullhorn_exported_week: number;
       }> = {};
 
       (runs || []).forEach((r: any) => {
@@ -1093,7 +1099,11 @@ Deno.serve(async (req) => {
             contacts_today: 0,
             contacts_week: 0,
             high_yield_runs: 0,
+            high_yield_runs_today: 0,
+            high_yield_runs_week: 0,
             bullhorn_exported: 0,
+            bullhorn_exported_today: 0,
+            bullhorn_exported_week: 0,
           };
         }
 
@@ -1117,10 +1127,14 @@ Deno.serve(async (req) => {
         // Count as high yield if found 10+ contacts
         if (contacts >= 10) {
           statsMap[pn].high_yield_runs++;
+          if (isToday) statsMap[pn].high_yield_runs_today++;
+          if (isThisWeek) statsMap[pn].high_yield_runs_week++;
         }
 
         if (r.bullhorn_exported_at) {
           statsMap[pn].bullhorn_exported++;
+          if (isToday) statsMap[pn].bullhorn_exported_today++;
+          if (isThisWeek) statsMap[pn].bullhorn_exported_week++;
         }
       });
 
@@ -1136,43 +1150,102 @@ Deno.serve(async (req) => {
         success_rate: s.total_runs > 0 
           ? Math.round((s.high_yield_runs / s.total_runs) * 100)
           : 0,
+        success_rate_today: s.runs_today > 0 
+          ? Math.round((s.high_yield_runs_today / s.runs_today) * 100)
+          : 0,
+        success_rate_week: s.runs_week > 0 
+          ? Math.round((s.high_yield_runs_week / s.runs_week) * 100)
+          : 0,
         avg_contacts_per_run: s.total_runs > 0
           ? Math.round(s.total_contacts / s.total_runs)
           : 0,
         bullhorn_exported: s.bullhorn_exported,
+        bullhorn_exported_today: s.bullhorn_exported_today,
+        bullhorn_exported_week: s.bullhorn_exported_week,
       }));
 
-      // Aggregate hourly data for TODAY only (starting from 8 AM work hours)
-      const hourlyMap: Record<string, number> = {};
-      const currentHour = now.getHours();
-      const workStartHour = 8; // Don't show hours before 8 AM
-
-      // Initialize hours from 08:00 up to current hour with 0
-      const startHour = Math.max(workStartHour, 8);
-      for (let i = startHour; i <= Math.max(currentHour, startHour); i++) {
-        const hourKey = i.toString().padStart(2, '0') + ":00";
-        hourlyMap[hourKey] = 0;
+      // Generate chart data based on time filter
+      let chartData: Array<{ label: string; runs: number }> = [];
+      
+      if (timeFilter === 'today') {
+        // Hourly runs for today (from 8 AM to current hour)
+        const currentHour = now.getHours();
+        const workStartHour = 8;
+        const hourlyMap: Record<string, number> = {};
+        
+        for (let i = workStartHour; i <= Math.max(currentHour, workStartHour); i++) {
+          const hourKey = i.toString().padStart(2, '0') + ":00";
+          hourlyMap[hourKey] = 0;
+        }
+        
+        (runs || []).forEach((r: any) => {
+          const createdAt = new Date(r.created_at);
+          if (createdAt >= todayStart) {
+            const hourKey = createdAt.getHours().toString().padStart(2, '0') + ":00";
+            if (hourlyMap[hourKey] !== undefined) {
+              hourlyMap[hourKey]++;
+            }
+          }
+        });
+        
+        chartData = Object.entries(hourlyMap)
+          .map(([label, runs]) => ({ label, runs }))
+          .sort((a, b) => parseInt(a.label) - parseInt(b.label));
+      } else if (timeFilter === 'week') {
+        // Daily runs for the past 7 days
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const dailyMap: Record<string, number> = {};
+        
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(todayStart);
+          d.setDate(d.getDate() - i);
+          const dayKey = dayNames[d.getDay()];
+          dailyMap[dayKey] = 0;
+        }
+        
+        (runs || []).forEach((r: any) => {
+          const createdAt = new Date(r.created_at);
+          if (createdAt >= weekStart) {
+            const dayKey = dayNames[createdAt.getDay()];
+            if (dailyMap[dayKey] !== undefined) {
+              dailyMap[dayKey]++;
+            }
+          }
+        });
+        
+        // Return in order from oldest to newest
+        const orderedDays: string[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(todayStart);
+          d.setDate(d.getDate() - i);
+          orderedDays.push(dayNames[d.getDay()]);
+        }
+        chartData = orderedDays.map(label => ({ label, runs: dailyMap[label] || 0 }));
+      } else {
+        // Weekly runs for all time (group by week number)
+        const weeklyMap: Record<string, number> = {};
+        
+        (runs || []).forEach((r: any) => {
+          const createdAt = new Date(r.created_at);
+          // Get week start date
+          const weekStartDate = new Date(createdAt);
+          weekStartDate.setDate(weekStartDate.getDate() - weekStartDate.getDay());
+          const weekKey = `${weekStartDate.getMonth() + 1}/${weekStartDate.getDate()}`;
+          weeklyMap[weekKey] = (weeklyMap[weekKey] || 0) + 1;
+        });
+        
+        // Sort by date and take last 12 weeks
+        const sortedWeeks = Object.entries(weeklyMap)
+          .map(([label, runs]) => ({ label, runs, sortKey: new Date(label + "/2024").getTime() }))
+          .sort((a, b) => a.sortKey - b.sortKey)
+          .slice(-12)
+          .map(({ label, runs }) => ({ label, runs }));
+        
+        chartData = sortedWeeks;
       }
 
-      // Aggregate contacts by hour for today only
-      (runs || []).forEach((r: any) => {
-        const createdAt = new Date(r.created_at);
-        if (createdAt >= todayStart) {
-          const hourKey = createdAt.getHours().toString().padStart(2, '0') + ":00";
-          const contacts = Array.isArray(r.enriched_data) ? r.enriched_data.length : 0;
-          if (hourlyMap[hourKey] !== undefined) {
-            hourlyMap[hourKey] += contacts;
-          }
-        }
-      });
-
-      // Convert to array sorted chronologically (00:00 -> current hour)
-      const hourlyData = Object.entries(hourlyMap)
-        .map(([hour, contacts]) => ({ hour, contacts }))
-        .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
-
       return new Response(
-        JSON.stringify({ success: true, data: { stats, hourlyData } }),
+        JSON.stringify({ success: true, data: { stats, chartData } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

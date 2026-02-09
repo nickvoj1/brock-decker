@@ -165,22 +165,26 @@ export interface TeamMemberStats {
   contacts_today: number;
   contacts_week: number;
   success_rate: number;
+  success_rate_today: number;
+  success_rate_week: number;
   avg_contacts_per_run: number;
   bullhorn_exported: number;
+  bullhorn_exported_today: number;
+  bullhorn_exported_week: number;
 }
 
-export interface HourlyDataPoint {
-  hour: string;
-  contacts: number;
+export interface ChartDataPoint {
+  label: string;
+  runs: number;
 }
 
 export interface TeamDashboardData {
   stats: TeamMemberStats[];
-  hourlyData: HourlyDataPoint[];
+  chartData: ChartDataPoint[];
 }
 
-export async function getTeamDashboardStats(profileName: string) {
-  return callDataApi<TeamDashboardData>("get-team-dashboard-stats", profileName);
+export async function getTeamDashboardStats(profileName: string, timeFilter: 'today' | 'week' | 'all' = 'today') {
+  return callDataApi<TeamDashboardData>("get-team-dashboard-stats", profileName, { timeFilter });
 }
 
 // === Skill Patterns ===
