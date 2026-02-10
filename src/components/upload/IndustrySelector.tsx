@@ -568,16 +568,34 @@ export function IndustrySelector({
               Exclude Industries
               <span className="text-xs font-normal text-muted-foreground">(optional)</span>
             </label>
-            {excludedIndustries.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={clearAllExcluded}
-                className="h-auto py-1 px-2 text-xs text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </Button>
-            )}
+            <div className="flex items-center gap-1">
+              {selectedIndustries.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (!onExcludedChange) return;
+                    const nonSelected = ALL_INDUSTRIES
+                      .filter((i) => !isIndustrySelected(i))
+                      .map((i) => i.label);
+                    onExcludedChange(nonSelected);
+                  }}
+                  className="h-auto py-1 px-2 text-xs text-destructive/70 hover:text-destructive"
+                >
+                  Exclude all non-selected
+                </Button>
+              )}
+              {excludedIndustries.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearAllExcluded}
+                  className="h-auto py-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
           </div>
 
           <Popover open={excludeOpen} onOpenChange={setExcludeOpen}>
