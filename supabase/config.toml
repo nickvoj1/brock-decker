@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.fetch-job-signals]
 verify_jwt = false
+
+[functions.special-request]
+verify_jwt = false

@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Play, Loader2, FileText, Settings2, Users, MapPin, Building2 } from "lucide-react";
+import { Play, Loader2, FileText, Settings2, Users, MapPin, Building2, Search } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { IndustrySelector } from "@/components/upload/IndustrySelector";
+import { SpecialRequestTab } from "@/components/upload/SpecialRequestTab";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IndustrySuggestions } from "@/components/upload/IndustrySuggestions";
 import { LocationSelector } from "@/components/upload/LocationSelector";
 import { LocationSuggestions } from "@/components/upload/LocationSuggestions";
@@ -465,7 +467,24 @@ export default function UploadRun() {
       title={hasSignalContext ? "Signal-Based Contact Search" : "Find Hiring Contacts"}
       description={hasSignalContext ? `Finding contacts at ${signalContext.company || "target company"}` : "Upload a CV and find relevant hiring contacts on Apollo.io"}
     >
-      <div className="max-w-4xl space-y-6">
+      <Tabs defaultValue={hasSignalContext ? "search" : "search"} className="max-w-4xl">
+        <TabsList className="mb-6">
+          <TabsTrigger value="search" className="gap-2">
+            <FileText className="h-4 w-4" />
+            CV / Quick Search
+          </TabsTrigger>
+          <TabsTrigger value="special" className="gap-2">
+            <Building2 className="h-4 w-4" />
+            Special Request
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="special">
+          <SpecialRequestTab />
+        </TabsContent>
+
+        <TabsContent value="search">
+      <div className="space-y-6">
         {/* Signal Context Card - shown when coming from Signals Dashboard */}
         {hasSignalContext && (
           <SignalContextCard
@@ -849,6 +868,8 @@ export default function UploadRun() {
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
+      </Tabs>
     </AppLayout>
     
     {/* Contact Preview Modal */}

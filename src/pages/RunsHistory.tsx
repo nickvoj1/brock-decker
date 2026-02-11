@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw, Sparkles, Database, MessageSquare } from "lucide-react";
+import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw, Sparkles, Database, MessageSquare, Building2, Copy } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,7 @@ import {
 } from "@/lib/bullhornSkills";
 import { getEnrichmentRuns } from "@/lib/dataApi";
 import { SkillsReviewModal } from "@/components/upload/SkillsReviewModal";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
 
@@ -398,6 +399,24 @@ export default function RunsHistory() {
     return candidates?.[0]?.name || 'Unknown';
   };
 
+  const isSpecialRequest = (run: EnrichmentRun): boolean => {
+    const prefs = run.preferences_data as any[];
+    return prefs?.[0]?.type === 'special_request';
+  };
+
+  const [activeTab, setActiveTab] = useState<string>("searches");
+
+  const regularRuns = runs?.filter(r => !isSpecialRequest(r));
+  const specialRuns = runs?.filter(r => isSpecialRequest(r));
+
+  const copySpecialEmails = (run: EnrichmentRun) => {
+    const contacts = (run.enriched_data as unknown) as ApolloContact[];
+    if (!contacts || !Array.isArray(contacts)) return;
+    const emails = contacts.map(c => c.email).join('\n');
+    navigator.clipboard.writeText(emails);
+    toast({ title: "Copied!", description: `${contacts.length} emails copied` });
+  };
+
   return (
     <AppLayout 
       title="Runs History" 
@@ -431,6 +450,19 @@ export default function RunsHistory() {
           </CardHeader>
         </Card>
 
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-4">
+            <TabsTrigger value="searches" className="gap-2">
+              <History className="h-4 w-4" />
+              Contact Searches ({regularRuns?.length || 0})
+            </TabsTrigger>
+            <TabsTrigger value="special" className="gap-2">
+              <Building2 className="h-4 w-4" />
+              Special Requests ({specialRuns?.length || 0})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="searches">
         {/* Runs Table */}
         <Card>
           <CardHeader>
@@ -441,7 +473,7 @@ export default function RunsHistory() {
               <div>
                 <CardTitle className="text-lg">Contact Searches</CardTitle>
                 <CardDescription>
-                  {runs?.length || 0} searches found
+                  {regularRuns?.length || 0} searches found
                 </CardDescription>
               </div>
             </div>
@@ -461,7 +493,7 @@ export default function RunsHistory() {
               <div className="flex items-center justify-center py-12">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
-            ) : runs && runs.length > 0 ? (
+            ) : regularRuns && regularRuns.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -475,7 +507,7 @@ export default function RunsHistory() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {runs.map((run) => (
+                  {regularRuns.map((run) => (
                     <TableRow key={run.id} className="animate-fade-in">
                       <TableCell className="font-medium">
                         {getCandidateName(run)}
@@ -498,29 +530,24 @@ export default function RunsHistory() {
                               </span>
                               {bullhornOverlap[run.id].recentNotes > 0 && (
                                 <span className="text-xs text-orange-600" title="Contacts with notes in the last 2 weeks">
-                                  {bullhornOverlap[run.id].recentNotes} recent
+                                  ⚠ {bullhornOverlap[run.id].recentNotes} contacted recently
                                 </span>
                               )}
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0"
-                              onClick={() => checkBullhornOverlap(run.id)}
-                              disabled={checkingRunId === run.id}
-                              title="Refresh Bullhorn check"
-                            >
-                              {checkingRunId === run.id ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <RefreshCw className="h-3 w-3" />
-                              )}
-                            </Button>
                           </div>
-                        ) : getTotalContactCount(run) === 0 ? (
-                          <span className="text-sm text-muted-foreground">-</span>
                         ) : (
-                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => checkBullhornOverlap(run.id)}
+                            disabled={checkingRunId === run.id || getTotalContactCount(run) === 0}
+                          >
+                            {checkingRunId === run.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4" />
+                            )}
+                          </Button>
                         )}
                       </TableCell>
                       <TableCell>{run.search_counter}</TableCell>
@@ -528,36 +555,49 @@ export default function RunsHistory() {
                         <StatusBadge status={run.status} />
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1">
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
                             onClick={() => openRunDetails(run)}
+                            title="View details"
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
+                            size="icon"
                             onClick={() => downloadCSV(run)}
                             disabled={getTotalContactCount(run) === 0}
+                            title="Download CSV"
                           >
                             <Download className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
-                            onClick={() => openSkillsReview(run)}
+                            size="icon"
+                            onClick={() => {
+                              const overlap = bullhornOverlap[run.id];
+                              const excludedEmails = overlap ? [...(overlap.recentNoteEmails || [])] : [];
+                              openSkillsReview(run, excludedEmails);
+                            }}
                             disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
-                            title="Review AI Skills before export"
-                            className="text-purple-600 hover:text-purple-700"
+                            title="AI Skills Review → Bullhorn"
                           >
-                            <Sparkles className="h-4 w-4" />
+                            {exportingRunId === run.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-4 w-4" />
+                            )}
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
-                            onClick={() => exportTooBullhornMutation.mutate({ runId: run.id })}
+                            size="icon"
+                            onClick={() => {
+                              const overlap = bullhornOverlap[run.id];
+                              const excludedEmails = overlap ? [...(overlap.recentNoteEmails || [])] : [];
+                              exportTooBullhornMutation.mutate({ runId: run.id, excludedEmails: excludedEmails.length > 0 ? excludedEmails : undefined });
+                            }}
                             disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
                             title={run.bullhorn_exported_at ? "Re-export to Bullhorn (quick)" : "Export to Bullhorn (quick)"}
                             className={run.bullhorn_exported_at ? "text-green-600 hover:text-green-700" : ""}
@@ -589,6 +629,100 @@ export default function RunsHistory() {
             )}
           </CardContent>
         </Card>
+          </TabsContent>
+
+          <TabsContent value="special">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Building2 className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Special Requests</CardTitle>
+                    <CardDescription>
+                      Company-specific contact searches
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!profileName ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                      <Users className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <h3 className="font-medium text-foreground mb-1">Select a Profile</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Choose your profile from the header to view your special requests
+                    </p>
+                  </div>
+                ) : isLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  </div>
+                ) : specialRuns && specialRuns.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Request</TableHead>
+                        <TableHead>Company</TableHead>
+                        <TableHead>Country</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Contacts</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {specialRuns.map((run) => {
+                        const prefs = (run.preferences_data as any[])?.[0] || {};
+                        return (
+                          <TableRow key={run.id} className="animate-fade-in">
+                            <TableCell className="font-medium">{getCandidateName(run)}</TableCell>
+                            <TableCell>{prefs.company || '-'}</TableCell>
+                            <TableCell>{prefs.country || '-'}</TableCell>
+                            <TableCell>{format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-muted-foreground" />
+                                {getTotalContactCount(run)}
+                              </div>
+                            </TableCell>
+                            <TableCell><StatusBadge status={run.status} /></TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="icon" onClick={() => openRunDetails(run)} title="View details">
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => copySpecialEmails(run)} disabled={getTotalContactCount(run) === 0} title="Copy emails">
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => downloadCSV(run)} disabled={getTotalContactCount(run) === 0} title="Download CSV">
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                      <Inbox className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <h3 className="font-medium text-foreground mb-1">No special requests yet</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Use the Special Request tab on Upload & Run to search for contacts at a specific company
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* Run Details Dialog */}
         <Dialog open={!!selectedRun} onOpenChange={() => { setSelectedRun(null); setRemovedContacts(new Set()); }}>
