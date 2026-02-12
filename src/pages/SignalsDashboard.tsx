@@ -14,7 +14,9 @@ import {
   Zap,
   AlertCircle,
   ChevronDown,
-  MoreHorizontal
+  MoreHorizontal,
+  LayoutGrid,
+  Table2
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,6 +69,7 @@ import { SignalsRegionMap } from "@/components/signals/SignalsRegionMap";
 import { SignalAccuracyChart } from "@/components/signals/SignalAccuracyChart";
 import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
 import { JobSignalCard } from "@/components/signals/JobSignalCard";
+import { SignalTableView } from "@/components/signals/SignalTableView";
  import { FantasticJobsBoard } from "@/components/jobs/FantasticJobsBoard";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -113,6 +116,7 @@ export default function SignalsDashboard() {
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
   const [activeTab, setActiveTab] = useState<TabView>("signals");
   const [isJobsLoading, setIsJobsLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -732,6 +736,24 @@ export default function SignalsDashboard() {
           <TabsContent value="signals" className="mt-4 space-y-4">
             {/* Filters Row - Signals */}
             <div className="flex flex-wrap items-center gap-3 py-2 px-1">
+              {/* View Mode Toggle */}
+              <div className="flex items-center border rounded-md overflow-hidden">
+                <button
+                  onClick={() => setViewMode("table")}
+                  className={`p-1.5 ${viewMode === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  title="Table view"
+                >
+                  <Table2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode("cards")}
+                  className={`p-1.5 ${viewMode === "cards" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  title="Card view"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+              </div>
+
               <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
                 <SelectTrigger className="w-[160px] h-9">
                   <SelectValue placeholder="Tier" />
@@ -804,6 +826,20 @@ export default function SignalsDashboard() {
                   </div>
                 </CardContent>
               </Card>
+            ) : viewMode === "table" ? (
+              <SignalTableView
+                signals={filteredSignals}
+                onDismiss={handleDismiss}
+                onTAContacts={handleTAContacts}
+                onCVMatches={handleCVMatches}
+                onRetrain={handleRetrain}
+                taSearchLoading={taSearchLoading}
+                onSignalUpdated={(updated) => {
+                  setSignals((prev) =>
+                    prev.map((s) => (s.id === updated.id ? updated : s))
+                  );
+                }}
+              />
             ) : (
               <div className="space-y-3">
                 {filteredSignals.map((signal) => (
