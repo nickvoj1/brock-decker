@@ -96,29 +96,24 @@ Deno.serve(async (req) => {
       .gte('added_at', cutoff)
     const usedEmails = new Set((usedRows || []).map(r => r.email.toLowerCase()))
 
-    // Step 1: Search for people using api_search (free, no credits)
-    const foundPeople: Array<{ id: string; name: string; title: string; company: string; email: string; location: string }> = []
+    // Step 1: Search using api_search (free, no credits)
+    const candidates: Array<{ id: string; firstName: string; lastName: string; name: string; title: string; company: string; email: string; location: string }> = []
     const seenIds = new Set<string>()
     let page = 1
-    const maxPages = 10
 
-    console.log(`Searching Apollo for ${company} in ${country}, titles: ${uniqueTitles.length}`)
+    console.log(`Searching Apollo for ${company} in ${country}, titles: ${uniqueTitles.length}, maxContacts: ${maxContacts}`)
 
-    while (foundPeople.length < maxContacts * 2 && page <= maxPages) {
+    while (candidates.length < maxContacts * 3 && page <= 2) {
       const queryParams = new URLSearchParams()
       queryParams.set('q_organization_name', company)
       queryParams.set('per_page', '100')
       queryParams.set('page', String(page))
-      
-      // Add person_titles as repeated params
       for (const title of uniqueTitles) {
         queryParams.append('person_titles[]', title)
       }
-      // Add location
       queryParams.append('person_locations[]', country)
 
       const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
-
       const searchRes = await fetch(searchUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apolloKey },
@@ -132,39 +127,33 @@ Deno.serve(async (req) => {
 
       const searchData = await searchRes.json()
       const people = searchData?.people || []
-      
-      console.log(`Apollo page ${page}: ${people.length} people returned`)
-      
+      console.log(`Apollo page ${page}: ${people.length} people`)
       if (people.length === 0) break
 
       for (const person of people) {
         const personId = person.id
         if (!personId || seenIds.has(personId)) continue
         seenIds.add(personId)
-        
+
+        const firstName = person.first_name || ''
+        const lastName = person.last_name || ''
+        const name = [firstName, lastName].filter(Boolean).join(' ')
         const email = person.email || ''
-        const name = [person.first_name, person.last_name].filter(Boolean).join(' ')
         const location = [person.city, person.state, person.country].filter(Boolean).join(', ')
-        
-        // If email present from search (direct hit), use it
+
         if (email && !usedEmails.has(email.toLowerCase())) {
-          foundPeople.push({
-            id: personId,
-            name,
+          candidates.push({
+            id: personId, firstName, lastName, name,
             title: person.title || '',
             company: person.organization?.name || company,
-            email,
-            location,
+            email, location,
           })
-        } else if (!email) {
-          // Store for enrichment
-          foundPeople.push({
-            id: personId,
-            name,
+        } else if (!email && candidates.length < maxContacts * 3) {
+          candidates.push({
+            id: personId, firstName, lastName, name,
             title: person.title || '',
             company: person.organization?.name || company,
-            email: '', // needs enrichment
-            location,
+            email: '', location,
           })
         }
       }
@@ -174,99 +163,74 @@ Deno.serve(async (req) => {
       page++
     }
 
-    console.log(`Found ${foundPeople.length} people from api_search (${foundPeople.filter(p => p.email).length} with email already), enriching...`)
+    const withEmail = candidates.filter(c => c.email)
+    const needEmail = candidates.filter(c => !c.email)
 
-    // Step 2: Reveal emails using bulk_reveal (1 credit per reveal)
-    const contactsWithEmail = foundPeople.filter(p => p.email)
-    const contactsNeedEmail = foundPeople.filter(p => !p.email)
-    
-    // Only reveal up to maxContacts minus already-found
-    const revealLimit = Math.min(contactsNeedEmail.length, maxContacts - contactsWithEmail.length)
-    const toReveal = contactsNeedEmail.slice(0, revealLimit)
-    
-    if (toReveal.length > 0) {
-      // Batch reveal in groups of 10
-      const batchSize = 10
-      for (let i = 0; i < toReveal.length; i += batchSize) {
-        const batch = toReveal.slice(i, i + batchSize)
-        try {
-          const revealRes = await fetch('https://api.apollo.io/api/v1/people/bulk_reveal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Api-Key': apolloKey },
-            body: JSON.stringify({
-              ids: batch.map(p => p.id),
-            }),
+    console.log(`Search: ${candidates.length} total, ${withEmail.length} with email, ${needEmail.length} need enrichment`)
+
+    // Step 2: Enrich using people/match (1 credit each), concurrent batches
+    const enrichLimit = Math.max(0, maxContacts - withEmail.length)
+    const toEnrich = needEmail.slice(0, Math.min(enrichLimit, 15))
+
+    if (toEnrich.length > 0) {
+      console.log(`Enriching ${toEnrich.length} people via people/match...`)
+      
+      const batchSize = 5
+      for (let i = 0; i < toEnrich.length; i += batchSize) {
+        if (withEmail.length >= maxContacts) break
+        const batch = toEnrich.slice(i, i + batchSize)
+        
+        const results = await Promise.allSettled(
+          batch.map(async (person) => {
+            const matchRes = await fetch('https://api.apollo.io/api/v1/people/match', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': apolloKey },
+              body: JSON.stringify({
+                first_name: person.firstName,
+                last_name: person.lastName,
+                organization_name: person.company,
+                reveal_personal_emails: false,
+              }),
+            })
+            if (!matchRes.ok) return null
+            const matchData = await matchRes.json()
+            return { personId: person.id, email: matchData?.person?.email || null }
           })
-          
-          if (revealRes.ok) {
-            const revealData = await revealRes.json()
-            const matches = revealData?.matches || []
-            console.log(`Bulk reveal batch: ${matches.length} matches from ${batch.length} requested`)
-            
-            for (const match of matches) {
-              const email = match?.email || match?.revealed_email
-              const personId = match?.id
-              if (email && personId) {
-                const person = batch.find(p => p.id === personId)
-                if (person && !usedEmails.has(email.toLowerCase())) {
-                  person.email = email
-                  contactsWithEmail.push(person)
-                }
+        )
+
+        for (const result of results) {
+          if (result.status === 'fulfilled' && result.value?.email) {
+            const { personId, email } = result.value
+            if (!usedEmails.has(email.toLowerCase())) {
+              const person = toEnrich.find(p => p.id === personId)
+              if (person) {
+                person.email = email
+                withEmail.push(person)
               }
-            }
-          } else {
-            const errText = await revealRes.text()
-            console.error('Bulk reveal failed:', revealRes.status, errText)
-            
-            // Fallback: try people/match one by one
-            for (const person of batch) {
-              try {
-                const nameParts = person.name.split(' ')
-                const matchRes = await fetch('https://api.apollo.io/api/v1/people/match', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'x-api-key': apolloKey },
-                  body: JSON.stringify({
-                    first_name: nameParts[0] || '',
-                    last_name: nameParts.slice(1).join(' ') || '',
-                    organization_name: person.company,
-                    reveal_personal_emails: false,
-                  }),
-                })
-                if (matchRes.ok) {
-                  const matchData = await matchRes.json()
-                  const email = matchData?.person?.email
-                  if (email && !usedEmails.has(email.toLowerCase())) {
-                    person.email = email
-                    contactsWithEmail.push(person)
-                  }
-                }
-              } catch (e) {
-                console.error('Match error for', person.name, e)
-              }
-              if (contactsWithEmail.length >= maxContacts) break
             }
           }
-        } catch (e) {
-          console.error('Bulk reveal error:', e)
         }
-        
-        if (contactsWithEmail.length >= maxContacts) break
       }
     }
 
-    const finalContacts = contactsWithEmail.slice(0, maxContacts).map(c => ({
+    console.log(`After enrichment: ${withEmail.length} contacts with email`)
+
+    // Return all contacts - prioritize those with emails, then without
+    const allContacts = [...withEmail, ...needEmail.filter(c => !c.email)]
+    const finalContacts = allContacts.slice(0, maxContacts).map(c => ({
       name: c.name,
       title: c.title,
       company: c.company,
-      email: c.email,
+      email: c.email || '',
       location: c.location,
     }))
 
-    console.log(`Final contacts: ${finalContacts.length}`)
+    console.log(`Final contacts: ${finalContacts.length} (${finalContacts.filter(c => c.email).length} with email)`)
 
-    // Save used contacts
-    if (finalContacts.length > 0) {
-      const upsertRows = finalContacts.map(c => ({
+    // Save used contacts (only those with email)
+    const contactsWithEmails = finalContacts.filter(c => c.email)
+    if (contactsWithEmails.length > 0) {
+      const upsertRows = contactsWithEmails.map(c => ({
         email: c.email.toLowerCase(),
         name: c.name,
         company: c.company,

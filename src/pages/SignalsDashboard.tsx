@@ -16,7 +16,8 @@ import {
   ChevronDown,
   MoreHorizontal,
   LayoutGrid,
-  Table2
+  Table2,
+  Target
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -58,6 +59,7 @@ import {
   submitSignalFeedback,
   getJobSignals,
   dismissJobSignal,
+  huntPEFunds,
   Signal,
   JobSignal 
 } from "@/lib/signalsApi";
@@ -114,6 +116,7 @@ export default function SignalsDashboard() {
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [minScore, setMinScore] = useState<number>(0);
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
+  const [isHunting, setIsHunting] = useState(false);
   const [activeTab, setActiveTab] = useState<TabView>("signals");
   const [isJobsLoading, setIsJobsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "cards">("table");
@@ -344,6 +347,42 @@ export default function SignalsDashboard() {
       toast.error("Failed to fetch signals");
     } finally {
       setIsSurgeRunning(false);
+    }
+  };
+
+  // Hunt PE Funds across all 4 regions
+  const handleHuntPEFunds = async () => {
+    setIsHunting(true);
+    toast.info("🎯 Hunting PE fund news across London, EU, UAE, USA...", { duration: 30000, id: "pe-hunt" });
+    
+    try {
+      const result = await huntPEFunds();
+      if (result.success) {
+        const regionSummary = result.regionResults 
+          ? Object.entries(result.regionResults)
+              .map(([r, v]) => `${r}: ${v.inserted} new`)
+              .join(", ")
+          : "";
+        
+        toast.success(
+          `Found ${result.totalInserted} new PE signals! ${regionSummary}`,
+          { id: "pe-hunt", duration: 5000 }
+        );
+        
+        // Auto-enrich new signals with AI
+        if (result.totalInserted && result.totalInserted > 0) {
+          toast.info("Enriching new signals with AI insights...", { duration: 5000 });
+          await enrichSignalsWithAI();
+          await fetchSignals();
+        }
+      } else {
+        toast.error(result.error || "Hunt failed", { id: "pe-hunt" });
+      }
+    } catch (error) {
+      console.error("PE Hunt error:", error);
+      toast.error("Failed to hunt PE funds", { id: "pe-hunt" });
+    } finally {
+      setIsHunting(false);
     }
   };
 
@@ -621,11 +660,27 @@ export default function SignalsDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Primary Action: Fetch & Enrich */}
+            {/* Primary Action: Hunt PE Funds */}
             <Button
               size="sm"
+              onClick={handleHuntPEFunds}
+              disabled={isHunting || isSurgeRunning || isRefreshing}
+              className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {isHunting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Target className="h-4 w-4" />
+              )}
+              {isHunting ? "Hunting..." : "Hunt 4 Locations"}
+            </Button>
+            
+            {/* Secondary: Fetch & Enrich */}
+            <Button
+              size="sm"
+              variant="outline"
               onClick={handleRegionalSurge}
-              disabled={isSurgeRunning || isRefreshing || isScraping}
+              disabled={isSurgeRunning || isRefreshing || isScraping || isHunting}
               className="gap-1.5"
             >
               {isSurgeRunning || isRefreshing ? (

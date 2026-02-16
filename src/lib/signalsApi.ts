@@ -456,6 +456,31 @@ export function getSignalEnrichmentParams(signal: Signal): Record<string, string
   return params;
 }
 
+// Hunt PE Funds across regions using Serper + AI
+export async function huntPEFunds(regions?: string[]): Promise<{
+  success: boolean;
+  totalInserted?: number;
+  totalParsed?: number;
+  regionResults?: Record<string, { searched: number; parsed: number; inserted: number }>;
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("hunt-pe-funds", {
+      body: { regions: regions || ["london", "europe", "uae", "usa"] },
+    });
+
+    if (error) {
+      console.error("Hunt PE funds error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Hunt PE funds failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // Export signals to CSV
 export function exportSignalsToCSV(signals: Signal[]): string {
   const headers = [
