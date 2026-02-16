@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.special-request]
 verify_jwt = false
+
+[functions.hunt-pe-funds]
+verify_jwt = false
