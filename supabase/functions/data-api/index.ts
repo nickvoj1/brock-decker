@@ -1291,7 +1291,7 @@ Deno.serve(async (req) => {
         .eq("is_dismissed", false)
         .gte("published_at", cutoffDate.toISOString())
         .order("score", { ascending: false })
-        .limit(200);
+        .limit(500);
       
       if (region) {
         query = query.eq("region", region);
@@ -1306,9 +1306,10 @@ Deno.serve(async (req) => {
       // Get region and tier counts
       const { data: allSignalsRaw } = await supabase
         .from("signals")
-        .select("region, tier, title, description, url")
+        .select("region, tier, title, description, url, company")
         .eq("is_dismissed", false)
-        .gte("published_at", cutoffDate.toISOString());
+        .gte("published_at", cutoffDate.toISOString())
+        .limit(5000);
 
       const allSignals = (allSignalsRaw || []).filter(isDisplayableSignal);
       
