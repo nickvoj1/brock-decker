@@ -718,56 +718,47 @@ export default function SignalsDashboard() {
           </div>
         </div>
 
-        {/* Region Selector - Compact Cards */}
-        <div className="grid grid-cols-4 gap-2">
+        {/* Region Selector with embedded counts */}
+        <div className="grid grid-cols-4 gap-3">
           {(Object.entries(REGION_CONFIG) as [Region, typeof REGION_CONFIG.europe][]).map(
-            ([key, config]) => (
-              <button
-                key={key}
-                onClick={() => setActiveRegion(key)}
-                className={`p-3 rounded-lg border text-center transition-all ${
-                  activeRegion === key
-                    ? "border-primary bg-primary/5 shadow-sm"
-                    : "border-border/50 hover:border-border bg-card"
-                }`}
-              >
-                <span className="text-xl">{config.emoji}</span>
-                <p className={`text-sm font-medium mt-1 ${activeRegion === key ? "text-primary" : "text-foreground"}`}>
-                  {config.label}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {regionCounts[key] || 0} signals
-                </p>
-              </button>
-            )
+            ([key, config]) => {
+              const count = regionCounts[key] || 0;
+              const isActive = activeRegion === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveRegion(key)}
+                  className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                    isActive
+                      ? "border-primary bg-primary/5 shadow-md"
+                      : "border-border/40 hover:border-border hover:bg-muted/30 bg-card"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-lg">{config.emoji}</span>
+                    <span className={`text-2xl font-bold tabular-nums ${isActive ? "text-primary" : "text-foreground"}`}>
+                      {count}
+                    </span>
+                  </div>
+                  <p className={`text-sm font-medium ${isActive ? "text-primary" : "text-foreground"}`}>
+                    {config.label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">
+                    {config.description}
+                  </p>
+                </button>
+              );
+            }
           )}
         </div>
 
-        {/* Quick Stats Bar */}
-        <div className="flex items-center gap-6 px-4 py-2.5 rounded-lg bg-muted/40 border border-border/30 text-sm">
-          <div className="flex items-center gap-1.5">
-            <span className="text-muted-foreground">Total:</span>
-            <span className="font-semibold">{signals.filter(s => !s.is_dismissed).length}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-red-500" />
-            <span className="text-muted-foreground">Tier 1:</span>
-            <span className="font-semibold">{tierCounts.tier_1 || 0}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-amber-500" />
-            <span className="text-muted-foreground">Tier 2:</span>
-            <span className="font-semibold">{tierCounts.tier_2 || 0}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="text-muted-foreground">Tier 3:</span>
-            <span className="font-semibold">{tierCounts.tier_3 || 0}</span>
-          </div>
-          <div className="ml-auto flex items-center gap-1.5">
-            <span className="text-muted-foreground">{REGION_CONFIG[activeRegion].label}:</span>
-            <span className="font-semibold">{regionCounts[activeRegion] || 0}</span>
-          </div>
+        {/* Compact tier legend */}
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{signals.filter(s => !s.is_dismissed).length} total signals</span>
+          <span className="text-border">|</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-destructive" /> Tier 1: {tierCounts.tier_1 || 0}</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-amber-500" /> Tier 2: {tierCounts.tier_2 || 0}</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> Tier 3: {tierCounts.tier_3 || 0}</span>
         </div>
 
         {/* Tabs: Signals vs Jobs */}
