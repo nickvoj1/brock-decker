@@ -66,13 +66,10 @@ import {
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
 import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
 import { SignalCard } from "@/components/signals/SignalCard";
-import { SignalsTierChart } from "@/components/signals/SignalsTierChart";
-import { SignalsRegionMap } from "@/components/signals/SignalsRegionMap";
-import { SignalAccuracyChart } from "@/components/signals/SignalAccuracyChart";
 import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
 import { JobSignalCard } from "@/components/signals/JobSignalCard";
 import { SignalTableView } from "@/components/signals/SignalTableView";
- import { FantasticJobsBoard } from "@/components/jobs/FantasticJobsBoard";
+import { FantasticJobsBoard } from "@/components/jobs/FantasticJobsBoard";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -746,29 +743,31 @@ export default function SignalsDashboard() {
           )}
         </div>
 
-        {/* Stats Row with Accuracy Chart */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <SignalsTierChart tierCounts={tierCounts} />
-          <SignalAccuracyChart region={activeRegion} />
-          <Card className="border-border/50">
-            <div className="p-4">
-              <h3 className="text-sm font-medium text-muted-foreground">Quick Stats</h3>
-              <div className="mt-3 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Total Signals</span>
-                  <span className="font-medium">{signals.filter(s => !s.is_dismissed).length}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>High Intent (Tier 1)</span>
-                  <span className="font-medium text-destructive">{tierCounts.tier_1 || 0}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>This Region</span>
-                  <span className="font-medium">{regionCounts[activeRegion] || 0}</span>
-                </div>
-              </div>
-            </div>
-          </Card>
+        {/* Quick Stats Bar */}
+        <div className="flex items-center gap-6 px-4 py-2.5 rounded-lg bg-muted/40 border border-border/30 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">Total:</span>
+            <span className="font-semibold">{signals.filter(s => !s.is_dismissed).length}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 w-2 rounded-full bg-red-500" />
+            <span className="text-muted-foreground">Tier 1:</span>
+            <span className="font-semibold">{tierCounts.tier_1 || 0}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 w-2 rounded-full bg-amber-500" />
+            <span className="text-muted-foreground">Tier 2:</span>
+            <span className="font-semibold">{tierCounts.tier_2 || 0}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="text-muted-foreground">Tier 3:</span>
+            <span className="font-semibold">{tierCounts.tier_3 || 0}</span>
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-muted-foreground">{REGION_CONFIG[activeRegion].label}:</span>
+            <span className="font-semibold">{regionCounts[activeRegion] || 0}</span>
+          </div>
         </div>
 
         {/* Tabs: Signals vs Jobs */}

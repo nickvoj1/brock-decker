@@ -4,6 +4,7 @@ import { ShieldAlert } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ApolloSettingsCard } from "@/components/settings/ApolloSettingsCard";
 import { BullhornSettingsCard } from "@/components/settings/BullhornSettingsCard";
+import { FantasticJobsSettingsCard } from "@/components/settings/FantasticJobsSettingsCard";
 import { useProfileName } from "@/hooks/useProfileName";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
@@ -48,6 +49,7 @@ export default function SettingsPage() {
       <div className="max-w-2xl space-y-6">
         <ApolloSettingsCard />
         <BullhornSettingsCard />
+        <FantasticJobsSettingsCard />
       </div>
     </AppLayout>
   );
