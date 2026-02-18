@@ -139,55 +139,55 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   return (
     <>
       <tr 
-        className="border-b border-border/30 hover:bg-muted/30 transition-colors cursor-pointer group"
+        className="border-b border-border/20 hover:bg-muted/40 transition-colors cursor-pointer group"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Tier Dot */}
-        <td className="p-2 w-8">
+        <td className="py-3 px-3 w-8">
           <div className={`h-2.5 w-2.5 rounded-full ${tierDot}`} title={signal.tier || "Unknown"} />
         </td>
         {/* Date */}
-        <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">
+        <td className="py-3 px-3 text-xs text-muted-foreground whitespace-nowrap tabular-nums">
           {formatDate(signal.published_at)}
         </td>
         {/* Firm */}
-        <td className="p-2">
-          <span className="text-sm font-medium text-foreground">
+        <td className="py-3 px-3">
+          <span className="text-sm font-semibold text-foreground">
             {signal.company || "Unknown"}
           </span>
         </td>
         {/* Type */}
-        <td className="p-2">
+        <td className="py-3 px-3">
           <Badge variant="secondary" className="text-xs font-normal">
             {typeLabel}
           </Badge>
         </td>
         {/* Amount */}
-        <td className="p-2 text-sm font-medium text-foreground whitespace-nowrap">
+        <td className="py-3 px-3 text-sm font-semibold text-foreground whitespace-nowrap tabular-nums">
           {formatAmount(signal.amount, signal.currency)}
         </td>
         {/* Fund / Key Detail */}
-        <td className="p-2 text-sm text-muted-foreground max-w-[200px] truncate" title={signal.title}>
+        <td className="py-3 px-3 text-sm text-muted-foreground max-w-[220px] truncate" title={signal.title}>
           {extractFundName(signal)}
         </td>
         {/* Key People */}
-        <td className="p-2 text-xs text-muted-foreground max-w-[180px] truncate" title={keyPeople}>
+        <td className="py-3 px-3 text-xs text-muted-foreground max-w-[180px] truncate" title={keyPeople}>
           {keyPeople !== "—" ? (
-            <span className="flex items-center gap-1">
-              <User className="h-3 w-3 flex-shrink-0" />
+            <span className="flex items-center gap-1.5">
+              <User className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
               {keyPeople}
             </span>
           ) : "—"}
         </td>
         {/* Region */}
-        <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">
+        <td className="py-3 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap">
           {signal.region?.toUpperCase() || "—"}
         </td>
         {/* Source */}
-        <td className="p-2 text-xs text-muted-foreground truncate max-w-[100px]">
+        <td className="py-3 px-3 text-xs text-muted-foreground truncate max-w-[100px]">
           {signal.source ? (
             signal.url ? (
-              <a href={signal.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <a href={signal.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary flex items-center gap-1 transition-colors" onClick={e => e.stopPropagation()}>
                 {signal.source}
                 <ExternalLink className="h-3 w-3" />
               </a>
@@ -195,13 +195,13 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
           ) : "—"}
         </td>
         {/* Actions */}
-        <td className="p-2">
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-            <Button size="sm" variant="default" className="h-7 text-xs" onClick={() => onTAContacts(signal)} disabled={taSearchLoading}>
-              {taSearchLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <><UserSearch className="h-3 w-3 mr-1" />TA</>}
+        <td className="py-3 px-3">
+          <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+            <Button size="sm" variant="default" className="h-7 text-xs gap-1" onClick={() => onTAContacts(signal)} disabled={taSearchLoading}>
+              {taSearchLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <><UserSearch className="h-3 w-3" />TA</>}
             </Button>
             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={copyRow} title="Copy row">
-              {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+              {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
             </Button>
             <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDismiss(signal.id)} title="Dismiss">
               <Trash2 className="h-3 w-3" />
@@ -282,20 +282,20 @@ export const SignalTableView = memo(function SignalTableView({
   onSignalUpdated,
 }: SignalTableViewProps) {
   return (
-    <div className="rounded-lg border border-border/50 overflow-auto">
+    <div className="rounded-xl border border-border/40 overflow-auto bg-card shadow-sm">
       <table className="w-full text-sm">
-        <thead className="bg-muted/50 sticky top-0 z-10">
-          <tr className="border-b border-border">
-            <th className="p-2 w-8" />
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Date</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Firm Name</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Type</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Amount</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Fund / Detail</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Key People</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Region</th>
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">Source</th>
-            <th className="p-2 w-28" />
+        <thead>
+          <tr className="border-b border-border/40 bg-muted/30">
+            <th className="py-3 px-3 w-8" />
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Firm</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Amount</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fund / Detail</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Key People</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Region</th>
+            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
+            <th className="py-3 px-3 w-32" />
           </tr>
         </thead>
         <tbody>
