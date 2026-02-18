@@ -249,12 +249,8 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
                 </Button>
               )}
               
-              {/* Action Row */}
+              {/* Action Row - only CV Match (TA is in hover row) */}
               <div className="flex items-center gap-2 pt-1">
-                <Button size="sm" onClick={() => onTAContacts(signal)} disabled={taSearchLoading} className="text-xs">
-                  <UserSearch className="h-3 w-3 mr-1" />
-                  TA Contacts {signal.contacts_found > 0 && `(${signal.contacts_found})`}
-                </Button>
                 <Button size="sm" variant="outline" onClick={() => onCVMatches(signal)} className="text-xs">
                   <FileText className="h-3 w-3 mr-1" />
                   CV Match {signal.cv_matches > 0 && `(${signal.cv_matches})`}

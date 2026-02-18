@@ -448,55 +448,33 @@ export const SignalCard = memo(function SignalCard({
               )}
             </div>
             
-            {/* Action Buttons */}
-            <div className="flex items-center gap-2">
-              {onRetrain && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onRetrain(signal)}
-                  className="h-8 w-8 p-0"
-                  title="Train AI on this signal"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </Button>
-              )}
-              
+            {/* Action Buttons - consolidated */}
+            <div className="flex items-center gap-1.5">
               <Button
                 size="sm"
                 variant="default"
                 onClick={() => onTAContacts(signal)}
                 disabled={taSearchLoading}
-                className="h-8 text-xs"
+                className="h-7 text-xs"
               >
                 {taSearchLoading ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
                   <>
                     <UserSearch className="h-3 w-3 mr-1" />
-                    TA Contacts
-                    {signal.contacts_found > 0 && (
-                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px] bg-white/20">
-                        {signal.contacts_found}
-                      </Badge>
-                    )}
+                    TA {signal.contacts_found > 0 && `(${signal.contacts_found})`}
                   </>
                 )}
               </Button>
               
               <Button
                 size="sm"
-                variant="outline"
+                variant="ghost"
                 onClick={() => onCVMatches(signal)}
-                className="h-8 text-xs"
+                className="h-7 text-xs"
               >
                 <FileText className="h-3 w-3 mr-1" />
-                CV Match
-                {signal.cv_matches > 0 && (
-                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
-                    {signal.cv_matches}
-                  </Badge>
-                )}
+                CV {signal.cv_matches > 0 && `(${signal.cv_matches})` }
               </Button>
             </div>
           </div>
