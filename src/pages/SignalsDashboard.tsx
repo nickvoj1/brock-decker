@@ -6,15 +6,11 @@ import {
   Filter,
   Download,
   Loader2,
-  Wand2,
   Briefcase,
   Check,
   Search,
-  RotateCcw,
   Zap,
-  AlertCircle,
   ChevronDown,
-  MoreHorizontal,
   LayoutGrid,
   Table2,
   Target
@@ -657,25 +653,9 @@ export default function SignalsDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Primary Action: Hunt PE Funds */}
+            {/* Primary Action: Fetch Signals (combines surge + AI enrich) */}
             <Button
               size="sm"
-              onClick={handleHuntPEFunds}
-              disabled={isHunting || isSurgeRunning || isRefreshing}
-              className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
-            >
-              {isHunting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Target className="h-4 w-4" />
-              )}
-              {isHunting ? "Hunting..." : "Hunt 4 Locations"}
-            </Button>
-            
-            {/* Secondary: Fetch & Enrich */}
-            <Button
-              size="sm"
-              variant="outline"
               onClick={handleRegionalSurge}
               disabled={isSurgeRunning || isRefreshing || isScraping || isHunting}
               className="gap-1.5"
@@ -692,21 +672,17 @@ export default function SignalsDashboard() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1">
-                  <MoreHorizontal className="h-4 w-4" />
+                  <ChevronDown className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={handleRefresh} disabled={isRefreshing || isScraping || isSurgeRunning}>
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-                  Quick Refresh
+                <DropdownMenuItem onClick={handleHuntPEFunds} disabled={isHunting || isSurgeRunning}>
+                  <Target className="h-4 w-4 mr-2" />
+                  Hunt All Regions
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleScrapeJobs} disabled={isScraping || isRefreshing}>
                   <Search className="h-4 w-4 mr-2" />
                   Scrape Job Pages
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleEnrichWithAI} disabled={isRefreshing || isScraping || isSurgeRunning}>
-                  <Wand2 className="h-4 w-4 mr-2" />
-                  AI Enrich Only
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleExportCSV} disabled={filteredSignals.length === 0}>
