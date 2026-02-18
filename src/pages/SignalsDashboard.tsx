@@ -640,25 +640,22 @@ export default function SignalsDashboard() {
 
   return (
     <AppLayout title="Signals Dashboard" description="Recruitment Intel">
-      <div className="space-y-6">
-        {/* Header - Streamlined */}
+      <div className="space-y-8">
+        {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />
+          <div className="space-y-1">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">
               Signals
             </h1>
             <p className="text-sm text-muted-foreground">
-              PE/VC hiring intelligence • {signals.filter(s => !s.is_dismissed).length} active signals
+              PE/VC hiring intelligence across {Object.keys(REGION_CONFIG).length} regions
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Primary Action: Fetch Signals (combines surge + AI enrich) */}
             <Button
-              size="sm"
               onClick={handleRegionalSurge}
               disabled={isSurgeRunning || isRefreshing || isScraping || isHunting}
-              className="gap-1.5"
+              className="gap-2 h-10 px-5"
             >
               {isSurgeRunning || isRefreshing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -668,10 +665,9 @@ export default function SignalsDashboard() {
               {isSurgeRunning ? "Fetching..." : "Fetch Signals"}
             </Button>
             
-            {/* More Options Dropdown */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1">
+                <Button variant="outline" size="icon" className="h-10 w-10">
                   <ChevronDown className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -694,8 +690,8 @@ export default function SignalsDashboard() {
           </div>
         </div>
 
-        {/* Region Selector with embedded counts */}
-        <div className="grid grid-cols-4 gap-3">
+        {/* Region Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {(Object.entries(REGION_CONFIG) as [Region, typeof REGION_CONFIG.europe][]).map(
             ([key, config]) => {
               const count = regionCounts[key] || 0;
@@ -704,22 +700,22 @@ export default function SignalsDashboard() {
                 <button
                   key={key}
                   onClick={() => setActiveRegion(key)}
-                  className={`relative p-4 rounded-xl border-2 text-left transition-all ${
+                  className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
                     isActive
-                      ? "border-primary bg-primary/5 shadow-md"
-                      : "border-border/40 hover:border-border hover:bg-muted/30 bg-card"
+                      ? "border-primary bg-primary/5 shadow-lg ring-1 ring-primary/20"
+                      : "border-border/30 hover:border-border/60 hover:shadow-sm bg-card"
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-lg">{config.emoji}</span>
-                    <span className={`text-2xl font-bold tabular-nums ${isActive ? "text-primary" : "text-foreground"}`}>
+                  <div className="flex items-start justify-between mb-3">
+                    <span className="text-2xl">{config.emoji}</span>
+                    <span className={`text-3xl font-bold tabular-nums tracking-tight ${isActive ? "text-primary" : "text-foreground"}`}>
                       {count}
                     </span>
                   </div>
-                  <p className={`text-sm font-medium ${isActive ? "text-primary" : "text-foreground"}`}>
+                  <p className={`text-sm font-semibold ${isActive ? "text-primary" : "text-foreground"}`}>
                     {config.label}
                   </p>
-                  <p className="text-[11px] text-muted-foreground leading-tight mt-0.5">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     {config.description}
                   </p>
                 </button>
@@ -728,13 +724,13 @@ export default function SignalsDashboard() {
           )}
         </div>
 
-        {/* Compact tier legend */}
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">{signals.filter(s => !s.is_dismissed).length} total signals</span>
-          <span className="text-border">|</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-destructive" /> Tier 1: {tierCounts.tier_1 || 0}</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-amber-500" /> Tier 2: {tierCounts.tier_2 || 0}</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> Tier 3: {tierCounts.tier_3 || 0}</span>
+        {/* Tier summary */}
+        <div className="flex items-center gap-5 text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground tabular-nums">{signals.filter(s => !s.is_dismissed).length} signals</span>
+          <div className="h-4 w-px bg-border" />
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-destructive" /> Tier 1: {tierCounts.tier_1 || 0}</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-warning" /> Tier 2: {tierCounts.tier_2 || 0}</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-success" /> Tier 3: {tierCounts.tier_3 || 0}</span>
         </div>
 
         {/* Tabs: Signals vs Jobs */}
@@ -754,21 +750,21 @@ export default function SignalsDashboard() {
             </TabsTrigger>
           </TabsList>
           
-          <TabsContent value="signals" className="mt-4 space-y-4">
-            {/* Filters Row - Signals */}
-            <div className="flex flex-wrap items-center gap-3 py-2 px-1">
+          <TabsContent value="signals" className="mt-6 space-y-5">
+            {/* Filters Row */}
+            <div className="flex flex-wrap items-center gap-3">
               {/* View Mode Toggle */}
-              <div className="flex items-center border rounded-md overflow-hidden">
+              <div className="flex items-center border rounded-lg overflow-hidden bg-muted/30">
                 <button
                   onClick={() => setViewMode("table")}
-                  className={`p-1.5 ${viewMode === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`p-2 transition-colors ${viewMode === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                   title="Table view"
                 >
                   <Table2 className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => setViewMode("cards")}
-                  className={`p-1.5 ${viewMode === "cards" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`p-2 transition-colors ${viewMode === "cards" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                   title="Card view"
                 >
                   <LayoutGrid className="h-4 w-4" />
@@ -776,7 +772,7 @@ export default function SignalsDashboard() {
               </div>
 
               <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
-                <SelectTrigger className="w-[160px] h-9">
+                <SelectTrigger className="w-[160px] h-9 bg-card">
                   <SelectValue placeholder="Tier" />
                 </SelectTrigger>
                 <SelectContent className="bg-background border">
@@ -789,7 +785,7 @@ export default function SignalsDashboard() {
               </Select>
 
               <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                <SelectTrigger className="w-[140px] h-9">
+                <SelectTrigger className="w-[140px] h-9 bg-card">
                   <SelectValue placeholder="Sort" />
                 </SelectTrigger>
                 <SelectContent className="bg-background border">
@@ -801,8 +797,8 @@ export default function SignalsDashboard() {
                 </SelectContent>
               </Select>
 
-              <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5">
-                <span className="text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
                   Score ≥ {minScore}
                 </span>
                 <Slider
@@ -810,12 +806,12 @@ export default function SignalsDashboard() {
                   onValueChange={(v) => setMinScore(v[0])}
                   max={100}
                   step={10}
-                  className="w-20"
+                  className="w-24"
                 />
               </div>
 
-              <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
-                <Filter className="h-3 w-3" />
+              <span className="ml-auto text-sm text-muted-foreground flex items-center gap-1.5 font-medium">
+                <Filter className="h-3.5 w-3.5" />
                 {filteredSignals.length} results
               </span>
             </div>
