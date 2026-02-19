@@ -313,6 +313,41 @@ function extractDealSignature(text: string): string {
   return `${actionMatch?.[0] || "na"}|${amountMatch?.[0] || "na"}`.toLowerCase();
 }
 
+function extractAmount(text: string): { amount: number; currency: string } | null {
+  const patterns = [
+    /(\d+(?:\.\d+)?)\s*(?:billion|bn|b)\s*(?:dollar|usd|\$|euro|eur|€|pound|gbp|£)?/i,
+    /\$(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
+    /€(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
+    /£(\d+(?:\.\d+)?)\s*(?:billion|bn|b)/i,
+    /(\d+(?:\.\d+)?)\s*(?:million|mn|m)\s*(?:dollar|usd|\$|euro|eur|€|pound|gbp|£)?/i,
+    /\$(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
+    /€(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
+    /£(\d+(?:\.\d+)?)\s*(?:million|mn|m)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      let value = parseFloat(match[1]);
+      const fullMatch = match[0].toLowerCase();
+      const isBillion = fullMatch.includes("billion") || fullMatch.includes("bn") || (fullMatch.includes("b") && !fullMatch.includes("m"));
+      if (isBillion) value *= 1000;
+
+      let currency = "USD";
+      if (text.includes("€") || text.toLowerCase().includes("euro")) currency = "EUR";
+      else if (text.includes("£") || text.toLowerCase().includes("pound")) currency = "GBP";
+
+      return { amount: value, currency };
+    }
+  }
+
+  return null;
+}
+
+function isFundCloseNews(text: string): boolean {
+  return /\b(fund close|final close|first close|closes fund|closed fund|raises fund|hard cap)\b/i.test(text);
+}
+
 function checkMustHaveSignals(text: string): MustHaveHit {
   const lower = text.toLowerCase();
   if (/fund close|final close|first close|closes fund|raises fund/.test(lower)) {
@@ -1195,6 +1230,13 @@ Deno.serve(async (req) => {
       }
 
       const mappedSignalType = mustHave.signalType || mapToValidSignalType(classification.signalType);
+      const amountData = extractAmount(`${signal.title || ""} ${signal.description || ""}`);
+      const isFundCloseSignal = mappedSignalType === "funding" && isFundCloseNews(fullText);
+      if (isFundCloseSignal && !amountData) {
+        console.log(`Skipping fund-close signal without amount: ${signal.title?.substring(0, 60)}`);
+        stats.skipped++;
+        continue;
+      }
       const scoreBase = classification.relevanceScore * 10;
       const boostedScore = Math.min(100, Math.max(scoreBase, scoreBase + mustHave.boost));
       const keyPeople = extractKeyPeople(`${signal.title || ""} ${signal.description || ""}`);
@@ -1237,6 +1279,8 @@ Deno.serve(async (req) => {
         ai_insight: classification.insight,
         ai_pitch: classification.pitch,
         score: boostedScore,
+        amount: amountData?.amount || null,
+        currency: amountData?.currency || null,
         published_at: signal.published_at || new Date().toISOString(),
         details: {
           key_people: keyPeople,

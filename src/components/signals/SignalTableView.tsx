@@ -9,8 +9,7 @@ import {
   Loader2,
   Trash2,
   Copy,
-  Check,
-  User
+  Check
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,15 +71,6 @@ function extractFundName(signal: Signal): string {
   if (fundMatch) return fundMatch[0];
   if (desc && desc.length < 80) return desc;
   return signal.title.length < 60 ? signal.title : signal.title.slice(0, 57) + "...";
-}
-
-// Extract key people from description
-function extractKeyPeople(signal: Signal): string {
-  const desc = signal.description || "";
-  // Check for "Key People: ..." pattern
-  const kpMatch = desc.match(/Key People:\s*(.+)/i);
-  if (kpMatch) return kpMatch[1].trim();
-  return "—";
 }
 
 function inferCompanyFromTitle(title: string): string | null {
@@ -177,7 +167,6 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   const tierDot = TIER_DOT[signal.tier || "tier_2"] || TIER_DOT.tier_2;
   const typeLabel = TYPE_LABELS[signal.signal_type || ""] || signal.signal_type || "Signal";
   const hasInsight = Boolean(signal.ai_insight || signal.ai_pitch);
-  const keyPeople = extractKeyPeople(signal);
   const firmName = resolveFirmName(signal);
 
   const handleEnrichAI = async () => {
@@ -207,7 +196,6 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
       typeLabel,
       formatAmount(signal.amount, signal.currency),
       extractFundName(signal),
-      keyPeople,
       signal.region?.toUpperCase() || "",
       signal.source || "",
     ].join("\t");
@@ -250,15 +238,6 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
         <td className="py-3 px-3 text-sm text-muted-foreground max-w-[220px] truncate" title={signal.title}>
           {extractFundName(signal)}
         </td>
-        {/* Key People */}
-        <td className="py-3 px-3 text-xs text-muted-foreground max-w-[180px] truncate" title={keyPeople}>
-          {keyPeople !== "—" ? (
-            <span className="flex items-center gap-1.5">
-              <User className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
-              {keyPeople}
-            </span>
-          ) : "—"}
-        </td>
         {/* Region */}
         <td className="py-3 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap">
           {signal.region?.toUpperCase() || "—"}
@@ -292,7 +271,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
       {/* Expanded Detail Row */}
       {expanded && (
         <tr className="bg-muted/20">
-          <td colSpan={10} className="p-4">
+          <td colSpan={9} className="p-4">
             <div className="space-y-3 max-w-4xl">
               {/* Title / Headline */}
               <div>
@@ -372,7 +351,6 @@ export const SignalTableView = memo(function SignalTableView({
             <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
             <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Amount</th>
             <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fund / Detail</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Key People</th>
             <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Region</th>
             <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
             <th className="py-3 px-3 w-32" />

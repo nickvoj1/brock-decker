@@ -484,6 +484,10 @@ function extractAmount(text: string): { amount: number; currency: string } | nul
   return null;
 }
 
+function isFundCloseNews(text: string): boolean {
+  return /\b(fund close|final close|first close|closes fund|closed fund|raises fund|hard cap)\b/i.test(text);
+}
+
 function extractCompany(title: string, description: string = ""): string | null {
   const cleanTitle = title
     .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
@@ -772,6 +776,14 @@ Deno.serve(async (req) => {
           if (!tierResult) continue;
           
           const amountData = extractAmount(fullText);
+          const mappedSignalType = mapToValidSignalType(tierResult.signalType);
+
+          // Fund close signals must have amount.
+          if (mappedSignalType === "funding" && isFundCloseNews(fullText) && !amountData) {
+            console.log(`Skipping fund-close signal without amount: ${item.title.slice(0, 60)}...`);
+            continue;
+          }
+
           const company = extractCompany(item.title, item.description);
           
           // STRICT: Detect region and reject if content belongs to different region
@@ -809,7 +821,7 @@ Deno.serve(async (req) => {
             score: score,
             amount: amountData?.amount || null,
             currency: amountData?.currency || "EUR",
-            signal_type: mapToValidSignalType(tierResult.signalType),
+            signal_type: mappedSignalType,
             description: item.description?.slice(0, 500) || null,
             url: item.url,
             source: feed.source,
@@ -836,6 +848,14 @@ Deno.serve(async (req) => {
         if (!tierResult) continue;
         
         const amountData = extractAmount(fullText);
+        const mappedSignalType = mapToValidSignalType(tierResult.signalType);
+
+        // Fund close signals must have amount.
+        if (mappedSignalType === "funding" && isFundCloseNews(fullText) && !amountData) {
+          console.log(`Skipping deep-search fund-close without amount: ${item.title.slice(0, 60)}...`);
+          continue;
+        }
+
         const company = extractCompany(item.title, item.description);
         
         // STRICT: Detect region and reject if content belongs to different region
@@ -863,7 +883,7 @@ Deno.serve(async (req) => {
           score: score,
           amount: amountData?.amount || null,
           currency: amountData?.currency || "EUR",
-          signal_type: mapToValidSignalType(tierResult.signalType),
+          signal_type: mappedSignalType,
           description: item.description?.slice(0, 500) || null,
           url: item.url,
           source: item.source || "Firecrawl Search",
