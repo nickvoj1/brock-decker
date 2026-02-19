@@ -106,10 +106,60 @@ function inferCompanyFromTitle(title: string): string | null {
   return null;
 }
 
+function cleanFirmCandidate(value: string): string {
+  return value
+    .replace(/\b(?:market|buyouts?|shop|latest|manager|debut|bn|million|billion|fund|for)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksLikeNoisyFirm(value: string): boolean {
+  const v = value.trim();
+  if (!v) return true;
+  if (v.length > 55) return true;
+  if (/\d/.test(v)) return true;
+
+  const lower = v.toLowerCase();
+  const banned = [
+    "market",
+    "buyout",
+    "shop",
+    "latest",
+    "manager",
+    "debut",
+    "bn",
+    "million",
+    "billion",
+    "for ",
+  ];
+  if (banned.some((w) => lower.includes(w))) return true;
+
+  // Very low-quality values tend to be all lowercase phrase fragments.
+  if (v === lower && v.split(" ").length >= 2) return true;
+
+  return false;
+}
+
 function resolveFirmName(signal: Signal): string {
-  const company = (signal.company || "").trim();
-  if (company && company.toLowerCase() !== "unknown") return company;
-  return inferCompanyFromTitle(signal.title) || "Unknown";
+  const rawCompany = (signal.company || "").trim();
+  const cleanedCompany = cleanFirmCandidate(rawCompany);
+
+  if (
+    cleanedCompany &&
+    cleanedCompany.toLowerCase() !== "unknown" &&
+    !looksLikeNoisyFirm(cleanedCompany)
+  ) {
+    return cleanedCompany;
+  }
+
+  const inferred = cleanFirmCandidate(inferCompanyFromTitle(signal.title) || "");
+  if (inferred && !looksLikeNoisyFirm(inferred)) return inferred;
+
+  // Last fallback: first capitalized token group in title
+  const fallbackMatch = signal.title.match(/\b([A-Z][A-Za-z0-9&'.-]{1,})(?:\s+[A-Z][A-Za-z0-9&'.-]{1,}){0,2}\b/);
+  if (fallbackMatch?.[0]) return fallbackMatch[0];
+
+  return "Unknown";
 }
 
 function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoading, onSignalUpdated }: {

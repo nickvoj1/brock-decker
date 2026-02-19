@@ -121,6 +121,43 @@ function formatSignalType(type: string): string {
     .replace(/\b\w/g, l => l.toUpperCase());
 }
 
+function inferCompanyFromTitle(title: string): string | null {
+  const cleaned = title
+    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
+    .trim();
+
+  const patterns = [
+    /^([A-Z][A-Za-z0-9&'().,\-\s]{1,60}?)\s+(?:raises|raised|closes|closed|acquires|acquired|announces|announced|appoints|appointed|hires|hired|merges|merged|sells|sold|backs|backed|secures|secured|launches|launched)\b/i,
+    /^([A-Z][A-Za-z0-9&'().,\-\s]{1,60}?)\s+(?:to|has|is)\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match?.[1]) {
+      const candidate = match[1].trim().replace(/\s+/g, " ");
+      if (candidate.length >= 2 && candidate.length <= 60) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveFirmName(signal: Signal): string {
+  const raw = (signal.company || "").trim();
+  const lowered = raw.toLowerCase();
+  const noisy =
+    !raw ||
+    lowered === "unknown" ||
+    /\d/.test(raw) ||
+    /\b(market|buyout|shop|latest|manager|debut|bn|million|billion)\b/i.test(raw) ||
+    raw.length > 55;
+
+  if (!noisy) return raw;
+  return inferCompanyFromTitle(signal.title) || "Unknown";
+}
+
 export const SignalCard = memo(function SignalCard({
   signal,
   onDismiss,
@@ -143,6 +180,7 @@ export const SignalCard = memo(function SignalCard({
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
   const sector = detectSector(signal);
   const sectorColor = sector ? SECTOR_COLORS[sector] : null;
+  const firmName = resolveFirmName(signal);
   
   // Determine if signal needs validation
   const isPending = !signal.user_feedback && !signal.validated_region;
@@ -219,9 +257,9 @@ export const SignalCard = memo(function SignalCard({
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
-                {signal.company && (
+                {firmName && firmName !== "Unknown" && (
                   <h3 className="text-base font-semibold text-foreground truncate">
-                    {signal.company}
+                    {firmName}
                   </h3>
                 )}
                 {signal.amount && (
