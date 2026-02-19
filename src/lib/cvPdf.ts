@@ -65,15 +65,13 @@ export function getCVRedactionSettings(): CVRedactionSettings {
     if (!raw) return envDefaults;
     const parsed = JSON.parse(raw);
     return {
-      hardDeleteEnabled:
-        typeof parsed?.hardDeleteEnabled === "boolean"
-          ? parsed.hardDeleteEnabled
-          : envDefaults.hardDeleteEnabled,
+      // Enforce hard-delete mode for CV compliance.
+      hardDeleteEnabled: true,
       hardDeleteApiUrl:
         String(parsed?.hardDeleteApiUrl || "").trim() || envDefaults.hardDeleteApiUrl,
     };
   } catch {
-    return envDefaults;
+    return { ...envDefaults, hardDeleteEnabled: true };
   }
 }
 

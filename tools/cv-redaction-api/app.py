@@ -25,19 +25,21 @@ ADDRESS_RE = re.compile(
     r"\b(street|strasse|road|avenue|ave|square|blvd|boulevard|london|munich|berlin|paris|madrid|germany|uk|united kingdom)\b",
     re.IGNORECASE,
 )
+HAS_NUMBER_RE = re.compile(r"\d")
 
 
-def _is_personal_line(text: str) -> bool:
+def _is_personal_line(text: str) -> Tuple[bool, bool]:
     line = text.strip()
     if not line:
-        return False
+        return False, False
     low = line.lower()
-    return (
-        bool(EMAIL_RE.search(line))
-        or bool(PHONE_RE.search(line))
-        or bool(SITE_RE.search(low))
-        or bool(ADDRESS_RE.search(low))
-    )
+    has_email = bool(EMAIL_RE.search(line))
+    has_phone = bool(PHONE_RE.search(line))
+    has_site = bool(SITE_RE.search(low))
+    has_address = bool(ADDRESS_RE.search(low)) and bool(HAS_NUMBER_RE.search(line))
+    matched = has_email or has_phone or has_site or has_address
+    strong = has_email or has_phone or has_site
+    return matched, strong
 
 
 def _name_anchor(page: fitz.Page) -> Optional[fitz.Rect]:
@@ -68,10 +70,10 @@ def _name_anchor(page: fitz.Page) -> Optional[fitz.Rect]:
     return best_rect
 
 
-def _line_rects_under_name(page: fitz.Page, name_rect: Optional[fitz.Rect]) -> List[fitz.Rect]:
+def _line_rects_under_name(page: fitz.Page, name_rect: Optional[fitz.Rect]) -> Tuple[List[fitz.Rect], int]:
     words = page.get_text("words")
     if not words:
-        return []
+        return [], 0
 
     if name_rect is not None:
         y_start = name_rect.y1 + 2
@@ -88,11 +90,15 @@ def _line_rects_under_name(page: fitz.Page, name_rect: Optional[fitz.Rect]) -> L
         grouped.setdefault((int(block_no), int(line_no)), []).append((float(x0), float(y0), float(x1), float(y1), str(text)))
 
     rects: List[fitz.Rect] = []
+    strong_hits = 0
     for _key, parts in grouped.items():
         parts.sort(key=lambda p: p[0])
         line_text = " ".join(p[4] for p in parts).strip()
-        if not _is_personal_line(line_text):
+        matched, strong = _is_personal_line(line_text)
+        if not matched:
             continue
+        if strong:
+            strong_hits += 1
 
         x0 = min(p[0] for p in parts) - 10
         y0 = min(p[1] for p in parts) - 4
@@ -100,22 +106,33 @@ def _line_rects_under_name(page: fitz.Page, name_rect: Optional[fitz.Rect]) -> L
         y1 = max(p[3] for p in parts) + 4
         rects.append(fitz.Rect(x0, y0, x1, y1))
 
-    return rects
+    rects.sort(key=lambda r: (r.y0, r.x0))
+    return rects[:3], strong_hits
 
 
-def _fallback_personal_masks(page: fitz.Page) -> List[fitz.Rect]:
-    w = page.rect.width
-    # PyMuPDF uses top-left origin; keep fallback masks in top contact band.
-    return [
-        fitz.Rect(w * 0.14, 92, w * 0.86, 146),
-        fitz.Rect(w * 0.18, 148, w * 0.82, 176),
-    ]
+def _detect_photo_masks(page: fitz.Page) -> List[fitz.Rect]:
+    # Detect likely profile photo image blocks near top-right; avoid static broad masks.
+    masks: List[fitz.Rect] = []
+    seen: set[Tuple[int, int, int, int]] = set()
+    min_x = page.rect.width * 0.55
+    max_y = page.rect.height * 0.45
 
+    for img in page.get_images(full=True):
+        xref = int(img[0])
+        rects = page.get_image_rects(xref)
+        for rect in rects:
+            r = fitz.Rect(rect)
+            if r.x0 < min_x or r.y0 > max_y:
+                continue
+            if r.width < 55 or r.height < 70:
+                continue
+            key = (int(r.x0), int(r.y0), int(r.x1), int(r.y1))
+            if key in seen:
+                continue
+            seen.add(key)
+            masks.append(r)
 
-def _photo_mask(page: fitz.Page) -> fitz.Rect:
-    w = page.rect.width
-    # Top-right portrait area in common CV templates.
-    return fitz.Rect(w - 150, 80, w - 30, 220)
+    return masks
 
 
 def redact_cv_bytes(input_pdf: bytes) -> bytes:
@@ -125,16 +142,22 @@ def redact_cv_bytes(input_pdf: bytes) -> bytes:
 
     page = doc[0]
     name_rect = _name_anchor(page)
-    line_rects = _line_rects_under_name(page, name_rect)
-    if not line_rects:
-        line_rects = _fallback_personal_masks(page)
+    line_rects, strong_hits = _line_rects_under_name(page, name_rect)
+    if not line_rects or strong_hits == 0:
+        doc.close()
+        raise ValueError("No high-confidence personal-info line found under candidate name.")
+
+    photo_rects = _detect_photo_masks(page)
+    all_rects = line_rects + photo_rects
+    total_area = sum(max(0.0, r.width) * max(0.0, r.height) for r in all_rects)
+    coverage = total_area / max(1.0, page.rect.width * page.rect.height)
+    if coverage > 0.08:
+        doc.close()
+        raise ValueError("Redaction coverage too large; aborting to avoid deleting CV content.")
 
     # Personal lines under name
-    for rect in line_rects:
+    for rect in all_rects:
         page.add_redact_annot(rect, fill=(1, 1, 1))
-
-    # Common photo area (top-right)
-    page.add_redact_annot(_photo_mask(page), fill=(1, 1, 1))
 
     # Apply true redaction: removes text objects in redacted areas.
     page.apply_redactions(
