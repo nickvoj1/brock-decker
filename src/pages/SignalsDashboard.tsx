@@ -135,6 +135,50 @@ export default function SignalsDashboard() {
   const [retrainModalOpen, setRetrainModalOpen] = useState(false);
   const [selectedSignalForRetrain, setSelectedSignalForRetrain] = useState<Signal | null>(null);
 
+  const setupRealtimeSubscription = useCallback(() => {
+    const channel = supabase
+      .channel("signals-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "signals",
+        },
+        (payload) => {
+          console.log("Realtime signal update:", payload);
+          if (payload.eventType === "INSERT") {
+            const newSignal = payload.new as Signal;
+            setSignals((prev) => [newSignal, ...prev]);
+            // Update counts
+            setRegionCounts((prev) => ({
+              ...prev,
+              [newSignal.region]: (prev[newSignal.region] || 0) + 1,
+            }));
+            if (newSignal.tier) {
+              setTierCounts((prev) => ({
+                ...prev,
+                [newSignal.tier!]: (prev[newSignal.tier!] || 0) + 1,
+              }));
+            }
+          } else if (payload.eventType === "UPDATE") {
+            const updatedSignal = payload.new as Signal;
+            setSignals((prev) =>
+              prev.map((s) => (s.id === updatedSignal.id ? updatedSignal : s))
+            );
+          } else if (payload.eventType === "DELETE") {
+            const deletedId = payload.old.id;
+            setSignals((prev) => prev.filter((s) => s.id !== deletedId));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   // Fetch signals on mount and when profile changes
   useEffect(() => {
     if (!profileName) return;
@@ -192,50 +236,6 @@ export default function SignalsDashboard() {
     };
     localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
   }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode]);
-
-  const setupRealtimeSubscription = useCallback(() => {
-    const channel = supabase
-      .channel("signals-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "signals",
-        },
-        (payload) => {
-          console.log("Realtime signal update:", payload);
-          if (payload.eventType === "INSERT") {
-            const newSignal = payload.new as Signal;
-            setSignals((prev) => [newSignal, ...prev]);
-            // Update counts
-            setRegionCounts((prev) => ({
-              ...prev,
-              [newSignal.region]: (prev[newSignal.region] || 0) + 1,
-            }));
-            if (newSignal.tier) {
-              setTierCounts((prev) => ({
-                ...prev,
-                [newSignal.tier!]: (prev[newSignal.tier!] || 0) + 1,
-              }));
-            }
-          } else if (payload.eventType === "UPDATE") {
-            const updatedSignal = payload.new as Signal;
-            setSignals((prev) =>
-              prev.map((s) => (s.id === updatedSignal.id ? updatedSignal : s))
-            );
-          } else if (payload.eventType === "DELETE") {
-            const deletedId = payload.old.id;
-            setSignals((prev) => prev.filter((s) => s.id !== deletedId));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   const fetchSignals = async () => {
     if (!profileName) return;
