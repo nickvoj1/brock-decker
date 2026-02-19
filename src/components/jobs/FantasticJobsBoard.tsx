@@ -37,6 +37,7 @@ interface Job {
   job_type: string;
   source: string;
   ai_taxonomies?: string[];
+  is_pe_match?: boolean;
 }
 
 interface Filters {
@@ -124,8 +125,19 @@ function mapTimeRange(postedAfter: string): string {
   const v = postedAfter.toLowerCase();
   if (v === "24hours" || v === "24h") return "24h";
   if (v === "1hour" || v === "1h") return "1h";
-  if (v === "30days" || v === "30d") return "6m";
+  if (v === "14days" || v === "14d" || v === "2weeks") return "14d";
+  if (v === "30days" || v === "30d") return "30d";
   return "7d";
+}
+
+function postedAfterToMs(postedAfter: string): number | null {
+  const v = String(postedAfter || "").toLowerCase();
+  if (v === "1hour" || v === "1h") return 60 * 60 * 1000;
+  if (v === "24hours" || v === "24h") return 24 * 60 * 60 * 1000;
+  if (v === "14days" || v === "14d" || v === "2weeks") return 14 * 24 * 60 * 60 * 1000;
+  if (v === "30days" || v === "30d") return 30 * 24 * 60 * 60 * 1000;
+  if (v === "7days" || v === "7d") return 7 * 24 * 60 * 60 * 1000;
+  return null;
 }
 
 function toNumber(value: unknown): number | null {
@@ -208,9 +220,15 @@ function normalizeJobs(items: Record<string, unknown>[], actorId: string): Job[]
 function toHistoryJob(job: Job): Job {
   return {
     ...job,
-    // Keep history payload compact so localStorage stays reliable.
-    description: (job.description || "").slice(0, 300),
+    // Keep history payload compact but preserve enough text for stable filtering.
+    description: (job.description || "").slice(0, 1200),
   };
+}
+
+function matchesPESignal(job: Job): boolean {
+  if (typeof job.is_pe_match === "boolean") return job.is_pe_match;
+  const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
+  return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
 }
 
 function inferDepartmentsFromJobTitle(title: string): string[] {
@@ -436,6 +454,12 @@ export function FantasticJobsBoard() {
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       if (mode === "linkedin") params.actor_id = settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID;
       if (mode === "career") params.actor_id = settings.careerActorId || DEFAULT_CAREER_ACTOR_ID;
+      if (mode === "all") {
+        params.actor_id = [
+          settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID,
+          settings.careerActorId || DEFAULT_CAREER_ACTOR_ID,
+        ].join(",");
+      }
       params.limit = String(requestedCount);
       params.offset = "0";
 
@@ -455,6 +479,8 @@ export function FantasticJobsBoard() {
       const companyTerms = splitTerms(filters.company).map((t) => t.toLowerCase());
       const locationTerms = splitTerms(filters.location).map((t) => t.toLowerCase());
       const industry = filters.industry.toLowerCase();
+      const postedAfterMs = postedAfterToMs(filters.postedAfter);
+      const cutoff = postedAfterMs ? Date.now() - postedAfterMs : null;
 
       return rows.filter((job) => {
         const haystack = `${job.title} ${job.company} ${job.description || ""} ${job.location}`.toLowerCase();
@@ -476,6 +502,11 @@ export function FantasticJobsBoard() {
           if (Number.isFinite(min) && min > 0) {
             if (!job.salary_min || job.salary_min < min) return false;
           }
+        }
+
+        if (cutoff) {
+          const postedTs = new Date(job.posted_at).getTime();
+          if (!Number.isFinite(postedTs) || postedTs < cutoff) return false;
         }
 
         if (filters.remote && !job.remote) return false;
@@ -511,12 +542,10 @@ export function FantasticJobsBoard() {
         );
         const filtered = applyClientFilters(deduped);
         const capped = filtered.slice(0, requestedCount);
+        const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const visibleRows = strictPEOnly
-          ? capped.filter((job) => {
-              const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
-              return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
-            })
-          : capped;
+          ? withPEFlags.filter((job) => job.is_pe_match)
+          : withPEFlags;
         const historyResults = visibleRows.map(toHistoryJob);
 
         setJobs(visibleRows);
@@ -575,10 +604,7 @@ export function FantasticJobsBoard() {
   const scopedJobs = useMemo(() => {
     let out = jobs;
     if (strictPEOnly) {
-      out = out.filter((job) => {
-        const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
-        return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
-      });
+      out = out.filter((job) => matchesPESignal(job));
     }
     return out;
   }, [jobs, strictPEOnly]);

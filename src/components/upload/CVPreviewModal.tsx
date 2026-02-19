@@ -37,10 +37,19 @@ interface CVPreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   candidate: ParsedCandidate | null;
+  headerImageUrl?: string | null;
+  watermarkImageUrl?: string | null;
 }
 
-export function CVPreviewModal({ isOpen, onClose, candidate }: CVPreviewModalProps) {
+export function CVPreviewModal({
+  isOpen,
+  onClose,
+  candidate,
+  headerImageUrl,
+  watermarkImageUrl,
+}: CVPreviewModalProps) {
   if (!candidate) return null;
+  const hasBranding = Boolean(headerImageUrl || watermarkImageUrl);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -53,9 +62,23 @@ export function CVPreviewModal({ isOpen, onClose, candidate }: CVPreviewModalPro
         </DialogHeader>
 
         <ScrollArea className="max-h-[70vh] pr-4">
-          <div className="space-y-6">
+          <div className="relative space-y-6">
+            {watermarkImageUrl ? (
+              <img
+                src={watermarkImageUrl}
+                alt="CV watermark"
+                className="absolute left-0 top-0 z-10 max-h-14 max-w-[180px] object-contain opacity-80"
+              />
+            ) : null}
+            {headerImageUrl ? (
+              <img
+                src={headerImageUrl}
+                alt="CV header"
+                className="absolute right-0 top-0 z-10 max-h-14 max-w-[220px] object-contain"
+              />
+            ) : null}
             {/* Header Section */}
-            <div className="flex items-start gap-4 p-4 bg-muted/50 rounded-lg">
+            <div className={`flex items-start gap-4 p-4 bg-muted/50 rounded-lg ${hasBranding ? "pt-20" : ""}`}>
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
                 <User className="h-7 w-7 text-primary" />
               </div>

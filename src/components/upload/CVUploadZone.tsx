@@ -1,8 +1,12 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2, Eye, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CVPreviewModal } from "./CVPreviewModal";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 interface WorkExperience {
   company: string;
@@ -37,6 +41,8 @@ interface CVUploadZoneProps {
   parsedData: ParsedCandidate | null;
   error: string | null;
   isProcessing: boolean;
+  headerImageUrl?: string | null;
+  watermarkImageUrl?: string | null;
 }
 
 const ACCEPTED_TYPES = [
@@ -50,14 +56,23 @@ const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.doc'];
 export function CVUploadZone({
   onFileSelect,
   onClear,
+  onParsed,
   file,
   parsedData,
   error,
   isProcessing,
+  headerImageUrl,
+  watermarkImageUrl,
 }: CVUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
   const [expandedWorkHistory, setExpandedWorkHistory] = useState(false);
+  const [editorDraft, setEditorDraft] = useState<ParsedCandidate | null>(null);
+
+  useEffect(() => {
+    setEditorDraft(parsedData);
+  }, [parsedData]);
 
   const isValidFile = (file: File): boolean => {
     const hasValidType = ACCEPTED_TYPES.includes(file.type);
@@ -101,6 +116,22 @@ export function CVUploadZone({
 
   const hasFile = file !== null;
   const isValid = hasFile && parsedData && !error;
+
+  const saveEditedCandidate = () => {
+    if (!editorDraft || !onParsed) {
+      setShowEditor(false);
+      return;
+    }
+    const normalizedSkills = Array.from(
+      new Set(
+        (editorDraft.skills || [])
+          .map((s) => String(s || "").trim())
+          .filter(Boolean),
+      ),
+    );
+    onParsed({ ...editorDraft, skills: normalizedSkills });
+    setShowEditor(false);
+  };
 
   return (
     <div className="space-y-2">
@@ -213,15 +244,25 @@ export function CVUploadZone({
                     </div>
                   )}
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPreview(true)}
-                  className="w-full gap-2"
-                >
-                  <Eye className="h-4 w-4" />
-                  Preview Full CV
-                </Button>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowPreview(true)}
+                    className="w-full gap-2"
+                  >
+                    <Eye className="h-4 w-4" />
+                    Preview Full CV
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowEditor(true)}
+                    className="w-full"
+                  >
+                    Edit Parsed CV
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -251,7 +292,104 @@ export function CVUploadZone({
         isOpen={showPreview}
         onClose={() => setShowPreview(false)}
         candidate={parsedData}
+        headerImageUrl={headerImageUrl}
+        watermarkImageUrl={watermarkImageUrl}
       />
+
+      <Dialog open={showEditor} onOpenChange={setShowEditor}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Parsed CV</DialogTitle>
+          </DialogHeader>
+          {!editorDraft ? (
+            <p className="text-sm text-muted-foreground">No parsed CV data to edit yet.</p>
+          ) : (
+            <div className="grid gap-4">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="cv-edit-name">Full Name</Label>
+                  <Input
+                    id="cv-edit-name"
+                    value={editorDraft.name || ""}
+                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-edit-title">Current Title</Label>
+                  <Input
+                    id="cv-edit-title"
+                    value={editorDraft.current_title || ""}
+                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, current_title: e.target.value } : prev))}
+                  />
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="cv-edit-location">Location</Label>
+                  <Input
+                    id="cv-edit-location"
+                    value={editorDraft.location || ""}
+                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, location: e.target.value } : prev))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="cv-edit-email">Email</Label>
+                  <Input
+                    id="cv-edit-email"
+                    value={editorDraft.email || ""}
+                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, email: e.target.value } : prev))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cv-edit-phone">Phone</Label>
+                <Input
+                  id="cv-edit-phone"
+                  value={editorDraft.phone || ""}
+                  onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, phone: e.target.value } : prev))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cv-edit-skills">Skills (comma-separated)</Label>
+                <Input
+                  id="cv-edit-skills"
+                  value={(editorDraft.skills || []).join(", ")}
+                  onChange={(e) =>
+                    setEditorDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            skills: e.target.value
+                              .split(",")
+                              .map((s) => s.trim())
+                              .filter(Boolean),
+                          }
+                        : prev,
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cv-edit-summary">Summary</Label>
+                <Textarea
+                  id="cv-edit-summary"
+                  rows={4}
+                  value={editorDraft.summary || ""}
+                  onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, summary: e.target.value } : prev))}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowEditor(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={saveEditedCandidate}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

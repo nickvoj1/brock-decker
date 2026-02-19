@@ -16,7 +16,10 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useProfileName } from "@/hooks/useProfileName";
+import { useToast } from "@/hooks/use-toast";
 import { format, subDays, startOfDay } from "date-fns";
 import { getEnrichmentRuns, getCandidateProfiles } from "@/lib/dataApi";
 
@@ -39,9 +42,26 @@ interface RecentActivity {
   timestamp: string;
 }
 
+const CV_BRANDING_STORAGE_KEY = "cv-branding-assets.v1";
+
+type CVBrandingAssets = {
+  headerImageUrl: string | null;
+  watermarkImageUrl: string | null;
+  headerFileName: string | null;
+  watermarkFileName: string | null;
+};
+
+const DEFAULT_CV_BRANDING: CVBrandingAssets = {
+  headerImageUrl: null,
+  watermarkImageUrl: null,
+  headerFileName: null,
+  watermarkFileName: null,
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const profileName = useProfileName();
+  const { toast } = useToast();
   const [stats, setStats] = useState<DashboardStats>({
     totalSearches: 0,
     totalContacts: 0,
@@ -53,6 +73,21 @@ export default function Dashboard() {
   });
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [cvBranding, setCvBranding] = useState<CVBrandingAssets>(() => {
+    try {
+      const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || typeof parsed !== "object") return DEFAULT_CV_BRANDING;
+      return {
+        headerImageUrl: typeof parsed.headerImageUrl === "string" ? parsed.headerImageUrl : null,
+        watermarkImageUrl: typeof parsed.watermarkImageUrl === "string" ? parsed.watermarkImageUrl : null,
+        headerFileName: typeof parsed.headerFileName === "string" ? parsed.headerFileName : null,
+        watermarkFileName: typeof parsed.watermarkFileName === "string" ? parsed.watermarkFileName : null,
+      };
+    } catch {
+      return DEFAULT_CV_BRANDING;
+    }
+  });
 
   useEffect(() => {
     if (profileName) {
@@ -61,6 +96,61 @@ export default function Dashboard() {
       setIsLoading(false);
     }
   }, [profileName]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CV_BRANDING_STORAGE_KEY, JSON.stringify(cvBranding));
+    } catch (error) {
+      console.error("Failed to persist CV branding assets:", error);
+    }
+  }, [cvBranding]);
+
+  const readImageAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleBrandingUpload = async (type: "header" | "watermark", file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload an image file for CV branding.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      setCvBranding((prev) =>
+        type === "header"
+          ? { ...prev, headerImageUrl: dataUrl, headerFileName: file.name }
+          : { ...prev, watermarkImageUrl: dataUrl, watermarkFileName: file.name },
+      );
+      toast({
+        title: type === "header" ? "Header uploaded" : "Watermark uploaded",
+        description: "Saved in Dashboard. It will appear in CV preview.",
+      });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Unable to read image file",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clearBrandingAsset = (type: "header" | "watermark") => {
+    setCvBranding((prev) =>
+      type === "header"
+        ? { ...prev, headerImageUrl: null, headerFileName: null }
+        : { ...prev, watermarkImageUrl: null, watermarkFileName: null },
+    );
+  };
 
   const fetchDashboardData = async () => {
     if (!profileName) return;
@@ -199,20 +289,86 @@ export default function Dashboard() {
     return format(date, 'MMM d');
   };
 
+  const renderCVBrandingCard = () => (
+    <Card className="animate-slide-up" style={{ animationDelay: '0ms' }}>
+      <CardHeader>
+        <CardTitle>CV Branding</CardTitle>
+        <CardDescription>Upload assets once here. Watermark is top-left, header is top-right in CV preview.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <Button onClick={() => navigate("/upload")} className="w-full sm:w-auto">
+            Upload CV & Edit
+          </Button>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="dashboard-watermark-upload">Watermark (Top Left)</Label>
+          <Input
+            id="dashboard-watermark-upload"
+            type="file"
+            accept="image/*"
+            onChange={(e) => handleBrandingUpload("watermark", e.target.files?.[0] || null)}
+          />
+          {cvBranding.watermarkFileName ? (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="truncate pr-2">{cvBranding.watermarkFileName}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => clearBrandingAsset("watermark")}
+              >
+                Remove
+              </Button>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="dashboard-header-upload">Header (Top Right)</Label>
+          <Input
+            id="dashboard-header-upload"
+            type="file"
+            accept="image/*"
+            onChange={(e) => handleBrandingUpload("header", e.target.files?.[0] || null)}
+          />
+          {cvBranding.headerFileName ? (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="truncate pr-2">{cvBranding.headerFileName}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => clearBrandingAsset("header")}
+              >
+                Remove
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   if (!profileName) {
     return (
       <AppLayout
         title="My Dashboard"
         description="Your personal workspace overview"
       >
-        <div className="flex flex-col items-center justify-center py-16">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted mb-4">
-            <Users className="h-8 w-8 text-muted-foreground" />
+        <div className="space-y-6">
+          {renderCVBrandingCard()}
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted mb-4">
+              <Users className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg font-medium text-foreground mb-2">Select a Profile</h3>
+            <p className="text-sm text-muted-foreground text-center max-w-md">
+              Please select your profile from the header dropdown to view your personal dashboard with searches, CVs, and activity history.
+            </p>
           </div>
-          <h3 className="text-lg font-medium text-foreground mb-2">Select a Profile</h3>
-          <p className="text-sm text-muted-foreground text-center max-w-md">
-            Please select your profile from the header dropdown to view your personal dashboard with searches, CVs, and activity history.
-          </p>
         </div>
       </AppLayout>
     );
@@ -224,6 +380,7 @@ export default function Dashboard() {
       description="Your personal workspace overview"
     >
       <div className="space-y-6">
+        {renderCVBrandingCard()}
         {/* Stats Overview */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card className="animate-slide-up" style={{ animationDelay: '0ms' }}>
@@ -404,6 +561,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         )}
+
       </div>
     </AppLayout>
   );

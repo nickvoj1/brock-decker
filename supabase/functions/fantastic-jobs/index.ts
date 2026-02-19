@@ -32,9 +32,20 @@ function mapTimeRange(postedAfter: string): string {
   const v = String(postedAfter || "").toLowerCase();
   if (v === "1hour" || v === "1h") return "1h";
   if (v === "24hours" || v === "24h") return "24h";
-  if (v === "14days" || v === "14d" || v === "2weeks") return "7d";
-  if (v === "30days" || v === "30d" || v === "6m") return "6m";
+  if (v === "14days" || v === "14d" || v === "2weeks") return "14d";
+  if (v === "30days" || v === "30d") return "30d";
+  if (v === "6m") return "6m";
   return "7d";
+}
+
+function postedAfterToMs(postedAfter: string): number | null {
+  const v = String(postedAfter || "").toLowerCase();
+  if (v === "1hour" || v === "1h") return 60 * 60 * 1000;
+  if (v === "24hours" || v === "24h") return 24 * 60 * 60 * 1000;
+  if (v === "14days" || v === "14d" || v === "2weeks") return 14 * 24 * 60 * 60 * 1000;
+  if (v === "30days" || v === "30d") return 30 * 24 * 60 * 60 * 1000;
+  if (v === "7days" || v === "7d") return 7 * 24 * 60 * 60 * 1000;
+  return null;
 }
 
 function toNumber(value: unknown): number | null {
@@ -57,6 +68,18 @@ function getFlag(body: Record<string, unknown>, url: URL, key: string): boolean 
   if (typeof fromBody === "string") return fromBody.trim().toLowerCase() === "true";
   const fromQuery = url.searchParams.get(key);
   return fromQuery?.trim().toLowerCase() === "true";
+}
+
+function normalizeUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>[] {
@@ -169,7 +192,7 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       salary_max: salaryMax,
       currency: salaryCurrency,
       posted_at: postedAt,
-      apply_url: applyUrl,
+      apply_url: normalizeUrl(applyUrl),
       description,
       remote: isRemote,
       job_type: jobType,
@@ -182,6 +205,21 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       ai_skills: (job.ai_key_skills as string[]) || [],
       ai_experience: (job.ai_experience_level as string) || null,
     };
+  });
+}
+
+function filterByPostedAfter(
+  jobs: Record<string, unknown>[],
+  postedAfter: string,
+): Record<string, unknown>[] {
+  const windowMs = postedAfterToMs(postedAfter);
+  if (!windowMs) return jobs;
+
+  const cutoff = Date.now() - windowMs;
+  return jobs.filter((job) => {
+    const postedAt = String(job.posted_at || "");
+    const ts = new Date(postedAt).getTime();
+    return Number.isFinite(ts) && ts >= cutoff;
   });
 }
 
@@ -459,18 +497,28 @@ serve(async (req) => {
     let rawJobs: Record<string, unknown>[] = [];
     let provider = "";
     let providerError = "";
+    const requestedLimit = Math.min(Math.max(Number(getParam(body, url, "limit", "50")) || 50, 1), 5000);
+    const postedAfter = getParam(body, url, "posted_after", "7days");
 
     if (apifyToken && apifyActorIds.length > 0) {
+      const providerParts: string[] = [];
+      let collected: Record<string, unknown>[] = [];
       for (const actorId of apifyActorIds) {
         try {
-          rawJobs = await fetchViaApify(apifyToken, actorId, body, url);
-          provider = `apify:${actorId}`;
-          if (rawJobs.length > 0) break;
+          const actorJobs = await fetchViaApify(apifyToken, actorId, body, url);
+          if (actorJobs.length > 0) {
+            collected = collected.concat(actorJobs);
+            providerParts.push(`apify:${actorId}`);
+          }
         } catch (error) {
           const err = error instanceof Error ? error.message : `Apify failed for ${actorId}`;
           providerError = providerError ? `${providerError}; ${err}` : err;
           console.error("[fantastic-jobs] Apify error:", err);
         }
+      }
+      if (collected.length > 0) {
+        rawJobs = collected;
+        provider = providerParts.join(",");
       }
     }
 
@@ -492,9 +540,21 @@ serve(async (req) => {
       );
     }
 
-    const jobs = normalizeJobs(rawJobs);
+    const normalizedJobs = normalizeJobs(rawJobs);
+    const postedFilteredJobs = filterByPostedAfter(normalizedJobs, postedAfter);
+    const dedupedJobs = Array.from(
+      new Map(
+        postedFilteredJobs.map((job) => {
+          const applyUrl = String(job.apply_url || "").toLowerCase();
+          const title = String(job.title || "").toLowerCase();
+          const company = String(job.company || "").toLowerCase();
+          return [`${applyUrl}|${title}|${company}`, job] as const;
+        }),
+      ).values(),
+    );
+    const jobs = dedupedJobs.slice(0, requestedLimit);
     const offset = Number(getParam(body, url, "offset", "0"));
-    const limit = Number(getParam(body, url, "limit", "50"));
+    const limit = requestedLimit;
 
     return new Response(
       JSON.stringify({
