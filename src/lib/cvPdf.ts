@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import mupdf from "mupdf";
 import { PDFDocument, StandardFonts, rgb, type PDFImage } from "pdf-lib";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfJsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
@@ -499,13 +500,12 @@ async function redactPdfTextLocally(
   detectedZones: RedactionZone[],
   hints?: CVPersonalHints,
 ): Promise<Uint8Array> {
-  const mod: any = await import("mupdf");
-  const mupdf = mod?.default || mod;
-  if (!mupdf?.Document?.openDocument) {
+  const mupdfMod: any = (mupdf as any)?.default || mupdf;
+  if (!mupdfMod?.Document?.openDocument) {
     throw new Error("CV redaction engine failed to load. Refresh and try again.");
   }
 
-  const doc = mupdf.Document.openDocument(sourcePdfBytes, "application/pdf");
+  const doc = mupdfMod.Document.openDocument(sourcePdfBytes, "application/pdf");
   const pdf = doc.asPDF();
   if (!pdf) {
     throw new Error("Failed to open PDF for redaction.");
