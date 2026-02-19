@@ -742,6 +742,7 @@ export default function GenerateMail() {
                         onFileSelect={handleCvFileSelect}
                         onClear={handleCvClear}
                         file={cvFile}
+                        originalFile={cvFile}
                         parsedData={cvData}
                         error={cvError}
                         isProcessing={isParsingCV}

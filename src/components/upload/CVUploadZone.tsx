@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { downloadBrandedSourcePdf, downloadCandidatePdf } from "@/lib/cvPdf";
 
 interface WorkExperience {
   company: string;
@@ -41,6 +42,7 @@ interface CVUploadZoneProps {
   parsedData: ParsedCandidate | null;
   error: string | null;
   isProcessing: boolean;
+  originalFile?: File | null;
   headerImageUrl?: string | null;
   watermarkImageUrl?: string | null;
   headerText?: string | null;
@@ -62,6 +64,7 @@ export function CVUploadZone({
   parsedData,
   error,
   isProcessing,
+  originalFile,
   headerImageUrl,
   watermarkImageUrl,
   headerText,
@@ -135,53 +138,16 @@ export function CVUploadZone({
     setShowEditor(false);
   };
 
-  const downloadEditedCandidate = () => {
+  const downloadEditedCandidate = async () => {
     const source = editorDraft || parsedData;
     if (!source) return;
-    const lines: string[] = [];
-    lines.push(source.name || "Unknown Name");
-    lines.push(source.current_title || "");
-    lines.push(source.location || "");
-    lines.push("");
-    if (source.summary) {
-      lines.push("Summary");
-      lines.push(source.summary);
-      lines.push("");
+    const outName = `${(source.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
+    const branding = { watermarkImageUrl, headerImageUrl, headerText };
+    if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
+      await downloadBrandedSourcePdf(originalFile, outName, branding);
+      return;
     }
-    if (source.email || source.phone) {
-      lines.push("Contact");
-      if (source.email) lines.push(`Email: ${source.email}`);
-      if (source.phone) lines.push(`Phone: ${source.phone}`);
-      lines.push("");
-    }
-    if (source.skills && source.skills.length > 0) {
-      lines.push("Skills");
-      lines.push(source.skills.join(", "));
-      lines.push("");
-    }
-    if (source.work_history && source.work_history.length > 0) {
-      lines.push("Experience");
-      for (const job of source.work_history) {
-        const duration = job.duration ? ` (${job.duration})` : "";
-        lines.push(`- ${job.title} at ${job.company}${duration}`);
-      }
-      lines.push("");
-    }
-    if (source.education && source.education.length > 0) {
-      lines.push("Education");
-      for (const edu of source.education) {
-        const year = edu.year ? ` (${edu.year})` : "";
-        lines.push(`- ${edu.degree}, ${edu.institution}${year}`);
-      }
-      lines.push("");
-    }
-    const blob = new Blob([lines.join("\n").trim()], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(source.name || "candidate").replace(/\s+/g, "-").toLowerCase()}-edited-cv.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadCandidatePdf(source, outName, branding);
   };
 
   return (

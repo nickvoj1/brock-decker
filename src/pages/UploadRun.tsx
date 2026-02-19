@@ -659,6 +659,7 @@ export default function UploadRun() {
                     onClear={handleCvClear}
                     onParsed={setCvData}
                     file={cvFile}
+                    originalFile={cvFile}
                     parsedData={cvData}
                     error={cvError}
                     isProcessing={isParsingCV}

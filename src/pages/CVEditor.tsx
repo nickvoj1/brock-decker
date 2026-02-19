@@ -176,6 +176,7 @@ export default function CVEditor() {
               parsedData={cvData}
               error={cvError}
               isProcessing={isParsingCV}
+              originalFile={cvFile}
               headerImageUrl={branding.headerImageUrl}
               watermarkImageUrl={branding.watermarkImageUrl}
               headerText={branding.headerText}

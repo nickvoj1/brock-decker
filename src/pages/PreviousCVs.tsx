@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getCandidateProfiles, deleteCandidateProfile } from "@/lib/dataApi";
+import { downloadCandidatePdf } from "@/lib/cvPdf";
 
 interface SavedProfile {
   id: string;
@@ -293,52 +294,13 @@ export default function PreviousCVs() {
     });
   };
 
-  const downloadProfileCV = (profile: SavedProfile) => {
-    const lines: string[] = [];
-    lines.push(profile.name || "Unknown Name");
-    lines.push(profile.current_title || "");
-    lines.push(profile.location || "");
-    lines.push("");
-    if (profile.summary) {
-      lines.push("Summary");
-      lines.push(profile.summary);
-      lines.push("");
-    }
-    if (profile.email || profile.phone) {
-      lines.push("Contact");
-      if (profile.email) lines.push(`Email: ${profile.email}`);
-      if (profile.phone) lines.push(`Phone: ${profile.phone}`);
-      lines.push("");
-    }
-    if (profile.skills.length > 0) {
-      lines.push("Skills");
-      lines.push(profile.skills.join(", "));
-      lines.push("");
-    }
-    if (profile.work_history.length > 0) {
-      lines.push("Experience");
-      for (const job of profile.work_history) {
-        const duration = job.duration ? ` (${job.duration})` : "";
-        lines.push(`- ${job.title} at ${job.company}${duration}`);
-      }
-      lines.push("");
-    }
-    if (profile.education && profile.education.length > 0) {
-      lines.push("Education");
-      for (const edu of profile.education) {
-        const year = edu.year ? ` (${edu.year})` : "";
-        lines.push(`- ${edu.degree}, ${edu.institution}${year}`);
-      }
-      lines.push("");
-    }
-    const content = lines.join("\n").trim();
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(profile.name || "candidate").replace(/\s+/g, "-").toLowerCase()}-cv.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const downloadProfileCV = async (profile: SavedProfile) => {
+    const active = cvBrandingStore.presets[cvBrandingStore.selectedPreset];
+    await downloadCandidatePdf(profile, `${(profile.name || "candidate").replace(/\s+/g, "-")}-cv`, {
+      watermarkImageUrl: active.watermarkImageUrl,
+      headerImageUrl: active.headerImageUrl,
+      headerText: active.headerText,
+    });
   };
 
   const renderCVBrandingCard = () => (
