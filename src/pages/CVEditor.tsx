@@ -6,6 +6,7 @@ import { CVUploadZone } from "@/components/upload/CVUploadZone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { getBrandingForPreset, getStoredBrandingPreset } from "@/lib/cvBranding";
 
 interface WorkExperience {
   company: string;
@@ -32,9 +33,6 @@ interface ParsedCandidate {
   education: Education[];
 }
 
-const CV_BRANDING_STORAGE_KEY = "cv-branding-assets.v1";
-type PresetKey = "acl_partners" | "everet_marsh" | "brock_decker";
-
 type CVBrandingAssets = {
   headerImageUrl: string | null;
   watermarkImageUrl: string | null;
@@ -60,45 +58,13 @@ export default function CVEditor() {
     };
   };
 
-  const branding: CVBrandingAssets = (() => {
-    try {
-      const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (parsed?.presets) {
-        let selectedPreset: PresetKey = "acl_partners";
-        if (parsed.selectedPreset === "acl_partners" || parsed.selectedPreset === "brock_decker" || parsed.selectedPreset === "everet_marsh") {
-          selectedPreset = parsed.selectedPreset;
-        }
-        if (parsed.selectedPreset === "everett_marsh") {
-          selectedPreset = "everet_marsh";
-        }
-        const preset = parsed.presets[selectedPreset] || {};
-        return {
-          headerImageUrl: preset.headerImageUrl || null,
-          watermarkImageUrl: preset.watermarkImageUrl || null,
-          headerText:
-            typeof preset.headerText === "string" && preset.headerText.trim().length > 0
-              ? preset.headerText
-              : "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
-        };
-      }
-
-      return {
-        headerImageUrl: parsed?.headerImageUrl || null,
-        watermarkImageUrl: parsed?.watermarkImageUrl || null,
-        headerText:
-          typeof parsed?.headerText === "string" && parsed.headerText.trim().length > 0
-            ? parsed.headerText
-            : "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
-      };
-    } catch {
-      return {
-        headerImageUrl: null,
-        watermarkImageUrl: null,
-        headerText: "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
-      };
-    }
-  })();
+  const selectedPreset = getStoredBrandingPreset();
+  const presetBranding = getBrandingForPreset(selectedPreset);
+  const branding: CVBrandingAssets = {
+    headerImageUrl: presetBranding.headerImageUrl,
+    watermarkImageUrl: presetBranding.watermarkImageUrl,
+    headerText: presetBranding.headerText,
+  };
 
   const handleCvFileSelect = async (file: File) => {
     setCvFile(file);

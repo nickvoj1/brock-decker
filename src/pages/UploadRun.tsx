@@ -25,6 +25,7 @@ import { useCVAnalysis } from "@/hooks/useCVAnalysis";
 import { useProfileName } from "@/hooks/useProfileName";
 import { createEnrichmentRun, updateEnrichmentRun, saveCandidateProfile as saveProfileToApi } from "@/lib/dataApi";
 import type { Json } from "@/integrations/supabase/types";
+import { getBrandingForPreset, getStoredBrandingPreset } from "@/lib/cvBranding";
 
 interface WorkExperience {
   company: string;
@@ -55,21 +56,6 @@ interface ParsedCandidate {
 export type { ParsedCandidate, WorkExperience, Education };
 
 const ROLES_STORAGE_KEY = 'apollo-search-selected-roles';
-const CV_BRANDING_STORAGE_KEY = "cv-branding-assets.v1";
-
-type CVBrandingAssets = {
-  headerImageUrl: string | null;
-  watermarkImageUrl: string | null;
-  headerFileName: string | null;
-  watermarkFileName: string | null;
-};
-
-const DEFAULT_CV_BRANDING: CVBrandingAssets = {
-  headerImageUrl: null,
-  watermarkImageUrl: null,
-  headerFileName: null,
-  watermarkFileName: null,
-};
 
 export default function UploadRun() {
   const navigate = useNavigate();
@@ -136,21 +122,8 @@ export default function UploadRun() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewContacts, setPreviewContacts] = useState<Contact[]>([]);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
-  const [cvBranding, setCvBranding] = useState<CVBrandingAssets>(() => {
-    try {
-      const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (!parsed || typeof parsed !== "object") return DEFAULT_CV_BRANDING;
-      return {
-        headerImageUrl: typeof parsed.headerImageUrl === "string" ? parsed.headerImageUrl : null,
-        watermarkImageUrl: typeof parsed.watermarkImageUrl === "string" ? parsed.watermarkImageUrl : null,
-        headerFileName: typeof parsed.headerFileName === "string" ? parsed.headerFileName : null,
-        watermarkFileName: typeof parsed.watermarkFileName === "string" ? parsed.watermarkFileName : null,
-      };
-    } catch {
-      return DEFAULT_CV_BRANDING;
-    }
-  });
+  const selectedPreset = getStoredBrandingPreset();
+  const cvBranding = getBrandingForPreset(selectedPreset);
 
   // Comprehensive CV analysis for industries, locations, and roles
   const cvAnalysis = useCVAnalysis(cvData);
@@ -222,14 +195,6 @@ export default function UploadRun() {
   useEffect(() => {
     localStorage.setItem(ROLES_STORAGE_KEY, JSON.stringify(selectedRoles));
   }, [selectedRoles]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CV_BRANDING_STORAGE_KEY, JSON.stringify(cvBranding));
-    } catch (error) {
-      console.error("Failed to persist CV branding assets:", error);
-    }
-  }, [cvBranding]);
 
   const handleCvFileSelect = async (file: File) => {
     setCvFile(file);

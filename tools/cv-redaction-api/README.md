@@ -24,8 +24,9 @@ uvicorn app:app --host 0.0.0.0 --port 8088
 
 ## Connect in web app
 
-1. Open `CVs` page.
-2. Turn on `Hard Delete Personal Info (API)`.
-3. Set `Hard Redaction API URL` to your endpoint, e.g. `http://localhost:8088/redact`.
+The web app tries hard-delete redaction automatically:
 
-If the API is unavailable, the app falls back to client-side masking (visual redaction only).
+1. If your backend serves this as `/redact` on the same domain, no extra setup is needed.
+2. Otherwise set `VITE_CV_HARD_DELETE_API_URL` to the full endpoint URL (e.g. `http://localhost:8088/redact`).
+
+If the API is unavailable, the app falls back to client-side masking (visual-only redaction) while preserving PDF quality.

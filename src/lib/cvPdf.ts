@@ -40,24 +40,40 @@ export type CVRedactionSettings = {
 
 const CV_REDACTION_SETTINGS_KEY = "cv-redaction-settings.v1";
 const DEFAULT_CV_REDACTION_SETTINGS: CVRedactionSettings = {
-  hardDeleteEnabled: false,
-  hardDeleteApiUrl: "",
+  hardDeleteEnabled: true,
+  hardDeleteApiUrl: "/redact",
 };
+
+function getDefaultRedactionSettingsFromEnv(): CVRedactionSettings {
+  const envUrl = String(import.meta.env.VITE_CV_HARD_DELETE_API_URL || "").trim();
+  if (envUrl) {
+    return {
+      hardDeleteEnabled: true,
+      hardDeleteApiUrl: envUrl,
+    };
+  }
+  return DEFAULT_CV_REDACTION_SETTINGS;
+}
 
 GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
 
 export function getCVRedactionSettings(): CVRedactionSettings {
-  if (typeof window === "undefined") return DEFAULT_CV_REDACTION_SETTINGS;
+  const envDefaults = getDefaultRedactionSettingsFromEnv();
+  if (typeof window === "undefined") return envDefaults;
   try {
     const raw = window.localStorage.getItem(CV_REDACTION_SETTINGS_KEY);
-    if (!raw) return DEFAULT_CV_REDACTION_SETTINGS;
+    if (!raw) return envDefaults;
     const parsed = JSON.parse(raw);
     return {
-      hardDeleteEnabled: Boolean(parsed?.hardDeleteEnabled),
-      hardDeleteApiUrl: String(parsed?.hardDeleteApiUrl || "").trim(),
+      hardDeleteEnabled:
+        typeof parsed?.hardDeleteEnabled === "boolean"
+          ? parsed.hardDeleteEnabled
+          : envDefaults.hardDeleteEnabled,
+      hardDeleteApiUrl:
+        String(parsed?.hardDeleteApiUrl || "").trim() || envDefaults.hardDeleteApiUrl,
     };
   } catch {
-    return DEFAULT_CV_REDACTION_SETTINGS;
+    return envDefaults;
   }
 }
 
