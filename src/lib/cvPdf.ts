@@ -14,6 +14,13 @@ type RedactionZone = {
   height: number;
 };
 
+type NamePlacement = {
+  xCenter: number;
+  yBottom: number;
+  boxWidth: number;
+  boxHeight: number;
+};
+
 type Rect = {
   x0: number;
   y0: number;
@@ -402,6 +409,56 @@ function protectRectsFromName(
     if (moved) protectedRects.push(moved);
   }
   return dedupeRects(protectedRects, 2);
+}
+
+function pickPrimaryNameRect(nameRects: Rect[], pageWidth: number, pageHeight: number): Rect | null {
+  const candidates = nameRects.filter((r) => {
+    if (r.y1 > pageHeight * 0.35) return false;
+    return rectArea(r) >= 40;
+  });
+  if (candidates.length === 0) return null;
+
+  const sorted = candidates.sort((a, b) => {
+    const areaDiff = rectArea(b) - rectArea(a);
+    if (Math.abs(areaDiff) > 0.5) return areaDiff;
+    const centerA = Math.abs((a.x0 + a.x1) / 2 - pageWidth / 2);
+    const centerB = Math.abs((b.x0 + b.x1) / 2 - pageWidth / 2);
+    if (Math.abs(centerA - centerB) > 0.5) return centerA - centerB;
+    return a.y0 - b.y0;
+  });
+
+  return sorted[0] || null;
+}
+
+function detectNamePlacementFromPdf(sourcePdfBytes: Uint8Array, hints?: CVPersonalHints): NamePlacement | null {
+  try {
+    const mupdfMod: any = (mupdf as any)?.default || mupdf;
+    if (!mupdfMod?.Document?.openDocument) return null;
+
+    const inputBytes = new Uint8Array(sourcePdfBytes);
+    const doc = mupdfMod.Document.openDocument(inputBytes, "application/pdf");
+    const pdf = doc?.asPDF?.();
+    if (!pdf) return null;
+
+    const page = pdf.loadPage(0);
+    const bounds = page.getBounds();
+    const pageWidth = Number(bounds?.[2] || 0);
+    const pageHeight = Number(bounds?.[3] || 0);
+    if (!pageWidth || !pageHeight) return null;
+
+    const nameRects = findNameProtectionRects(page, pageWidth, pageHeight, hints);
+    const bestRect = pickPrimaryNameRect(nameRects, pageWidth, pageHeight);
+    if (!bestRect) return null;
+
+    return {
+      xCenter: (bestRect.x0 + bestRect.x1) / 2,
+      yBottom: bestRect.y0,
+      boxWidth: Math.max(16, bestRect.x1 - bestRect.x0),
+      boxHeight: Math.max(10, bestRect.y1 - bestRect.y0),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function findStructuredTopContactRects(
@@ -995,6 +1052,9 @@ export async function downloadBrandedSourcePdf(
   hints?: CVPersonalHints,
 ): Promise<void> {
   const originalBytes = new Uint8Array(await sourceFile.arrayBuffer());
+  const namePlacement = hints?.anonymizeName
+    ? detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
+    : null;
   const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
   const hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
 
@@ -1080,11 +1140,22 @@ export async function downloadBrandedSourcePdf(
 
     if (hints?.anonymizeName && pageIndex === 0) {
       const replacement = safeText(hints?.replacementName) || "CANDIDATE";
-      const size = 30;
-      const textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
+      let size = namePlacement ? Math.min(34, Math.max(16, namePlacement.boxHeight * 0.9)) : 30;
+      let textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
+      if (namePlacement) {
+        const maxAllowedWidth = Math.max(48, namePlacement.boxWidth - 2);
+        while (textWidth > maxAllowedWidth && size > 12) {
+          size -= 1;
+          textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
+        }
+      }
+      const desiredX = namePlacement ? namePlacement.xCenter - textWidth / 2 : (width - textWidth) / 2;
+      const desiredY = namePlacement
+        ? namePlacement.yBottom + Math.max(0, (namePlacement.boxHeight - size) / 2)
+        : height - 82;
       page.drawText(replacement, {
-        x: Math.max(26, (width - textWidth) / 2),
-        y: height - 82,
+        x: Math.max(26, Math.min(width - 26 - textWidth, desiredX)),
+        y: Math.max(26, Math.min(height - 42, desiredY)),
         size,
         font: helveticaBold,
         color: rgb(0.09, 0.09, 0.09),
