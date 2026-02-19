@@ -52,6 +52,72 @@ interface DataApiResponse<T = unknown> {
   error?: string;
 }
 
+function mapCurrencyToken(token?: string | null): string | null {
+  const t = String(token || "").trim().toUpperCase();
+  if (!t) return null;
+  if (t === "€" || t === "EUR") return "EUR";
+  if (t === "£" || t === "GBP") return "GBP";
+  if (t === "$" || t === "USD" || t === "US$") return "USD";
+  return null;
+}
+
+function extractAmountFromText(text: string): { amount: number; currency: string | null } | null {
+  const source = String(text || "");
+  if (!source) return null;
+
+  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
+  let best: { amount: number; currency: string | null } | null = null;
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(source)) !== null) {
+    let rawValue = String(match[2] || "").trim().replace(/\s+/g, "");
+    if (rawValue.includes(",") && !rawValue.includes(".")) {
+      const parts = rawValue.split(",");
+      rawValue = parts.length === 2 && parts[1].length <= 2 ? `${parts[0]}.${parts[1]}` : rawValue.replace(/,/g, "");
+    } else {
+      rawValue = rawValue.replace(/,/g, "");
+    }
+
+    const value = Number(rawValue);
+    if (!Number.isFinite(value) || value <= 0) continue;
+
+    const unit = String(match[3] || "").toLowerCase();
+    const amount = unit === "bn" || unit === "billion" || unit === "b" ? value * 1000 : value;
+    const currency = mapCurrencyToken(match[1]) || mapCurrencyToken(match[4]) || null;
+
+    if (!best || amount > best.amount) best = { amount, currency };
+  }
+
+  return best;
+}
+
+function hydrateSignalAmounts(signals: Signal[]): Signal[] {
+  return signals.map((s) => {
+    const currentAmount = Number(s.amount);
+    const hasAmount = Number.isFinite(currentAmount) && currentAmount > 0;
+    const hasCurrency = Boolean(s.currency);
+    if (hasAmount && hasCurrency) return s;
+
+    const details = (s.details || {}) as Record<string, unknown>;
+    const parsed = extractAmountFromText([
+      s.title || "",
+      s.description || "",
+      s.ai_insight || "",
+      s.ai_pitch || "",
+      typeof details.raw_content === "string" ? details.raw_content : "",
+      typeof details.content === "string" ? details.content : "",
+    ].join(" "));
+
+    if (!parsed) return s;
+
+    return {
+      ...s,
+      amount: hasAmount ? s.amount : parsed.amount,
+      currency: s.currency || parsed.currency || "USD",
+    };
+  });
+}
+
 async function callDataApi<T>(action: string, profileName: string, data?: Record<string, unknown>): Promise<DataApiResponse<T>> {
   try {
     const { data: response, error } = await supabase.functions.invoke("data-api", {
@@ -75,7 +141,16 @@ async function callDataApi<T>(action: string, profileName: string, data?: Record
 }
 
 export async function getSignals(profileName: string, region?: string) {
-  return callDataApi<SignalsResponse>("get-signals", profileName, { region });
+  const response = await callDataApi<SignalsResponse>("get-signals", profileName, { region });
+  if (!response.success || !response.data?.signals) return response;
+
+  return {
+    ...response,
+    data: {
+      ...response.data,
+      signals: hydrateSignalAmounts(response.data.signals),
+    },
+  };
 }
 
 export async function dismissSignal(profileName: string, signalId: string) {
