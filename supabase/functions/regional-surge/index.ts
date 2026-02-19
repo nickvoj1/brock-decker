@@ -134,6 +134,51 @@ function calculateSurgeScore(keywordCount: number): number {
   return 30;
 }
 
+function normalizeUrlForDedup(url?: string | null): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname.replace(/\/+$/, "");
+    return `${host}${path}`.toLowerCase();
+  } catch {
+    return String(url).trim().toLowerCase();
+  }
+}
+
+function normalizeTextForDedup(text?: string | null): string {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleFingerprint(text?: string | null): string {
+  return normalizeTextForDedup(text).split(" ").slice(0, 14).join(" ");
+}
+
+function classifySignalTypeFromContent(text: string): "funding" | "expansion" | "c_suite" | "hiring" | "team_growth" {
+  const t = text.toLowerCase();
+  if (/fund close|final close|first close|raises fund|raises \$|raises €|series [abc]|investment round/.test(t)) {
+    return "funding";
+  }
+  if (/new ceo|new cfo|new coo|appoints|appointed|leadership change|chief executive|chief financial/.test(t)) {
+    return "c_suite";
+  }
+  if (/hiring|hires|hired|open roles|job openings|talent acquisition|recruiter/.test(t)) {
+    return "hiring";
+  }
+  if (/people team|hr team|headcount growth|workforce expansion/.test(t)) {
+    return "team_growth";
+  }
+  if (/acquires|acquired|acquisition|expands|expansion|opens office|launches/.test(t)) {
+    return "expansion";
+  }
+  return "expansion";
+}
+
 // ============================================================================
 // FIRECRAWL SCRAPING
 // ============================================================================
@@ -390,6 +435,31 @@ Deno.serve(async (req) => {
     const regionsToProcess = targetRegion 
       ? [targetRegion] 
       : ["london", "europe", "uae", "usa"];
+
+    const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentSignals } = await supabase
+      .from("signals")
+      .select("url, title, company, region, signal_type, published_at")
+      .gte("published_at", dedupeCutoffIso)
+      .limit(5000);
+
+    const seenUrlKeys = new Set<string>();
+    const seenTitleKeys = new Set<string>();
+    const seenCompanyTypeKeys = new Set<string>();
+
+    for (const existing of recentSignals || []) {
+      const urlKey = normalizeUrlForDedup(existing.url);
+      if (urlKey) seenUrlKeys.add(urlKey);
+      const titleKey = titleFingerprint(existing.title);
+      if (titleKey) seenTitleKeys.add(titleKey);
+      const companyTypeKey = [
+        normalizeTextForDedup(existing.company),
+        normalizeTextForDedup(existing.region),
+        normalizeTextForDedup(existing.signal_type),
+        titleKey,
+      ].join("|");
+      if (companyTypeKey.replace(/\|/g, "").length > 0) seenCompanyTypeKeys.add(companyTypeKey);
+    }
     
     const results = {
       processed: 0,
@@ -457,18 +527,20 @@ Deno.serve(async (req) => {
           const isPending = geoConfidence < 80;
           const validatedRegion = isPending ? null : region.toUpperCase();
           
-          // Check for existing signal with same company/title
-          const title = `${company} - ${source.source}`;
-          const { data: existing } = await supabase
-            .from("signals")
-            .select("id")
-            .eq("company", company)
-            .eq("region", region)
-            .gte("created_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
-            .limit(1);
-          
-          if (existing && existing.length > 0) {
-            console.log(`Skipping duplicate: ${company}`);
+          const contentTitle = articleContent.split("\n")[0]?.trim() || `${company} ${source.source} update`;
+          const title = contentTitle.slice(0, 255);
+          const signalType = classifySignalTypeFromContent(articleContent);
+          const urlKey = normalizeUrlForDedup(source.url);
+          const titleKey = titleFingerprint(title);
+          const companyTypeKey = [
+            normalizeTextForDedup(company),
+            normalizeTextForDedup(region),
+            normalizeTextForDedup(signalType),
+            titleKey,
+          ].join("|");
+
+          if ((urlKey && seenUrlKeys.has(urlKey)) || seenTitleKeys.has(titleKey) || seenCompanyTypeKeys.has(companyTypeKey)) {
+            console.log(`Skipping duplicate: ${company} (${source.source})`);
             continue;
           }
           
@@ -489,7 +561,7 @@ Deno.serve(async (req) => {
               ai_confidence: geoConfidence,
               ai_insight: insight,
               source: source.source,
-              signal_type: "funding", // Default type
+              signal_type: signalType,
               tier: surgeScore >= 90 ? "tier_1" : surgeScore >= 70 ? "tier_2" : "tier_3",
               published_at: new Date().toISOString(),
               user_feedback: isPending ? null : "AUTO_VALIDATED",
@@ -498,6 +570,9 @@ Deno.serve(async (req) => {
           if (insertError) {
             console.error("Insert error:", insertError);
           } else {
+            if (urlKey) seenUrlKeys.add(urlKey);
+            seenTitleKeys.add(titleKey);
+            seenCompanyTypeKeys.add(companyTypeKey);
             if (isPending) {
               results.pending++;
               results.byRegion[region].pending++;

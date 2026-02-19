@@ -366,6 +366,61 @@ function mapToValidSignalType(type: string): string {
   return typeMap[type] || "expansion";
 }
 
+function normalizeUrlForDedup(url?: string | null): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname.replace(/\/+$/, "");
+    return `${host}${path}`.toLowerCase();
+  } catch {
+    return String(url).toLowerCase().trim();
+  }
+}
+
+function normalizeTextForDedup(text?: string | null): string {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleFingerprint(text?: string | null): string {
+  return normalizeTextForDedup(text).split(" ").slice(0, 14).join(" ");
+}
+
+function isSignalTypeFit(text: string, signalType: string): boolean {
+  const t = text.toLowerCase();
+  const FIT_KEYWORDS: Record<string, string[]> = {
+    funding: [
+      "raises", "raised", "fund close", "final close", "first close", "capital raise",
+      "investment", "backs", "backed", "funding round", "series a", "series b", "series c",
+    ],
+    hiring: [
+      "hiring", "hires", "hired", "recruiter", "talent acquisition", "team growth",
+      "open roles", "job openings", "staffing",
+    ],
+    expansion: [
+      "acquires", "acquired", "acquisition", "expands", "expansion", "opens office",
+      "launches", "rollout", "market entry",
+    ],
+    c_suite: [
+      "new ceo", "new cfo", "new coo", "chief executive", "chief financial", "appoints",
+      "leadership change", "executive hire",
+    ],
+    team_growth: [
+      "people team", "hr team", "talent team", "organizational growth", "workforce expansion",
+      "headcount growth",
+    ],
+  };
+
+  const keywords = FIT_KEYWORDS[signalType] || [];
+  if (keywords.length === 0) return true;
+  return keywords.some((kw) => t.includes(kw));
+}
+
 // ============================================================================
 // FIRECRAWL SCRAPER WITH FT COOKIES
 // ============================================================================
@@ -925,6 +980,36 @@ Deno.serve(async (req) => {
 
     console.log(`Unique signals after dedup: ${uniqueSignals.length}`);
 
+    // Build a recent dedupe index from DB to avoid repeated inserts across runs.
+    const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentSignals } = await supabase
+      .from("signals")
+      .select("url, title, company, region, signal_type, published_at")
+      .gte("published_at", dedupeCutoffIso)
+      .limit(5000);
+
+    const seenUrlKeys = new Set<string>();
+    const seenTitleKeys = new Set<string>();
+    const seenCompanyTypeKeys = new Set<string>();
+
+    for (const existing of recentSignals || []) {
+      const urlKey = normalizeUrlForDedup(existing.url);
+      if (urlKey) seenUrlKeys.add(urlKey);
+
+      const titleKey = titleFingerprint(existing.title);
+      if (titleKey) seenTitleKeys.add(titleKey);
+
+      const companyTypeKey = [
+        normalizeTextForDedup(existing.company),
+        normalizeTextForDedup(existing.region),
+        normalizeTextForDedup(existing.signal_type),
+        titleKey,
+      ].join("|");
+      if (companyTypeKey.replace(/\|/g, "").length > 0) {
+        seenCompanyTypeKeys.add(companyTypeKey);
+      }
+    }
+
     // Classify and insert signals
     for (const signal of uniqueSignals.slice(0, 100)) {
       // STRICT: Skip signals without valid URL
@@ -950,29 +1035,43 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const company = extractCompany(signal.title || signal.description || "");
+      const company = extractCompany(signal.title || signal.description || "").trim();
+      if (!company || company.length < 2) {
+        stats.skipped++;
+        continue;
+      }
 
-      // Check for existing signal
-      const { data: existing } = await supabase
-        .from("signals")
-        .select("id")
-        .eq("url", signal.url)
-        .maybeSingle();
+      const mappedSignalType = mapToValidSignalType(classification.signalType);
+      const fullText = `${signal.title || ""} ${signal.description || ""} ${company}`.toLowerCase();
+      if (!isSignalTypeFit(fullText, mappedSignalType)) {
+        console.log(`Skipping type mismatch (${mappedSignalType}): ${signal.title?.substring(0, 60)}`);
+        stats.skipped++;
+        continue;
+      }
 
-      if (existing) {
+      const urlKey = normalizeUrlForDedup(signal.url);
+      const titleKey = titleFingerprint(signal.title);
+      const companyTypeKey = [
+        normalizeTextForDedup(company),
+        normalizeTextForDedup(signal.region),
+        normalizeTextForDedup(mappedSignalType),
+        titleKey,
+      ].join("|");
+
+      if ((urlKey && seenUrlKeys.has(urlKey)) || seenTitleKeys.has(titleKey) || seenCompanyTypeKeys.has(companyTypeKey)) {
         stats.skipped++;
         continue;
       }
 
       const signalRecord = {
         title: signal.title,
-        company: company || null,
+        company: company,
         description: signal.description || null,
         url: signal.url,
         source: signal.source,
         region: signal.region,
         tier: classification.tier,
-        signal_type: classification.signalType,
+        signal_type: mappedSignalType,
         ai_confidence: classification.confidence,
         ai_insight: classification.insight,
         ai_pitch: classification.pitch,
@@ -983,6 +1082,9 @@ Deno.serve(async (req) => {
       const { error } = await supabase.from("signals").insert(signalRecord);
       
       if (!error) {
+        if (urlKey) seenUrlKeys.add(urlKey);
+        if (titleKey) seenTitleKeys.add(titleKey);
+        seenCompanyTypeKeys.add(companyTypeKey);
         stats.inserted++;
         stats.classified++;
         console.log(`✓ Inserted: ${signal.title?.substring(0, 60)}`);

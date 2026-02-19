@@ -499,6 +499,31 @@ function extractCompany(title: string, description: string = ""): string | null 
   return null;
 }
 
+function normalizeUrlForDedup(url?: string | null): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname.replace(/\/+$/, "");
+    return `${host}${path}`.toLowerCase();
+  } catch {
+    return String(url).trim().toLowerCase();
+  }
+}
+
+function normalizeTextForDedup(text?: string | null): string {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titleFingerprint(text?: string | null): string {
+  return normalizeTextForDedup(text).split(" ").slice(0, 14).join(" ");
+}
+
 async function parseRSSFeed(url: string): Promise<any[]> {
   try {
     const response = await fetch(url, {
@@ -848,20 +873,54 @@ Deno.serve(async (req) => {
 
     console.log(`Unique signals after enhanced dedup: ${uniqueSignals.length}`);
 
+    const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentSignals } = await supabase
+      .from("signals")
+      .select("url, title, company, region, signal_type, published_at")
+      .gte("published_at", dedupeCutoffIso)
+      .limit(5000);
+
+    const seenUrlKeys = new Set<string>();
+    const seenTitleKeys = new Set<string>();
+    const seenCompanyTypeKeys = new Set<string>();
+
+    for (const existing of recentSignals || []) {
+      const urlKey = normalizeUrlForDedup(existing.url);
+      if (urlKey) seenUrlKeys.add(urlKey);
+      const titleKey = titleFingerprint(existing.title);
+      if (titleKey) seenTitleKeys.add(titleKey);
+      const companyTypeKey = [
+        normalizeTextForDedup(existing.company),
+        normalizeTextForDedup(existing.region),
+        normalizeTextForDedup(existing.signal_type),
+        titleKey,
+      ].join("|");
+      if (companyTypeKey.replace(/\|/g, "").length > 0) seenCompanyTypeKeys.add(companyTypeKey);
+    }
+
     let insertedCount = 0;
-    if (uniqueSignals.length > 0) {
-      for (const signal of uniqueSignals) {
-        const { data: existing } = await supabase
-          .from("signals")
-          .select("id")
-          .or(`url.eq.${signal.url},title.eq.${signal.title}`)
-          .maybeSingle();
-        
-        if (!existing) {
-          const { error } = await supabase.from("signals").insert(signal);
-          if (!error) insertedCount++;
-          else console.error("Insert error:", error);
-        }
+    for (const signal of uniqueSignals) {
+      const urlKey = normalizeUrlForDedup(signal.url);
+      const titleKey = titleFingerprint(signal.title);
+      const companyTypeKey = [
+        normalizeTextForDedup(signal.company),
+        normalizeTextForDedup(signal.region),
+        normalizeTextForDedup(signal.signal_type),
+        titleKey,
+      ].join("|");
+
+      if ((urlKey && seenUrlKeys.has(urlKey)) || seenTitleKeys.has(titleKey) || seenCompanyTypeKeys.has(companyTypeKey)) {
+        continue;
+      }
+
+      const { error } = await supabase.from("signals").insert(signal);
+      if (!error) {
+        insertedCount++;
+        if (urlKey) seenUrlKeys.add(urlKey);
+        seenTitleKeys.add(titleKey);
+        seenCompanyTypeKeys.add(companyTypeKey);
+      } else {
+        console.error("Insert error:", error);
       }
     }
 

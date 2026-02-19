@@ -87,6 +87,41 @@ function isDisplayableSignal(row: any): boolean {
   return false;
 }
 
+function normalizeUrlForDedup(url?: string | null): string {
+  if (!url || typeof url !== "string") return "";
+  try {
+    const parsed = new URL(url.trim());
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname.replace(/\/+$/, "");
+    return `${host}${path}`.toLowerCase();
+  } catch {
+    return url.trim().toLowerCase();
+  }
+}
+
+function normalizeTextForDedup(text?: string | null): string {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildDisplayDedupKey(row: any): string {
+  const normalizedUrl = normalizeUrlForDedup(row?.url);
+  if (normalizedUrl) return `url:${normalizedUrl}`;
+
+  const titleTokens = normalizeTextForDedup(row?.title)
+    .split(" ")
+    .slice(0, 12)
+    .join(" ");
+  const company = normalizeTextForDedup(row?.company);
+  const region = normalizeTextForDedup(row?.region);
+  const type = normalizeTextForDedup(row?.signal_type);
+  return `text:${company}|${region}|${type}|${titleTokens}`;
+}
+
 function checkRateLimit(profileName: string): boolean {
   const now = Date.now();
   const entry = rateLimitMap.get(profileName);
@@ -1300,8 +1335,15 @@ Deno.serve(async (req) => {
       const { data: signalsRaw, error } = await query;
       if (error) throw error;
 
-      // Filter out non-news / unusable rows (e.g. "Company - Source", missing URL)
-      const signals = (signalsRaw || []).filter(isDisplayableSignal);
+      // Filter out non-news / unusable rows and hide repeated entries
+      const dedupSeen = new Set<string>();
+      const signals = (signalsRaw || []).filter((row: any) => {
+        if (!isDisplayableSignal(row)) return false;
+        const key = buildDisplayDedupKey(row);
+        if (dedupSeen.has(key)) return false;
+        dedupSeen.add(key);
+        return true;
+      });
       
       // Get region and tier counts
       const { data: allSignalsRaw } = await supabase
@@ -1311,7 +1353,14 @@ Deno.serve(async (req) => {
         .gte("published_at", cutoffDate.toISOString())
         .limit(5000);
 
-      const allSignals = (allSignalsRaw || []).filter(isDisplayableSignal);
+      const allSeen = new Set<string>();
+      const allSignals = (allSignalsRaw || []).filter((row: any) => {
+        if (!isDisplayableSignal(row)) return false;
+        const key = buildDisplayDedupKey(row);
+        if (allSeen.has(key)) return false;
+        allSeen.add(key);
+        return true;
+      });
       
       const regionCounts: Record<string, number> = {};
       const tierCounts: Record<string, number> = { tier_1: 0, tier_2: 0, tier_3: 0 };
