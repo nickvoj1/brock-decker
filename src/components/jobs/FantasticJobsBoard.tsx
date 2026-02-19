@@ -33,6 +33,7 @@ interface Job {
   remote: boolean;
   job_type: string;
   source: string;
+  ai_taxonomies?: string[];
 }
 
 interface Filters {
@@ -182,6 +183,7 @@ function normalizeJobs(items: Record<string, unknown>[], actorId: string): Job[]
           ? String(item.employment_type[0])
           : String(item.job_type || "Full-time"),
       source: String(item.source || item.provider || "fantastic.jobs"),
+      ai_taxonomies: Array.isArray(item.ai_taxonomies) ? (item.ai_taxonomies as string[]) : [],
     });
   }
 
@@ -222,6 +224,11 @@ export function FantasticJobsBoard() {
     localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 30)));
   }, [searchHistory]);
 
+  const requestedCount = useMemo(
+    () => Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100)),
+    [filters.jobsPerSearch],
+  );
+
   const fetchDirect = useCallback(
     async (mode: SearchMode): Promise<Job[]> => {
       if (!settings.apifyToken.trim()) throw new Error("Apify token missing. Add it in Settings -> Fantastic.jobs.");
@@ -241,14 +248,14 @@ export function FantasticJobsBoard() {
       const locationSearch = splitTerms(filters.location);
       const organizationSearch = splitTerms(filters.company);
       const timeRange = mapTimeRange(filters.postedAfter);
-      const limit = Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100));
+      const perActorLimit = mode === "all" ? Math.max(10, Math.ceil(requestedCount / 2)) : requestedCount;
 
       let merged: Job[] = [];
       for (const actorId of actorIds) {
         const isLinkedinActor = actorId === (settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID);
         const input: Record<string, unknown> = {
           timeRange,
-          limit,
+          limit: perActorLimit,
           includeAi: true,
           descriptionType: "text",
           removeAgency: true,
@@ -274,7 +281,7 @@ export function FantasticJobsBoard() {
 
         const endpoint =
           `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
-          `/run-sync-get-dataset-items?token=${encodeURIComponent(settings.apifyToken)}&format=json&clean=true&maxItems=${limit}`;
+          `/run-sync-get-dataset-items?token=${encodeURIComponent(settings.apifyToken)}&format=json&clean=true&maxItems=${perActorLimit}`;
 
         const res = await fetch(endpoint, {
           method: "POST",
@@ -289,7 +296,7 @@ export function FantasticJobsBoard() {
       }
       return merged;
     },
-    [settings, filters],
+    [settings, filters, requestedCount],
   );
 
   const fetchViaBackend = useCallback(
@@ -303,7 +310,7 @@ export function FantasticJobsBoard() {
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       if (mode === "linkedin") params.actor_id = settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID;
       if (mode === "career") params.actor_id = settings.careerActorId || DEFAULT_CAREER_ACTOR_ID;
-      params.limit = String(Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100)));
+      params.limit = String(requestedCount);
       params.offset = "0";
 
       const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
@@ -311,7 +318,43 @@ export function FantasticJobsBoard() {
       if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
       return data.jobs as Job[];
     },
-    [settings, filters],
+    [settings, filters, requestedCount],
+  );
+
+  const applyClientFilters = useCallback(
+    (rows: Job[]) => {
+      const includeTerms = splitTerms(filters.keyword).map((t) => t.toLowerCase());
+      const excludeTerms = splitTerms(filters.exclude).map((t) => t.toLowerCase());
+      const companyTerms = splitTerms(filters.company).map((t) => t.toLowerCase());
+      const locationTerms = splitTerms(filters.location).map((t) => t.toLowerCase());
+      const industry = filters.industry.toLowerCase();
+
+      return rows.filter((job) => {
+        const haystack = `${job.title} ${job.company} ${job.description || ""} ${job.location}`.toLowerCase();
+
+        if (includeTerms.length > 0 && !includeTerms.some((t) => haystack.includes(t))) return false;
+        if (excludeTerms.length > 0 && excludeTerms.some((t) => haystack.includes(t))) return false;
+        if (companyTerms.length > 0 && !companyTerms.some((t) => job.company.toLowerCase().includes(t))) return false;
+        if (locationTerms.length > 0 && !locationTerms.some((t) => job.location.toLowerCase().includes(t))) return false;
+
+        if (industry !== "all") {
+          const taxonomies = (job.ai_taxonomies || []).map((t) => t.toLowerCase());
+          const industryMatch = taxonomies.includes(industry) || haystack.includes(industry);
+          if (!industryMatch) return false;
+        }
+
+        if (filters.salaryMin) {
+          const min = Number(filters.salaryMin);
+          if (Number.isFinite(min) && min > 0) {
+            if (!job.salary_min || job.salary_min < min) return false;
+          }
+        }
+
+        if (filters.remote && !job.remote) return false;
+        return true;
+      });
+    },
+    [filters],
   );
 
   const runSearch = useCallback(
@@ -338,9 +381,11 @@ export function FantasticJobsBoard() {
             ]),
           ).values(),
         );
+        const filtered = applyClientFilters(deduped);
+        const capped = filtered.slice(0, requestedCount);
 
-        setJobs(deduped);
-        setTotal(deduped.length);
+        setJobs(capped);
+        setTotal(capped.length);
         setLastRefresh(new Date());
         setSearchHistory((prev) => [
           {
@@ -348,14 +393,14 @@ export function FantasticJobsBoard() {
             createdAt: new Date().toISOString(),
             mode,
             filters: { ...filters },
-            resultCount: deduped.length,
-            topResults: deduped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
+            resultCount: capped.length,
+            topResults: capped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
           },
           ...prev,
         ]);
         toast({
           title: "Jobs refreshed",
-          description: `Found ${deduped.length} jobs (${mode})`,
+          description: `Found ${capped.length} jobs (${mode})`,
         });
       } catch (error) {
         toast({
@@ -367,7 +412,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [settings, fetchDirect, fetchViaBackend, toast, filters],
+    [settings, fetchDirect, fetchViaBackend, toast, filters, requestedCount, applyClientFilters],
   );
 
   const scopedJobs = useMemo(() => {
