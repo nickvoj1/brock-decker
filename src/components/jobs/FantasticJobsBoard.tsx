@@ -29,13 +29,15 @@
    source: string;
  }
  
- interface Filters {
-   keyword: string;
-   location: string;
-   salaryMin: string;
-   remote: boolean;
-   postedAfter: string;
- }
+interface Filters {
+  keyword: string;
+  location: string;
+  salaryMin: string;
+  remote: boolean;
+  postedAfter: string;
+}
+
+type SearchMode = "all" | "linkedin" | "career";
  
  const DEFAULT_FILTERS: Filters = {
    keyword: "private equity OR internship OR VC OR family office",
@@ -52,7 +54,7 @@
    { label: "USA", value: "USA,New York,Boston,San Francisco,Chicago,Los Angeles" },
  ];
 
- const PE_SIGNAL_TERMS = [
+const PE_SIGNAL_TERMS = [
    "private equity",
    "venture capital",
    "family office",
@@ -61,7 +63,10 @@
    "portfolio",
    "investor",
    "capital partners",
- ];
+];
+
+const LINKEDIN_ACTOR_ID = "vIGxjRrHqDTPuE6M4";
+const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
 
  export function FantasticJobsBoard() {
    const { toast } = useToast();
@@ -76,9 +81,10 @@
    const [offset, setOffset] = useState(0);
    const [hasMore, setHasMore] = useState(false);
    const [total, setTotal] = useState(0);
+   const [searchMode, setSearchMode] = useState<SearchMode>("all");
    const PAGE_SIZE = 50;
 
-  const fetchJobs = useCallback(async (append = false) => {
+  const fetchJobs = useCallback(async (append = false, mode: SearchMode = searchMode) => {
      setLoading(true);
      try {
        const params: Record<string, string> = {};
@@ -88,6 +94,8 @@
        if (filters.salaryMin) params.salary_min = filters.salaryMin;
        if (filters.remote) params.remote = "true";
        if (filters.postedAfter) params.posted_after = filters.postedAfter;
+       if (mode === "linkedin") params.actor_id = LINKEDIN_ACTOR_ID;
+       if (mode === "career") params.actor_id = CAREER_ACTOR_ID;
        params.limit = String(PAGE_SIZE);
        params.offset = String(append ? offset : 0);
 
@@ -118,8 +126,8 @@
          toast({
            title: "Jobs refreshed",
            description: append
-             ? `Loaded ${incoming.length} more jobs`
-             : `Found ${deduped.length} jobs`,
+             ? `Loaded ${incoming.length} more jobs (${mode})`
+             : `Found ${deduped.length} jobs (${mode})`,
          });
        } else {
          throw new Error(data?.error || "Failed to fetch jobs");
@@ -134,18 +142,25 @@
      } finally {
        setLoading(false);
      }
-   }, [filters, toast, offset, jobs]);
+   }, [filters, toast, offset, jobs, searchMode]);
  
    // Auto-refresh every 30 minutes
    useEffect(() => {
      if (!autoRefresh) return;
  
      const interval = setInterval(() => {
-       fetchJobs(false);
+       fetchJobs(false, searchMode);
      }, 30 * 60 * 1000); // 30 minutes
 
      return () => clearInterval(interval);
-   }, [autoRefresh, fetchJobs]);
+   }, [autoRefresh, fetchJobs, searchMode]);
+
+   const runSearch = (mode: SearchMode) => {
+     setSearchMode(mode);
+     setOffset(0);
+     setHasMore(false);
+     fetchJobs(false, mode);
+   };
  
    const clearFilters = () => {
      setFilters({
@@ -380,14 +395,34 @@
  
              <Button
                onClick={() => {
-                 setOffset(0);
-                 setHasMore(false);
-                 fetchJobs(false);
+                 runSearch("all");
                }}
                disabled={loading}
              >
                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-               {loading ? "Searching..." : "Search Jobs"}
+               {loading ? "Searching..." : "Search Jobs (All)"}
+             </Button>
+
+             <Button
+               variant="outline"
+               onClick={() => runSearch("linkedin")}
+               disabled={loading}
+             >
+               {loading && searchMode === "linkedin" ? (
+                 <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+               ) : null}
+               LinkedIn Search
+             </Button>
+
+             <Button
+               variant="outline"
+               onClick={() => runSearch("career")}
+               disabled={loading}
+             >
+               {loading && searchMode === "career" ? (
+                 <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+               ) : null}
+               Career Page Search
              </Button>
            </div>
 
@@ -439,7 +474,7 @@
            ) : sortedJobs.length === 0 ? (
              <div className="text-center py-12 text-muted-foreground">
                <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-               <p>No jobs found. Click "Search Jobs" to fetch positions.</p>
+               <p>No jobs found. Click search to fetch positions.</p>
                <p className="text-sm mt-2">
                  Try adjusting filters or use "PE/VC defaults" for targeted results.
                </p>
@@ -545,7 +580,7 @@
                 <Button
                   variant="outline"
                   disabled={loading || !hasMore}
-                  onClick={() => fetchJobs(true)}
+                  onClick={() => fetchJobs(true, searchMode)}
                 >
                   {loading ? (
                     <>
