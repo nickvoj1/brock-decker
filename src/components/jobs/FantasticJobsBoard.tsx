@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { supabase } from "@/integrations/supabase/client";
+import { createEnrichmentRun } from "@/lib/dataApi";
 import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 import {
@@ -226,10 +227,67 @@ function inferDepartmentsFromJobTitle(title: string): string[] {
   return Array.from(departments);
 }
 
-function getApolloCountry(location: string): string {
-  const value = (location || "").trim();
-  if (!value) return "United States";
-  return value.split("|")[0].trim() || "United States";
+function normalizeLocationSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function inferLocationsForEnrichment(location: string): string[] {
+  const lower = (location || "").toLowerCase();
+  const mapped: string[] = [];
+  if (lower.includes("london")) mapped.push("london");
+  if (lower.includes("new york") || lower.includes("nyc")) mapped.push("new-york");
+  if (lower.includes("boston")) mapped.push("boston");
+  if (lower.includes("san francisco")) mapped.push("san-francisco");
+  if (lower.includes("los angeles")) mapped.push("los-angeles");
+  if (lower.includes("chicago")) mapped.push("chicago");
+  if (lower.includes("miami")) mapped.push("miami");
+  if (lower.includes("dubai")) mapped.push("dubai");
+  if (lower.includes("abu dhabi")) mapped.push("abu-dhabi");
+  if (mapped.length > 0) return Array.from(new Set(mapped));
+
+  const first = (location || "").split("|")[0]?.split(",")[0]?.trim();
+  if (!first) return ["new-york"];
+  return [normalizeLocationSlug(first)];
+}
+
+function inferSignalRegionFromLocation(location: string): "london" | "europe" | "uae" | "usa" {
+  const lower = (location || "").toLowerCase();
+  if (lower.includes("dubai") || lower.includes("abu dhabi") || lower.includes("uae")) return "uae";
+  if (lower.includes("london") || lower.includes("united kingdom") || lower.includes("uk")) return "london";
+  if (
+    lower.includes("new york") ||
+    lower.includes("nyc") ||
+    lower.includes("san francisco") ||
+    lower.includes("los angeles") ||
+    lower.includes("chicago") ||
+    lower.includes("miami") ||
+    lower.includes("usa") ||
+    lower.includes("united states")
+  ) return "usa";
+  return "europe";
+}
+
+function inferTargetRolesForJob(jobTitle: string): string[] {
+  const base = [
+    "Recruiter",
+    "Talent Acquisition",
+    "HR Manager",
+    "Head of Talent",
+    "People Operations",
+    "HR Director",
+    "Hiring Manager",
+  ];
+  const t = (jobTitle || "").toLowerCase();
+  if (/(partner|principal|director|vp|vice president|managing director)/i.test(t)) {
+    base.push("Partner", "Principal", "Managing Director");
+  }
+  if (/(cfo|finance|controller|fund finance)/i.test(t)) {
+    base.push("CFO", "Finance Director", "Head of Finance");
+  }
+  if (/(legal|counsel|compliance)/i.test(t)) {
+    base.push("General Counsel", "Head of Legal");
+  }
+  return Array.from(new Set(base));
 }
 
 export function FantasticJobsBoard() {
@@ -617,27 +675,77 @@ export function FantasticJobsBoard() {
       return;
     }
 
-    const country = getApolloCountry(job.location);
+    if (!profileName) {
+      toast({
+        title: "Profile required",
+        description: "Select your profile first to run Apollo AI enrichment.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const departments = inferDepartmentsFromJobTitle(job.title);
-    const maxContacts = 25;
+    const locations = inferLocationsForEnrichment(job.location);
+    const signalRegion = inferSignalRegionFromLocation(job.location);
+    const targetRoles = inferTargetRolesForJob(job.title);
+    const industry = filters.industry !== "all" ? filters.industry : "Private Equity";
+    const maxContacts = 30;
     const effectiveProfile = profileName || "Unknown";
 
     setApolloLoadingByJob((prev) => ({ ...prev, [job.id]: true }));
     try {
-      const { data, error } = await supabase.functions.invoke("special-request", {
-        body: {
-          company,
-          country,
-          departments,
-          maxContacts,
-          emailOnly: true,
-          profileName: effectiveProfile,
-          requestName: `JobBoard: ${company} - ${job.title}`,
-        },
+      let bullhornEmails: string[] = [];
+      try {
+        const { data: bhResult } = await supabase.functions.invoke("fetch-bullhorn-emails", {});
+        if (bhResult?.success && Array.isArray(bhResult.emails)) {
+          bullhornEmails = bhResult.emails as string[];
+        }
+      } catch {
+        // Non-fatal fallback.
+      }
+
+      const candidateData = {
+        candidate_id: `JB-${Date.now()}`,
+        name: `JobBoard ${company}`,
+        current_title: job.title || "Job Board Search",
+        location: job.location || "",
+        skills: [],
+        work_history: [],
+        education: [],
+      };
+
+      const preferencesData = [{
+        industry,
+        companies: "",
+        exclusions: "",
+        excludedIndustries: [],
+        locations,
+        targetRoles,
+        sectors: departments,
+        targetCompany: company,
+        signalTitle: job.title || `${company} hiring`,
+        signalRegion,
+      }];
+
+      const runResult = await createEnrichmentRun(effectiveProfile, {
+        search_counter: maxContacts,
+        candidates_count: 1,
+        preferences_count: 1,
+        status: "running",
+        bullhorn_enabled: false,
+        candidates_data: JSON.parse(JSON.stringify([candidateData])),
+        preferences_data: JSON.parse(JSON.stringify(preferencesData)),
+      });
+
+      if (!runResult.success || !runResult.data?.id) {
+        throw new Error(runResult.error || "Failed to create enrichment run");
+      }
+
+      const { data, error } = await supabase.functions.invoke("run-enrichment", {
+        body: { runId: runResult.data.id, bullhornEmails },
       });
 
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || "Apollo job contact search failed");
 
       const contacts = Array.isArray(data.contacts) ? (data.contacts as ApolloJobContact[]) : [];
       const emailContacts = contacts.filter((c) => (c.email || "").trim().length > 0);
