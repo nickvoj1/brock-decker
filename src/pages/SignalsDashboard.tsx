@@ -73,6 +73,7 @@ type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
 type SortOption = "newest" | "relevant" | "amount";
 type TabView = "signals" | "jobs" | "jobboard";
+type ViewMode = "table" | "cards";
 
 const REGION_CONFIG = {
   london: { label: "London", emoji: "🇬🇧", description: "City, Mayfair, Canary Wharf" },
@@ -112,7 +113,8 @@ export default function SignalsDashboard() {
   const [isHunting, setIsHunting] = useState(false);
   const [activeTab, setActiveTab] = useState<TabView>("signals");
   const [isJobsLoading, setIsJobsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<"table" | "cards">("table");
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [searchQuery, setSearchQuery] = useState("");
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -135,13 +137,15 @@ export default function SignalsDashboard() {
 
   // Fetch signals on mount and when profile changes
   useEffect(() => {
-    if (profileName) {
-      fetchSignals();
-      fetchJobSignals();
-      setupRealtimeSubscription();
-    }
+    if (!profileName) return;
+
+    fetchSignals();
+    fetchJobSignals();
+
+    const cleanup = setupRealtimeSubscription();
+    return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileName]);
+  }, [profileName, setupRealtimeSubscription]);
   
   // Fetch job signals when region changes
   useEffect(() => {
@@ -149,6 +153,45 @@ export default function SignalsDashboard() {
       fetchJobSignals();
     }
   }, [activeRegion, activeTab, profileName]);
+
+  const SIGNALS_PREFS_KEY = "signals-dashboard-preferences";
+
+  useEffect(() => {
+    const rawPrefs = localStorage.getItem(SIGNALS_PREFS_KEY);
+    if (!rawPrefs) return;
+
+    try {
+      const prefs = JSON.parse(rawPrefs) as {
+        activeRegion?: Region;
+        tierFilter?: TierFilter;
+        sortBy?: SortOption;
+        minScore?: number;
+        activeTab?: TabView;
+        viewMode?: ViewMode;
+      };
+
+      if (prefs.activeRegion && prefs.activeRegion in REGION_CONFIG) setActiveRegion(prefs.activeRegion);
+      if (prefs.tierFilter && TIER_FILTERS.some((f) => f.value === prefs.tierFilter)) setTierFilter(prefs.tierFilter);
+      if (prefs.sortBy && SORT_OPTIONS.some((s) => s.value === prefs.sortBy)) setSortBy(prefs.sortBy);
+      if (typeof prefs.minScore === "number" && prefs.minScore >= 0 && prefs.minScore <= 100) setMinScore(prefs.minScore);
+      if (prefs.activeTab && ["signals", "jobs", "jobboard"].includes(prefs.activeTab)) setActiveTab(prefs.activeTab);
+      if (prefs.viewMode && ["table", "cards"].includes(prefs.viewMode)) setViewMode(prefs.viewMode);
+    } catch (error) {
+      console.error("Failed to parse Signals dashboard preferences:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    const prefs = {
+      activeRegion,
+      tierFilter,
+      sortBy,
+      minScore,
+      activeTab,
+      viewMode,
+    };
+    localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
+  }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode]);
 
   const setupRealtimeSubscription = useCallback(() => {
     const channel = supabase
@@ -594,6 +637,24 @@ export default function SignalsDashboard() {
 
   const filteredSignals = useMemo(() => {
     let filtered = signals.filter((s) => s.region === activeRegion && !s.is_dismissed);
+
+    const trimmedSearch = searchQuery.trim().toLowerCase();
+    if (trimmedSearch) {
+      filtered = filtered.filter((s) => {
+        const haystack = [
+          s.company,
+          s.headline,
+          s.fund_name,
+          s.key_people,
+          s.type,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(trimmedSearch);
+      });
+    }
     
     if (tierFilter !== "all") {
       filtered = filtered.filter((s) => s.tier === tierFilter);
@@ -617,7 +678,7 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, minScore, sortBy]);
+  }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery]);
 
   // Count pending signals for badge
   const pendingCount = useMemo(() => {
@@ -796,6 +857,16 @@ export default function SignalsDashboard() {
                   ))}
                 </SelectContent>
               </Select>
+
+              <div className="relative w-full sm:w-[260px]">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search company, fund, people..."
+                  className="h-9 w-full rounded-md border bg-card pl-8 pr-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
 
               <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">
