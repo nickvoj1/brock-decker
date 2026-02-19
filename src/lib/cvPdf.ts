@@ -158,8 +158,9 @@ function looksLikePersonalInfo(text: string): boolean {
   const t = text.toLowerCase();
   const compact = text.replace(/\s+/g, " ").trim();
   const hasEmail = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(compact);
-  const hasWeb = /\b(linkedin|github|website|www\.|\.com\b|\.co\.uk\b|gmail|outlook|yahoo)\b/.test(t);
-  const hasAddress = /\b(street|strasse|road|avenue|ave|square|blvd|boulevard|postal|postcode|zip)\b/.test(t);
+  const hasWeb = /\b(linkedin|github|website|www\.|gmail|outlook|yahoo)\b|\. ?com\b|\. ?co\. ?uk\b/.test(t);
+  const hasAddress = /\b(street|strasse|straße|road|avenue|ave|square|blvd|boulevard|postal|postcode|zip)\b/.test(t);
+  const hasPostalAddress = /\b\d{4,6}\b/.test(compact) && /,/.test(compact) && /[a-z]/i.test(compact);
 
   const phoneChunkRegex = /(\+?\d[\d\s().-]{6,}\d)/g;
   const phoneChunks = [...compact.matchAll(phoneChunkRegex)].map((m) => m[1]);
@@ -177,7 +178,8 @@ function looksLikePersonalInfo(text: string): boolean {
     hasEmail ||
     hasPhone ||
     hasWeb ||
-    hasAddress
+    hasAddress ||
+    hasPostalAddress
   );
 }
 
@@ -188,10 +190,25 @@ function uniqueSearchTerms(hints?: CVPersonalHints): string[] {
     if (!t) return;
     if (t.length < 5) return;
     if (!out.includes(t)) out.push(t);
+    const compact = t.replace(/\s+/g, "");
+    if (compact.length >= 5 && !out.includes(compact)) out.push(compact);
+
+    if (t.includes("@")) {
+      const [local, domain] = t.split("@");
+      if (local && local.length >= 4 && !out.includes(local)) out.push(local);
+      if (domain && domain.length >= 4 && !out.includes(domain)) out.push(domain);
+    } else {
+      const digits = t.replace(/\D/g, "");
+      if (digits.length >= 8 && !out.includes(digits)) out.push(digits);
+    }
   };
   add(hints?.email);
   add(hints?.phone);
   return out;
+}
+
+function normalizeComparable(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, "").replace(/[|,;:()[\]{}<>]/g, "");
 }
 
 function clampRect(rect: Rect, width: number, height: number): Rect | null {
@@ -234,6 +251,73 @@ function dedupeRects(rects: Rect[], tolerance = 2): Rect[] {
     if (!exists) out.push(r);
   }
   return out;
+}
+
+function findStructuredTopContactRects(
+  page: any,
+  pageWidth: number,
+  pageHeight: number,
+  hints?: CVPersonalHints,
+): Rect[] {
+  try {
+    const stJsonRaw = page.toStructuredText().asJSON(1);
+    const st = JSON.parse(stJsonRaw);
+    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
+    const lines: Array<{ x: number; y: number; w: number; h: number; text: string }> = [];
+
+    for (const block of blocks) {
+      if (block?.type !== "text") continue;
+      const blockLines = Array.isArray(block?.lines) ? block.lines : [];
+      for (const line of blockLines) {
+        const bb = line?.bbox || {};
+        const text = String(line?.text || "").replace(/\s+/g, " ").trim();
+        const x = Number(bb.x || 0);
+        const y = Number(bb.y || 0);
+        const w = Number(bb.w || 0);
+        const h = Number(bb.h || 0);
+        if (!text || w <= 0 || h <= 0) continue;
+        lines.push({ x, y, w, h, text });
+      }
+    }
+
+    if (lines.length === 0) return [];
+
+    const topLimit = pageHeight * 0.36;
+    const topLines = lines.filter((l) => l.y <= topLimit).sort((a, b) => a.y - b.y || a.x - b.x);
+    if (topLines.length === 0) return [];
+
+    const heading = topLines.find((l) => l.y > 40 && isHeadingLike(l.text));
+    const headingY = heading ? heading.y : pageHeight * 0.24;
+    const nameLine = topLines
+      .filter((l) => l.y < Math.min(110, headingY) && l.text.split(/\s+/).length >= 2)
+      .sort((a, b) => b.h - a.h)[0];
+
+    const termNorms = uniqueSearchTerms(hints)
+      .map((x) => normalizeComparable(x))
+      .filter((x) => x.length >= 4);
+
+    const out: Rect[] = [];
+    for (const l of topLines) {
+      if (l.y > headingY + 2) continue;
+      if (nameLine && Math.abs(l.y - nameLine.y) <= 1.5 && Math.abs(l.x - nameLine.x) <= 1.5) continue;
+
+      const normLine = normalizeComparable(l.text);
+      const fuzzyHintMatch = termNorms.some((term) => normLine.includes(term) || term.includes(normLine));
+      const personal = looksLikePersonalInfo(l.text) || fuzzyHintMatch;
+      if (!personal) continue;
+
+      const rect = clampRect(
+        { x0: l.x - 8, y0: l.y - 4, x1: l.x + l.w + 8, y1: l.y + l.h + 4 },
+        pageWidth,
+        pageHeight,
+      );
+      if (rect) out.push(rect);
+    }
+
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
@@ -378,6 +462,9 @@ async function redactPdfTextLocally(
     }
   }
 
+  // Fallback: detect personal lines from MuPDF structured text (same engine used for deletion).
+  rects.push(...findStructuredTopContactRects(page, pageWidth, pageHeight, hints));
+
   // Detect likely profile photo images in top-right from structured text image blocks.
   try {
     const stJsonRaw = page.toStructuredText().asJSON(1);
@@ -401,7 +488,7 @@ async function redactPdfTextLocally(
 
   const uniqueRects = dedupeRects(rects);
   if (uniqueRects.length === 0) {
-    throw new Error("Could not find personal info text to delete on this CV.");
+    throw new Error("Could not detect personal header lines to delete. Try CV with selectable text (not scanned image).");
   }
 
   const totalArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
