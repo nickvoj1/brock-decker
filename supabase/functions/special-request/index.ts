@@ -97,70 +97,80 @@ Deno.serve(async (req) => {
     const usedEmails = new Set((usedRows || []).map(r => r.email.toLowerCase()))
 
     // Step 1: Search using api_search (free, no credits)
+    // If strict country/location is too narrow, fallback to no location filter.
     const candidates: Array<{ id: string; firstName: string; lastName: string; name: string; title: string; company: string; email: string; location: string }> = []
     const seenIds = new Set<string>()
-    let page = 1
-
     console.log(`Searching Apollo for ${company} in ${country}, titles: ${uniqueTitles.length}, maxContacts: ${maxContacts}`)
 
-    while (candidates.length < maxContacts * 3 && page <= 2) {
-      const queryParams = new URLSearchParams()
-      queryParams.set('q_organization_name', company)
-      queryParams.set('per_page', '100')
-      queryParams.set('page', String(page))
-      for (const title of uniqueTitles) {
-        queryParams.append('person_titles[]', title)
-      }
-      queryParams.append('person_locations[]', country)
+    const locationPasses: Array<string | null> = [country, null]
+    for (const locationFilter of locationPasses) {
+      if (candidates.length >= maxContacts * 2) break
 
-      const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
-      const searchRes = await fetch(searchUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apolloKey },
-      })
+      let page = 1
+      const maxPages = locationFilter ? 3 : 2
+      console.log(`Apollo search pass: ${locationFilter ? `location=${locationFilter}` : "location=ANY (fallback)"}`)
 
-      if (!searchRes.ok) {
-        const errText = await searchRes.text()
-        console.error('Apollo api_search failed:', searchRes.status, errText)
-        break
-      }
-
-      const searchData = await searchRes.json()
-      const people = searchData?.people || []
-      console.log(`Apollo page ${page}: ${people.length} people`)
-      if (people.length === 0) break
-
-      for (const person of people) {
-        const personId = person.id
-        if (!personId || seenIds.has(personId)) continue
-        seenIds.add(personId)
-
-        const firstName = person.first_name || ''
-        const lastName = person.last_name || ''
-        const name = [firstName, lastName].filter(Boolean).join(' ')
-        const email = person.email || ''
-        const location = [person.city, person.state, person.country].filter(Boolean).join(', ')
-
-        if (email && !usedEmails.has(email.toLowerCase())) {
-          candidates.push({
-            id: personId, firstName, lastName, name,
-            title: person.title || '',
-            company: person.organization?.name || company,
-            email, location,
-          })
-        } else if (!email && candidates.length < maxContacts * 3) {
-          candidates.push({
-            id: personId, firstName, lastName, name,
-            title: person.title || '',
-            company: person.organization?.name || company,
-            email: '', location,
-          })
+      while (candidates.length < maxContacts * 3 && page <= maxPages) {
+        const queryParams = new URLSearchParams()
+        queryParams.set('q_organization_name', company)
+        queryParams.set('per_page', '100')
+        queryParams.set('page', String(page))
+        for (const title of uniqueTitles) {
+          queryParams.append('person_titles[]', title)
         }
-      }
+        if (locationFilter) {
+          queryParams.append('person_locations[]', locationFilter)
+        }
 
-      const totalPages = Math.ceil((searchData?.pagination?.total_entries || 0) / 100)
-      if (page >= totalPages) break
-      page++
+        const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
+        const searchRes = await fetch(searchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apolloKey },
+        })
+
+        if (!searchRes.ok) {
+          const errText = await searchRes.text()
+          console.error('Apollo api_search failed:', searchRes.status, errText)
+          break
+        }
+
+        const searchData = await searchRes.json()
+        const people = searchData?.people || []
+        console.log(`Apollo page ${page} (${locationFilter || "ANY"}): ${people.length} people`)
+        if (people.length === 0) break
+
+        for (const person of people) {
+          const personId = person.id
+          if (!personId || seenIds.has(personId)) continue
+          seenIds.add(personId)
+
+          const firstName = person.first_name || ''
+          const lastName = person.last_name || ''
+          const name = [firstName, lastName].filter(Boolean).join(' ')
+          const email = person.email || ''
+          const location = [person.city, person.state, person.country].filter(Boolean).join(', ')
+
+          if (email && !usedEmails.has(email.toLowerCase())) {
+            candidates.push({
+              id: personId, firstName, lastName, name,
+              title: person.title || '',
+              company: person.organization?.name || company,
+              email, location,
+            })
+          } else if (!email && candidates.length < maxContacts * 3) {
+            candidates.push({
+              id: personId, firstName, lastName, name,
+              title: person.title || '',
+              company: person.organization?.name || company,
+              email: '', location,
+            })
+          }
+        }
+
+        const totalPages = Math.ceil((searchData?.pagination?.total_entries || 0) / 100)
+        if (page >= totalPages) break
+        page++
+      }
     }
 
     const withEmail = candidates.filter(c => c.email)

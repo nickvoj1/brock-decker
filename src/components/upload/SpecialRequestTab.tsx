@@ -61,6 +61,7 @@ export function SpecialRequestTab() {
           country: country.trim(),
           departments: selectedDepartments,
           maxContacts,
+          emailOnly: true,
           profileName,
           requestName: requestName.trim() || `${company.trim()} - ${country.trim()}`,
         },
