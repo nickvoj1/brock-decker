@@ -37,7 +37,8 @@ interface Job {
 }
 
 interface Filters {
-  keyword: string;
+  title: string;
+  industryKeywords: string;
   company: string;
   exclude: string;
   industry: string;
@@ -61,7 +62,8 @@ type SearchHistoryItem = {
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
 
 const DEFAULT_FILTERS: Filters = {
-  keyword: "",
+  title: "",
+  industryKeywords: "",
   company: "",
   exclude: "",
   industry: "all",
@@ -243,7 +245,8 @@ export function FantasticJobsBoard() {
                 settings.careerActorId || DEFAULT_CAREER_ACTOR_ID,
               ];
 
-      const titleSearch = splitTerms(filters.keyword);
+      const titleSearch = splitTerms(filters.title);
+      const industryKeywordSearch = splitTerms(filters.industryKeywords);
       const titleExclusionSearch = splitTerms(filters.exclude);
       const locationSearch = splitTerms(filters.location);
       const organizationSearch = splitTerms(filters.company);
@@ -264,6 +267,7 @@ export function FantasticJobsBoard() {
         };
 
         if (titleSearch.length > 0) input.titleSearch = titleSearch;
+        if (industryKeywordSearch.length > 0) input.descriptionSearch = industryKeywordSearch;
         if (titleExclusionSearch.length > 0) input.titleExclusionSearch = titleExclusionSearch;
         if (locationSearch.length > 0) input.locationSearch = locationSearch;
         if (organizationSearch.length > 0) input.organizationSearch = organizationSearch;
@@ -273,6 +277,9 @@ export function FantasticJobsBoard() {
         if (isLinkedinActor) {
           if (filters.remote) input.remote = true;
           if (filters.industry !== "all") input.industryFilter = [filters.industry];
+          if (industryKeywordSearch.length > 0) {
+            input.organizationDescriptionSearch = industryKeywordSearch;
+          }
         } else {
           input.includeLinkedIn = true;
           if (filters.remote) input["remote only (legacy)"] = true;
@@ -302,7 +309,8 @@ export function FantasticJobsBoard() {
   const fetchViaBackend = useCallback(
     async (mode: SearchMode): Promise<Job[]> => {
       const params: Record<string, string> = {};
-      if (filters.keyword) params.keyword = filters.keyword;
+      if (filters.title) params.keyword = filters.title;
+      if (filters.industryKeywords) params.industry_keywords = filters.industryKeywords;
       if (filters.location) params.location = filters.location;
       if (filters.salaryMin) params.salary_min = filters.salaryMin;
       if (filters.industry && filters.industry !== "all") params.industry = filters.industry;
@@ -323,7 +331,8 @@ export function FantasticJobsBoard() {
 
   const applyClientFilters = useCallback(
     (rows: Job[]) => {
-      const includeTerms = splitTerms(filters.keyword).map((t) => t.toLowerCase());
+      const titleTerms = splitTerms(filters.title).map((t) => t.toLowerCase());
+      const industryKeywordTerms = splitTerms(filters.industryKeywords).map((t) => t.toLowerCase());
       const excludeTerms = splitTerms(filters.exclude).map((t) => t.toLowerCase());
       const companyTerms = splitTerms(filters.company).map((t) => t.toLowerCase());
       const locationTerms = splitTerms(filters.location).map((t) => t.toLowerCase());
@@ -332,7 +341,8 @@ export function FantasticJobsBoard() {
       return rows.filter((job) => {
         const haystack = `${job.title} ${job.company} ${job.description || ""} ${job.location}`.toLowerCase();
 
-        if (includeTerms.length > 0 && !includeTerms.some((t) => haystack.includes(t))) return false;
+        if (titleTerms.length > 0 && !titleTerms.some((t) => job.title.toLowerCase().includes(t))) return false;
+        if (industryKeywordTerms.length > 0 && !industryKeywordTerms.some((t) => haystack.includes(t))) return false;
         if (excludeTerms.length > 0 && excludeTerms.some((t) => haystack.includes(t))) return false;
         if (companyTerms.length > 0 && !companyTerms.some((t) => job.company.toLowerCase().includes(t))) return false;
         if (locationTerms.length > 0 && !locationTerms.some((t) => job.location.toLowerCase().includes(t))) return false;
@@ -439,7 +449,8 @@ export function FantasticJobsBoard() {
     });
   }, [scopedJobs, sortBy, sortOrder]);
 
-  const clearFilters = () => setFilters({ ...DEFAULT_FILTERS, keyword: "", location: "", industry: "all", jobsPerSearch: "100" });
+  const clearFilters = () =>
+    setFilters({ ...DEFAULT_FILTERS, title: "", industryKeywords: "", location: "", industry: "all", jobsPerSearch: "100" });
   const resetToDefaults = () => setFilters(DEFAULT_FILTERS);
 
   const formatDate = (dateStr: string) => {
@@ -517,11 +528,16 @@ export function FantasticJobsBoard() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
-              placeholder="Keywords (private equity OR VC)"
-              value={filters.keyword}
-              onChange={(e) => setFilters((f) => ({ ...f, keyword: e.target.value }))}
+              placeholder="Title / Position (e.g. VP, Principal, CFO)"
+              value={filters.title}
+              onChange={(e) => setFilters((f) => ({ ...f, title: e.target.value }))}
+            />
+            <Input
+              placeholder="Industry keywords (e.g. buyout, infra, secondaries)"
+              value={filters.industryKeywords}
+              onChange={(e) => setFilters((f) => ({ ...f, industryKeywords: e.target.value }))}
             />
             <Input
               placeholder="Company include (optional)"
