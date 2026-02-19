@@ -577,6 +577,72 @@ async function firecrawlDeepSearch(
   }
 }
 
+async function generateAISearchQueries(
+  region: string,
+  baseQueries: string[]
+): Promise<string[]> {
+  const apiKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!apiKey) return [];
+
+  const systemPrompt = `You generate PE/VC/family-office deal discovery web queries.
+
+Region: ${region.toUpperCase()}
+Focus:
+- fund close / final close / first close
+- PE/family-office mergers or acquisitions
+- new PE CEO/C-suite appointments
+- hiring/team growth driven by deals
+
+Return JSON only:
+{
+  "queries": ["query 1", "query 2", "..."]
+}
+
+Constraints:
+- 4 to 8 queries
+- each query <= 120 chars
+- no politics, macro economy, sports, celebrity news`;
+
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: `Base queries:\n${baseQueries.join("\n")}\n\nGenerate additional discovery queries.`,
+          },
+        ],
+        temperature: 0.2,
+      }),
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return [];
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(parsed.queries)) return [];
+
+    return parsed.queries
+      .map((q: unknown) => String(q || "").trim())
+      .filter((q: string) => q.length > 8 && q.length <= 120)
+      .slice(0, 8);
+  } catch (error) {
+    console.error(`AI query generation failed for ${region}:`, error);
+    return [];
+  }
+}
+
 // ============================================================================
 // RSS FEED PARSER
 // ============================================================================
@@ -1005,8 +1071,15 @@ Deno.serve(async (req) => {
 
       // 3. Firecrawl Deep Search with FT cookies
       if (includeFirecrawl && firecrawlApiKey) {
-        const queries = FT_SEARCH_QUERIES[r as keyof typeof FT_SEARCH_QUERIES] || [];
-        for (const query of queries.slice(0, 4)) {
+        const baseQueries = FT_SEARCH_QUERIES[r as keyof typeof FT_SEARCH_QUERIES] || [];
+        const aiQueries = await generateAISearchQueries(r, baseQueries);
+        const queries = Array.from(new Set([...baseQueries.slice(0, 4), ...aiQueries]));
+
+        if (aiQueries.length > 0) {
+          console.log(`AI generated ${aiQueries.length} extra search queries for ${r}`);
+        }
+
+        for (const query of queries) {
           const results = await firecrawlDeepSearch(query, firecrawlApiKey, r);
           
           // Filter for valid URLs and PE relevance with quality check

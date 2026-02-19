@@ -136,6 +136,10 @@ const RSS_FEEDS = {
     { url: "https://feeds.skynews.com/feeds/rss/business.xml", source: "Sky News Business" },
     { url: "https://www.telegraph.co.uk/business/rss.xml", source: "Telegraph Business" },
     { url: "https://www.thisismoney.co.uk/money/markets/index.rss", source: "This is Money" },
+    { url: "https://www.ft.com/private-equity?format=rss", source: "FT Private Equity" },
+    { url: "https://www.theguardian.com/uk/business/rss", source: "Guardian UK Business" },
+    { url: "https://www.privateequityinternational.com/rss", source: "PEI" },
+    { url: "https://www.unquote.com/rss", source: "Unquote" },
     // Press Releases (Global - UK focused)
     { url: "https://www.prnewswire.co.uk/rss/news-releases-list.rss", source: "PR Newswire UK" },
     { url: "https://www.businesswire.com/portal/site/home/news/rss/?rss=G1QFDERJXkJeGQ==", source: "Business Wire UK" },
@@ -163,6 +167,10 @@ const RSS_FEEDS = {
     { url: "https://www.di.se/rss/", source: "Dagens Industri" },
     { url: "https://www.thelocal.se/feeds/rss.php", source: "The Local Sweden" },
     { url: "https://www.thelocal.de/rss/business", source: "The Local DE" },
+    { url: "https://realdeals.eu.com/feed/", source: "Real Deals Europe" },
+    { url: "https://www.privateequitywire.co.uk/feed/", source: "PE Wire Europe" },
+    { url: "https://www.privateequityinternational.com/rss", source: "PEI Europe" },
+    { url: "https://www.unquote.com/rss", source: "Unquote Europe" },
     // Pan-European
     { url: "https://www.investeurope.eu/news-opinion/rss/", source: "Invest Europe" },
     // Press Releases
@@ -181,8 +189,12 @@ const RSS_FEEDS = {
     { url: "https://www.meed.com/rss", source: "MEED" },
     { url: "https://wam.ae/en/rss/economy", source: "WAM Economy" },
     { url: "https://www.middleeastmonitor.com/feed/", source: "ME Monitor" },
+    { url: "https://www.agbi.com/feed/", source: "AGBI" },
+    { url: "https://www.emirates247.com/rss", source: "Emirates247" },
+    { url: "https://www.constructionweekonline.com/rss", source: "Construction Week" },
     // Press Releases
     { url: "https://www.prnewswire.com/rss/middle-east-latest-news.rss", source: "PR Newswire ME" },
+    { url: "https://www.globenewswire.com/RssFeed/country/middle-east/feedTitle/GlobeNewswire_Middle_East", source: "GlobeNewswire ME" },
   ],
   usa: [
     // PE/VC Specific
@@ -204,6 +216,10 @@ const RSS_FEEDS = {
     { url: "https://www.cnbc.com/id/10001147/device/rss/rss.html", source: "CNBC Finance" },
     { url: "https://www.businessinsider.com/finance/rss", source: "Business Insider Finance" },
     { url: "https://seekingalpha.com/market_currents.xml", source: "Seeking Alpha" },
+    { url: "https://www.axios.com/pro/fintech/feed", source: "Axios Fintech" },
+    { url: "https://www.venturebeat.com/category/venture/feed/", source: "VentureBeat Venture" },
+    { url: "https://www.forbes.com/private-equity/feed/", source: "Forbes PE" },
+    { url: "https://www.reuters.com/arc/outboundfeeds/private-equity/?outputType=xml", source: "Reuters PE" },
     // Press Releases - Financial
     { url: "https://www.prnewswire.com/rss/financial-services-banking-latest-news.rss", source: "PR Newswire Banking" },
     { url: "https://www.prnewswire.com/rss/mergers-and-acquisitions-latest-news.rss", source: "PR Newswire M&A" },
