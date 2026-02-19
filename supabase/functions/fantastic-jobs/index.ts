@@ -20,6 +20,23 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
 }
 
+function splitTerms(value: string): string[] {
+  if (!value) return [];
+  return value
+    .split(/\s+OR\s+|,|\|/i)
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+function mapTimeRange(postedAfter: string): string {
+  const v = String(postedAfter || "").toLowerCase();
+  if (v === "1hour" || v === "1h") return "1h";
+  if (v === "24hours" || v === "24h") return "24h";
+  if (v === "14days" || v === "14d" || v === "2weeks") return "7d";
+  if (v === "30days" || v === "30d" || v === "6m") return "6m";
+  return "7d";
+}
+
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -45,10 +62,15 @@ function getFlag(body: Record<string, unknown>, url: URL, key: string): boolean 
 function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>[] {
   return jobs.map((job, index) => {
     const locations = (job.locations_derived as Array<{ city?: string; admin?: string; country?: string }>) || [];
+    const locationsRawStrings = Array.isArray(job.locations_derived)
+      ? (job.locations_derived as unknown[]).filter((v) => typeof v === "string") as string[]
+      : [];
     const locationFromDerived =
       locations.length > 0
         ? locations.map((l) => [l.city, l.admin, l.country].filter(Boolean).join(", ")).join(" | ")
-        : "";
+        : locationsRawStrings.length > 0
+          ? locationsRawStrings.join(" | ")
+          : "";
 
     const title =
       (job.title as string) ||
@@ -231,20 +253,33 @@ async function fetchViaApify(
   const limit = getParam(body, url, "limit", "50");
   const offset = getParam(body, url, "offset", "0");
 
-  const actorInput = {
-    query: keyword || undefined,
-    keyword,
-    location,
-    posted_after: postedAfter,
-    salary_min: salaryMin ? Number(salaryMin) : undefined,
-    remote,
-    maxItems: Number(limit),
-    limit: Number(limit),
-    offset: Number(offset),
+  const timeRange = mapTimeRange(postedAfter);
+  const maxItems = Math.min(Math.max(Number(limit) || 50, 10), 5000);
+  const titleSearch = splitTerms(keyword);
+  const locationSearch = splitTerms(location);
+  const actorLower = actorId.toLowerCase();
+  const isLinkedInActor = actorLower.includes("vigxjrrhqdtpue6m4") || actorLower.includes("advanced-linkedin-job-search-api");
+  const isCareerActor = actorLower.includes("s3dtstzszwftavln5") || actorLower.includes("career-site-job-listing-api");
+
+  const actorInput: Record<string, unknown> = {
+    timeRange,
+    limit: maxItems,
+    includeAi: true,
+    descriptionType: "text",
+    removeAgency: true,
+    populateAiRemoteLocation: true,
+    populateAiRemoteLocationDerived: true,
   };
 
+  if (titleSearch.length > 0) actorInput.titleSearch = titleSearch;
+  if (locationSearch.length > 0) actorInput.locationSearch = locationSearch;
+  if (salaryMin) actorInput.aiHasSalary = true;
+  if (isCareerActor) actorInput.includeLinkedIn = true;
+  if (remote && isLinkedInActor) actorInput.remote = true;
+  if (remote && isCareerActor) actorInput["remote only (legacy)"] = true;
+  if (offset && Number(offset) > 0) actorInput.offset = Number(offset);
+
   const buildRunSyncUrl = (input: Record<string, unknown>) => {
-    const maxItems = Number(input.maxItems || 50);
     return (
       `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
       `/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}&format=json&clean=true&maxItems=${maxItems}`
@@ -260,23 +295,35 @@ async function fetchViaApify(
   const payloads: Record<string, unknown>[] = [
     actorInput,
     {
+      timeRange,
+      limit: maxItems,
+      includeAi: true,
+      descriptionType: "text",
+      titleSearch,
+      locationSearch,
+      removeAgency: true,
+      remote: isLinkedInActor && remote ? true : undefined,
+      "remote only (legacy)": isCareerActor && remote ? true : undefined,
+    },
+    {
+      timeRange,
+      limit: maxItems,
+      includeAi: true,
+      titleSearch,
+      locationSearch,
+    },
+    {
       query: keyword || undefined,
-      location: location || undefined,
-      maxItems: Number(limit),
+      keyword,
+      location,
+      posted_after: postedAfter,
+      salary_min: salaryMin ? Number(salaryMin) : undefined,
       remote,
+      maxItems,
+      limit: maxItems,
+      offset: Number(offset),
     },
-    {
-      keyword: keyword || undefined,
-      location: location || undefined,
-      maxItems: Number(limit),
-    },
-    {
-      keywords: keyword || undefined,
-      location: location || undefined,
-      limit: Number(limit),
-      remote,
-    },
-    { maxItems: Number(limit) },
+    { timeRange, limit: maxItems },
   ];
 
   const parseApifyItems = (data: unknown): Record<string, unknown>[] => {
