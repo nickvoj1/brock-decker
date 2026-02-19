@@ -211,6 +211,24 @@ function normalizeComparable(text: string): string {
   return text.toLowerCase().replace(/\s+/g, "").replace(/[|,;:()[\]{}<>]/g, "");
 }
 
+function looksLikeNameLine(text: string, x: number, width: number, pageWidth: number): boolean {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (!compact) return false;
+  if (compact.length < 5 || compact.length > 64) return false;
+  if (compact.includes("@")) return false;
+  if (/\d/.test(compact)) return false;
+  if (/[|/\\]/.test(compact)) return false;
+  if (/,/.test(compact)) return false;
+  const words = compact.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 5) return false;
+  const mostlyLetters = words.every((w) => /^[A-Za-z.'-]+$/.test(w));
+  if (!mostlyLetters) return false;
+
+  const centerX = x + width / 2;
+  const distanceFromCenter = Math.abs(centerX - pageWidth / 2);
+  return distanceFromCenter <= pageWidth * 0.3;
+}
+
 function clampRect(rect: Rect, width: number, height: number): Rect | null {
   const x0 = Math.max(0, Math.min(width, rect.x0));
   const y0 = Math.max(0, Math.min(height, rect.y0));
@@ -320,6 +338,74 @@ function findStructuredTopContactRects(
   }
 }
 
+function findHeaderBandFallbackRect(page: any, pageWidth: number, pageHeight: number): Rect | null {
+  const defaultRect = clampRect(
+    {
+      x0: 24,
+      y0: 72,
+      x1: pageWidth - 24,
+      y1: Math.min(148, pageHeight * 0.32),
+    },
+    pageWidth,
+    pageHeight,
+  );
+
+  try {
+    const stJsonRaw = page.toStructuredText().asJSON(1);
+    const st = JSON.parse(stJsonRaw);
+    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
+    const lines: Array<{ x: number; y: number; w: number; h: number; text: string }> = [];
+
+    for (const block of blocks) {
+      if (block?.type !== "text") continue;
+      const blockLines = Array.isArray(block?.lines) ? block.lines : [];
+      for (const line of blockLines) {
+        const bb = line?.bbox || {};
+        const text = String(line?.text || "").replace(/\s+/g, " ").trim();
+        const x = Number(bb.x || 0);
+        const y = Number(bb.y || 0);
+        const w = Number(bb.w || 0);
+        const h = Number(bb.h || 0);
+        if (!text || w <= 0 || h <= 0) continue;
+        lines.push({ x, y, w, h, text });
+      }
+    }
+
+    if (lines.length === 0) return defaultRect;
+
+    const topLines = lines
+      .filter((l) => l.y < pageHeight * 0.42)
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    if (topLines.length === 0) return defaultRect;
+
+    const nameLine = topLines
+      .filter(
+        (l) =>
+          l.y < pageHeight * 0.24 &&
+          l.h >= 12 &&
+          !isHeadingLike(l.text) &&
+          looksLikeNameLine(l.text, l.x, l.w, pageWidth),
+      )
+      .sort((a, b) => b.h - a.h || a.y - b.y)[0];
+
+    const heading = topLines
+      .filter((l) => isHeadingLike(l.text) && (!nameLine || l.y > nameLine.y + 16))
+      .sort((a, b) => a.y - b.y)[0];
+
+    const y0 = nameLine
+      ? nameLine.y + nameLine.h + 2
+      : Math.max(58, topLines[0].y + topLines[0].h + 2);
+
+    const y1Raw = heading ? heading.y - 3 : y0 + 72;
+    const y1 = Math.min(y1Raw, pageHeight * 0.34);
+    if (y1 <= y0 + 8) return defaultRect;
+
+    return clampRect({ x0: 24, y0, x1: pageWidth - 24, y1 }, pageWidth, pageHeight) || defaultRect;
+  } catch {
+    return defaultRect;
+  }
+}
+
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
   try {
     const loadingTask = getDocument({ data: pdfBytes });
@@ -415,6 +501,9 @@ async function redactPdfTextLocally(
 ): Promise<Uint8Array> {
   const mod: any = await import("mupdf");
   const mupdf = mod?.default || mod;
+  if (!mupdf?.Document?.openDocument) {
+    throw new Error("CV redaction engine failed to load. Refresh and try again.");
+  }
 
   const doc = mupdf.Document.openDocument(sourcePdfBytes, "application/pdf");
   const pdf = doc.asPDF();
@@ -486,15 +575,27 @@ async function redactPdfTextLocally(
     // Ignore image detection issues.
   }
 
-  const uniqueRects = dedupeRects(rects);
+  let uniqueRects = dedupeRects(rects).filter((r) => r.y0 < pageHeight * 0.42);
   if (uniqueRects.length === 0) {
-    throw new Error("Could not detect personal header lines to delete. Try CV with selectable text (not scanned image).");
+    const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight);
+    if (fallbackBand) uniqueRects = [fallbackBand];
+  }
+
+  if (uniqueRects.length === 0) {
+    throw new Error("Could not detect personal header lines to delete.");
   }
 
   const totalArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
   const coverage = totalArea / Math.max(1, pageWidth * pageHeight);
-  if (coverage > 0.08) {
-    throw new Error("Redaction area is too large. Aborted to protect CV content.");
+  if (coverage > 0.11) {
+    const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight);
+    if (fallbackBand) uniqueRects = [fallbackBand];
+  }
+
+  const guardedArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
+  const guardedCoverage = guardedArea / Math.max(1, pageWidth * pageHeight);
+  if (guardedCoverage > 0.2) {
+    throw new Error("Redaction area is unexpectedly large. Export stopped.");
   }
 
   for (const r of uniqueRects) {
