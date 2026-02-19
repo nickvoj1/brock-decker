@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { downloadBrandedSourcePdf, downloadCandidatePdf } from "@/lib/cvPdf";
+import { useToast } from "@/hooks/use-toast";
 
 interface WorkExperience {
   company: string;
@@ -69,6 +70,7 @@ export function CVUploadZone({
   watermarkImageUrl,
   headerText,
 }: CVUploadZoneProps) {
+  const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
@@ -139,15 +141,26 @@ export function CVUploadZone({
   };
 
   const downloadEditedCandidate = async () => {
-    const source = editorDraft || parsedData;
-    if (!source) return;
-    const outName = `${(source.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
-    const branding = { watermarkImageUrl, headerImageUrl, headerText };
-    if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
-      await downloadBrandedSourcePdf(originalFile, outName, branding);
-      return;
+    try {
+      const source = editorDraft || parsedData;
+      if (!source) return;
+      const outName = `${(source.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
+      const branding = { watermarkImageUrl, headerImageUrl, headerText };
+      if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
+        await downloadBrandedSourcePdf(originalFile, outName, branding);
+        return;
+      }
+      await downloadCandidatePdf(source, outName, branding);
+    } catch (error) {
+      toast({
+        title: "CV export failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Unable to process CV export.",
+        variant: "destructive",
+      });
     }
-    await downloadCandidatePdf(source, outName, branding);
   };
 
   return (

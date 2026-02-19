@@ -567,7 +567,9 @@ export async function downloadBrandedSourcePdf(
       sourcePdfBytes = hardDeleted;
       usedHardDelete = true;
     } else {
-      console.warn("Hard redaction API failed; falling back to client-side redaction masks.");
+      throw new Error(
+        "Hard redaction service is unavailable. Personal info cannot be truly deleted right now.",
+      );
     }
   }
 

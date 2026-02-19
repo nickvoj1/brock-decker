@@ -105,17 +105,17 @@ def _line_rects_under_name(page: fitz.Page, name_rect: Optional[fitz.Rect]) -> L
 
 def _fallback_personal_masks(page: fitz.Page) -> List[fitz.Rect]:
     w = page.rect.width
-    h = page.rect.height
+    # PyMuPDF uses top-left origin; keep fallback masks in top contact band.
     return [
-        fitz.Rect(w * 0.14, h - 158, w * 0.86, h - 106),
-        fitz.Rect(w * 0.18, h - 190, w * 0.82, h - 164),
+        fitz.Rect(w * 0.14, 92, w * 0.86, 146),
+        fitz.Rect(w * 0.18, 148, w * 0.82, 176),
     ]
 
 
 def _photo_mask(page: fitz.Page) -> fitz.Rect:
     w = page.rect.width
-    h = page.rect.height
-    return fitz.Rect(w - 150, h - 220, w - 30, h - 80)
+    # Top-right portrait area in common CV templates.
+    return fitz.Rect(w - 150, 80, w - 30, 220)
 
 
 def redact_cv_bytes(input_pdf: bytes) -> bytes:
@@ -138,8 +138,8 @@ def redact_cv_bytes(input_pdf: bytes) -> bytes:
 
     # Apply true redaction: removes text objects in redacted areas.
     page.apply_redactions(
-        images=fitz.PDF_REDACT_IMAGE_REMOVE,
-        graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+        images=fitz.PDF_REDACT_IMAGE_PIXELS,
+        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
         text=fitz.PDF_REDACT_TEXT_REMOVE,
     )
 

@@ -24,9 +24,9 @@ uvicorn app:app --host 0.0.0.0 --port 8088
 
 ## Connect in web app
 
-The web app tries hard-delete redaction automatically:
+The web app uses hard-delete redaction automatically:
 
 1. If your backend serves this as `/redact` on the same domain, no extra setup is needed.
 2. Otherwise set `VITE_CV_HARD_DELETE_API_URL` to the full endpoint URL (e.g. `http://localhost:8088/redact`).
 
-If the API is unavailable, the app falls back to client-side masking (visual-only redaction) while preserving PDF quality.
+If the API is unavailable, export is blocked and an explicit error is shown (to avoid producing non-compliant CVs).
