@@ -58,6 +58,61 @@ function fitInBox(sourceW: number, sourceH: number, maxW: number, maxH: number):
   return { width: w * scale, height: h * scale };
 }
 
+async function trimTransparentDataUrl(dataUrl?: string | null): Promise<string | null> {
+  const raw = String(dataUrl || "").trim();
+  if (!raw.startsWith("data:image/") || typeof document === "undefined") return raw || null;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error("Failed to load image"));
+      i.src = raw;
+    });
+
+    const w = Math.max(1, Math.floor(img.naturalWidth || img.width));
+    const h = Math.max(1, Math.floor(img.naturalHeight || img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return raw;
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let minX = w;
+    let minY = h;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const alpha = data[(y * w + x) * 4 + 3];
+        if (alpha < 8) continue;
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+
+    if (maxX < 0 || maxY < 0) return raw;
+    const cropW = maxX - minX + 1;
+    const cropH = maxY - minY + 1;
+    if (cropW <= 0 || cropH <= 0) return raw;
+    if (cropW === w && cropH === h) return raw;
+
+    const out = document.createElement("canvas");
+    out.width = cropW;
+    out.height = cropH;
+    const outCtx = out.getContext("2d");
+    if (!outCtx) return raw;
+    outCtx.drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+    return out.toDataURL("image/png");
+  } catch {
+    return raw || null;
+  }
+}
+
 export async function downloadCandidatePdf(
   candidate: CandidateForPdf,
   fileNameBase: string,
@@ -68,13 +123,13 @@ export async function downloadCandidatePdf(
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 40;
   const contentW = pageW - margin * 2;
-  const watermarkData = await toDataUrl(branding?.watermarkImageUrl);
-  const headerData = await toDataUrl(branding?.headerImageUrl);
+  const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
+  const headerData = await trimTransparentDataUrl(await toDataUrl(branding?.headerImageUrl));
   const headerText = safeText(branding?.headerText);
 
   if (watermarkData) {
     try {
-      doc.addImage(watermarkData, "PNG", margin, 20, 74, 22, undefined, "FAST");
+      doc.addImage(watermarkData, "PNG", margin, 20, 62, 18, undefined, "FAST");
     } catch {
       // Ignore non-critical image errors.
     }
@@ -268,19 +323,46 @@ async function detectPersonalInfoZones(sourceFile: File): Promise<RedactionZone[
     const topStart = nameCandidate ? nameCandidate.yTop + nameCandidate.h + 4 : viewport.height * 0.09;
     const topEnd = nameCandidate ? Math.min(nameCandidate.yTop + 150, viewport.height * 0.40) : viewport.height * 0.33;
 
-    const matched = itemBoxes.filter((b) => {
-      if (b.yTop < topStart || b.yTop > topEnd) return false;
-      if (isHeadingLike(b.text)) return false;
-      return looksLikePersonalInfo(b.text);
-    });
+    const candidateTopItems = itemBoxes
+      .filter((b) => b.yTop >= topStart && b.yTop <= topEnd)
+      .sort((a, b) => a.yTop - b.yTop || a.x - b.x);
 
-    for (const b of matched) {
-      const padX = 8;
-      const padY = 4;
-      const x = Math.max(0, b.x - padX);
-      const yTop = Math.max(0, b.yTop - padY);
-      const width = Math.min(viewport.width - x, b.w + padX * 2);
-      const height = b.h + padY * 2;
+    const lineGroups: Array<Array<{ text: string; x: number; yTop: number; w: number; h: number }>> = [];
+    const lineThreshold = 3.5;
+    for (const b of candidateTopItems) {
+      const current = lineGroups[lineGroups.length - 1];
+      if (!current) {
+        lineGroups.push([b]);
+        continue;
+      }
+      const baseline = current.reduce((sum, item) => sum + item.yTop, 0) / current.length;
+      if (Math.abs(b.yTop - baseline) <= lineThreshold) {
+        current.push(b);
+      } else {
+        lineGroups.push([b]);
+      }
+    }
+
+    for (const group of lineGroups) {
+      const ordered = group.slice().sort((a, b) => a.x - b.x);
+      const lineText = ordered.map((g) => g.text).join(" ").replace(/\s+/g, " ").trim();
+      if (!lineText || isHeadingLike(lineText)) continue;
+      const personalLine =
+        looksLikePersonalInfo(lineText) ||
+        (/^\+?\d/.test(lineText) && /[a-z]/i.test(lineText)) ||
+        (lineText.includes(".com") || lineText.includes(".co.uk"));
+      if (!personalLine) continue;
+
+      const minX = Math.min(...ordered.map((i) => i.x));
+      const maxX = Math.max(...ordered.map((i) => i.x + i.w));
+      const minYTop = Math.min(...ordered.map((i) => i.yTop));
+      const maxYTop = Math.max(...ordered.map((i) => i.yTop + i.h));
+      const padX = 10;
+      const padY = 5;
+      const x = Math.max(0, minX - padX);
+      const yTop = Math.max(0, minYTop - padY);
+      const width = Math.min(viewport.width - x, maxX - minX + padX * 2);
+      const height = Math.max(12, maxYTop - minYTop + padY * 2);
 
       zones.push({
         pageIndex: 0,
@@ -306,7 +388,7 @@ async function renderRedactedFirstPagePng(sourceFile: File, zones: RedactionZone
     const loadingTask = getDocument({ data: bytes });
     const pdf = await loadingTask.promise;
     const page = await pdf.getPage(1);
-    const scale = 2;
+    const scale = 3;
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = Math.ceil(viewport.width);
@@ -357,8 +439,8 @@ export async function downloadBrandedSourcePdf(
   const pdfDoc = await PDFDocument.load(pdfBytes);
   const detectedZones = await detectPersonalInfoZones(sourceFile);
   const redactedFirstPagePng = await renderRedactedFirstPagePng(sourceFile, detectedZones);
-  const watermarkData = await toDataUrl(branding?.watermarkImageUrl);
-  const headerData = await toDataUrl(branding?.headerImageUrl);
+  const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
+  const headerData = await trimTransparentDataUrl(await toDataUrl(branding?.headerImageUrl));
   const headerText = safeText(branding?.headerText);
 
   let embeddedWatermark: PDFImage | null = null;
@@ -445,7 +527,7 @@ export async function downloadBrandedSourcePdf(
 
     if (embeddedWatermark) {
       const natural = embeddedWatermark.scale(1);
-      const fitted = fitInBox(natural.width, natural.height, 74, 22);
+      const fitted = fitInBox(natural.width, natural.height, 62, 18);
       page.drawImage(embeddedWatermark, {
         x: 26,
         y: height - 24 - fitted.height,
