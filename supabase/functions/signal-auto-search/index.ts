@@ -132,18 +132,46 @@ const DEFAULT_CATEGORY_PRIORITY = [
 
 // Region to locations mapping
 const REGION_LOCATIONS: Record<string, string[]> = {
+  london: ['London, United Kingdom', 'Manchester, United Kingdom', 'Birmingham, United Kingdom'],
   europe: ['London, United Kingdom', 'Frankfurt, Germany', 'Paris, France', 'Amsterdam, Netherlands', 'Zurich, Switzerland'],
   uae: ['Dubai, UAE', 'Abu Dhabi, UAE'],
+  usa: ['New York, NY', 'Boston, MA', 'Chicago, IL', 'San Francisco, CA', 'Los Angeles, CA', 'Seattle, WA'],
   east_usa: ['New York, NY', 'Boston, MA', 'Chicago, IL', 'Washington D.C.'],
   west_usa: ['San Francisco, CA', 'Los Angeles, CA', 'Seattle, WA'],
 }
 
 // Wider region locations for fallback
 const REGION_COUNTRY_LOCATIONS: Record<string, string[]> = {
+  london: ['United Kingdom', 'England'],
   europe: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Switzerland', 'Ireland', 'Spain', 'Italy', 'Belgium', 'Luxembourg'],
   uae: ['United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Bahrain'],
+  usa: ['United States', 'New York', 'Massachusetts', 'California', 'Illinois', 'Washington', 'Texas', 'Florida'],
   east_usa: ['New York', 'Massachusetts', 'Connecticut', 'New Jersey', 'Pennsylvania', 'Illinois', 'Florida'],
   west_usa: ['California', 'Washington', 'Oregon', 'Colorado', 'Texas'],
+}
+
+function getSignalLocationOverrides(signal: any): { exactLocations: string[]; countryHints: string[] } {
+  const locationRaw = typeof signal?.details?.location === 'string' ? signal.details.location.trim() : ''
+  if (!locationRaw) return { exactLocations: [], countryHints: [] }
+
+  const exactLocations = Array.from(
+    new Set(
+      locationRaw
+        .split('|')
+        .map((part: string) => part.trim())
+        .filter((part: string) => part.length > 1)
+    )
+  )
+
+  const countryHints = Array.from(
+    new Set(
+      exactLocations
+        .map((loc) => loc.split(',').map((p) => p.trim()).filter(Boolean).pop() || '')
+        .filter((v) => v.length > 1)
+    )
+  )
+
+  return { exactLocations, countryHints }
 }
 
 // Company name normalization
@@ -822,8 +850,11 @@ Deno.serve(async (req) => {
 
     // Get locations for the signal's region
     const region = signal.region || 'europe'
-    const cityLocations = REGION_LOCATIONS[region] || REGION_LOCATIONS.europe
-    const countryLocations = REGION_COUNTRY_LOCATIONS[region] || REGION_COUNTRY_LOCATIONS.europe
+    const regionCityLocations = REGION_LOCATIONS[region] || REGION_LOCATIONS.europe
+    const regionCountryLocations = REGION_COUNTRY_LOCATIONS[region] || REGION_COUNTRY_LOCATIONS.europe
+    const { exactLocations, countryHints } = getSignalLocationOverrides(signal)
+    const cityLocations = Array.from(new Set([...exactLocations, ...regionCityLocations]))
+    const countryLocations = Array.from(new Set([...countryHints, ...regionCountryLocations]))
 
     console.log(`Region: ${region}, Locations: ${cityLocations.join(', ')}`)
 

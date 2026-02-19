@@ -243,11 +243,21 @@ function inferLocationsForEnrichment(location: string): string[] {
   if (lower.includes("miami")) mapped.push("miami");
   if (lower.includes("dubai")) mapped.push("dubai");
   if (lower.includes("abu dhabi")) mapped.push("abu-dhabi");
-  if (mapped.length > 0) return Array.from(new Set(mapped));
 
-  const first = (location || "").split("|")[0]?.split(",")[0]?.trim();
-  if (!first) return ["new-york"];
-  return [normalizeLocationSlug(first)];
+  const rawParts = (location || "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part) => part.split(",").map((s) => s.trim()).filter(Boolean))
+    .slice(0, 4);
+
+  const normalizedRaw = rawParts
+    .map((part) => normalizeLocationSlug(part))
+    .filter((part) => part.length > 1);
+
+  const merged = Array.from(new Set([...mapped, ...normalizedRaw]));
+  if (merged.length > 0) return merged;
+  return ["new-york"];
 }
 
 function inferSignalRegionFromLocation(location: string): "london" | "europe" | "uae" | "usa" {
