@@ -605,44 +605,260 @@ function findHeaderBandFallbackRect(
   }
 }
 
-function detectPhotoImageRects(page: any, pageWidth: number, pageHeight: number): Rect[] {
+type StructuredLine = { x: number; y: number; w: number; h: number; text: string };
+
+function extractStructuredLines(page: any): StructuredLine[] {
+  try {
+    const stJsonRaw = page.toStructuredText().asJSON(1);
+    const st = JSON.parse(stJsonRaw);
+    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
+    const lines: StructuredLine[] = [];
+    for (const block of blocks) {
+      if (block?.type !== "text") continue;
+      const blockLines = Array.isArray(block?.lines) ? block.lines : [];
+      for (const line of blockLines) {
+        const bb = line?.bbox || {};
+        const text = String(line?.text || "").replace(/\s+/g, " ").trim();
+        const x = Number(bb.x || 0);
+        const y = Number(bb.y || 0);
+        const w = Number(bb.w || 0);
+        const h = Number(bb.h || 0);
+        if (!text || w <= 0 || h <= 0) continue;
+        lines.push({ x, y, w, h, text });
+      }
+    }
+    return lines;
+  } catch {
+    return [];
+  }
+}
+
+function bboxLikeToRect(raw: any, pageWidth: number, pageHeight: number): Rect | null {
+  if (!raw) return null;
+
+  if (Array.isArray(raw) && raw.length >= 4) {
+    return clampRect(
+      {
+        x0: Number(raw[0] || 0),
+        y0: Number(raw[1] || 0),
+        x1: Number(raw[2] || 0),
+        y1: Number(raw[3] || 0),
+      },
+      pageWidth,
+      pageHeight,
+    );
+  }
+
+  if (typeof raw === "object") {
+    const x = Number(raw.x ?? raw.x0 ?? 0);
+    const y = Number(raw.y ?? raw.y0 ?? 0);
+    const w = Number(raw.w ?? (raw.x1 != null && raw.x0 != null ? raw.x1 - raw.x0 : 0) ?? 0);
+    const h = Number(raw.h ?? (raw.y1 != null && raw.y0 != null ? raw.y1 - raw.y0 : 0) ?? 0);
+
+    if (w > 0 && h > 0) {
+      return clampRect({ x0: x, y0: y, x1: x + w, y1: y + h }, pageWidth, pageHeight);
+    }
+
+    const x0 = Number(raw.x0 ?? x);
+    const y0 = Number(raw.y0 ?? y);
+    const x1 = Number(raw.x1 ?? x0);
+    const y1 = Number(raw.y1 ?? y0);
+    return clampRect({ x0, y0, x1, y1 }, pageWidth, pageHeight);
+  }
+
+  return null;
+}
+
+function matrixToRect(matrix: any, pageWidth: number, pageHeight: number, scaleX = 1, scaleY = 1): Rect | null {
+  if (!Array.isArray(matrix) || matrix.length < 6) return null;
+  const a = Number(matrix[0] || 0);
+  const b = Number(matrix[1] || 0);
+  const c = Number(matrix[2] || 0);
+  const d = Number(matrix[3] || 0);
+  const e = Number(matrix[4] || 0);
+  const f = Number(matrix[5] || 0);
+
+  const corners: Array<[number, number]> = [
+    [0, 0],
+    [scaleX, 0],
+    [0, scaleY],
+    [scaleX, scaleY],
+  ];
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const [u, v] of corners) {
+    xs.push(a * u + c * v + e);
+    ys.push(b * u + d * v + f);
+  }
+
+  return clampRect(
+    {
+      x0: Math.min(...xs),
+      y0: Math.min(...ys),
+      x1: Math.max(...xs),
+      y1: Math.max(...ys),
+    },
+    pageWidth,
+    pageHeight,
+  );
+}
+
+function collectImageRects(page: any, pageWidth: number, pageHeight: number): Rect[] {
   const rects: Rect[] = [];
+
+  try {
+    const stPage = page.toStructuredText();
+    if (stPage?.walk) {
+      stPage.walk({
+        onImageBlock: (bbox: any, transform: any, image: any) => {
+          const boxRect = bboxLikeToRect(bbox, pageWidth, pageHeight);
+          if (boxRect) rects.push(boxRect);
+
+          const unitRect = matrixToRect(transform, pageWidth, pageHeight, 1, 1);
+          if (unitRect && rectArea(unitRect) >= 6) rects.push(unitRect);
+
+          try {
+            const iw = Number(image?.getWidth?.() || 0);
+            const ih = Number(image?.getHeight?.() || 0);
+            if (iw > 0 && ih > 0) {
+              const pixelRect = matrixToRect(transform, pageWidth, pageHeight, iw, ih);
+              if (pixelRect && rectArea(pixelRect) >= 6) rects.push(pixelRect);
+            }
+          } catch {
+            // Ignore image dimension extraction issues.
+          }
+        },
+      });
+    }
+  } catch {
+    // Ignore StructuredText walk issues.
+  }
+
   try {
     const stJsonRaw = page.toStructuredText().asJSON(1);
     const st = JSON.parse(stJsonRaw);
     const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
     for (const b of blocks) {
-      if (b?.type !== "image") continue;
-      const bb = b?.bbox || {};
-      const x = Number(bb.x || 0);
-      const y = Number(bb.y || 0);
-      const w = Number(bb.w || 0);
-      const h = Number(bb.h || 0);
-      if (w < 36 || h < 36) continue;
-      const areaRatio = (w * h) / Math.max(1, pageWidth * pageHeight);
-      const aspect = w / Math.max(1, h);
-
-      const profileLike =
-        aspect >= 0.45 &&
-        aspect <= 1.8 &&
-        areaRatio >= 0.006 &&
-        areaRatio <= 0.35;
-
-      const topPhotoLike =
-        y <= pageHeight * 0.65 &&
-        aspect >= 0.35 &&
-        aspect <= 2.2 &&
-        areaRatio >= 0.004 &&
-        (x >= pageWidth * 0.4 || x <= pageWidth * 0.2);
-
-      if (!profileLike && !topPhotoLike) continue;
-      const r = clampRect({ x0: x, y0: y, x1: x + w, y1: y + h }, pageWidth, pageHeight);
+      const type = String(b?.type || "").toLowerCase();
+      if (type !== "image" && !type.includes("img")) continue;
+      const r = bboxLikeToRect(b?.bbox, pageWidth, pageHeight);
       if (r) rects.push(r);
     }
   } catch {
-    // Ignore structured image parsing issues.
+    // Ignore asJSON image parsing issues.
+  }
+
+  return dedupeRects(rects, 3);
+}
+
+function detectPhotoImageRectsFromImageRects(imageRects: Rect[], pageWidth: number, pageHeight: number): Rect[] {
+  const rects: Rect[] = [];
+  for (const r of imageRects) {
+    const w = r.x1 - r.x0;
+    const h = r.y1 - r.y0;
+    if (w < 28 || h < 28) continue;
+
+    const areaRatio = (w * h) / Math.max(1, pageWidth * pageHeight);
+    const aspect = w / Math.max(1, h);
+    const topDist = Math.min(Math.max(0, r.y0), Math.max(0, pageHeight - r.y1));
+    const leftDist = Math.max(0, r.x0);
+    const rightDist = Math.max(0, pageWidth - r.x1);
+    const nearTop = topDist <= pageHeight * 0.42;
+    const nearSide = leftDist <= pageWidth * 0.28 || rightDist <= pageWidth * 0.28;
+    const veryNearSide = leftDist <= pageWidth * 0.16 || rightDist <= pageWidth * 0.16;
+
+    const profileLike =
+      aspect >= 0.5 &&
+      aspect <= 1.85 &&
+      areaRatio >= 0.004 &&
+      areaRatio <= 0.22;
+
+    const topCornerLike =
+      nearTop &&
+      nearSide &&
+      aspect >= 0.33 &&
+      aspect <= 2.5 &&
+      areaRatio >= 0.0025 &&
+      areaRatio <= 0.24;
+
+    const edgePhotoLike =
+      veryNearSide &&
+      aspect >= 0.42 &&
+      aspect <= 2.2 &&
+      areaRatio >= 0.005 &&
+      areaRatio <= 0.26;
+
+    if (!profileLike && !topCornerLike && !edgePhotoLike) continue;
+
+    const padded = clampRect(
+      { x0: r.x0 - 2, y0: r.y0 - 2, x1: r.x1 + 2, y1: r.y1 + 2 },
+      pageWidth,
+      pageHeight,
+    );
+    if (padded) rects.push(padded);
   }
   return dedupeRects(rects, 3);
+}
+
+function findPhotoFallbackRect(page: any, pageWidth: number, pageHeight: number): Rect | null {
+  const candidates: Rect[] = [];
+
+  const topOriginCandidate = clampRect(
+    {
+      x0: pageWidth * 0.78,
+      y0: pageHeight * 0.06,
+      x1: pageWidth * 0.985,
+      y1: pageHeight * 0.34,
+    },
+    pageWidth,
+    pageHeight,
+  );
+  const bottomOriginCandidate = clampRect(
+    {
+      x0: pageWidth * 0.78,
+      y0: pageHeight * 0.66,
+      x1: pageWidth * 0.985,
+      y1: pageHeight * 0.94,
+    },
+    pageWidth,
+    pageHeight,
+  );
+
+  if (topOriginCandidate) candidates.push(topOriginCandidate);
+  if (bottomOriginCandidate) candidates.push(bottomOriginCandidate);
+  if (candidates.length === 0) return null;
+
+  const lines = extractStructuredLines(page);
+  if (lines.length === 0) return candidates[0] || null;
+
+  let best: { rect: Rect; score: number } | null = null;
+  for (const candidate of candidates) {
+    const score = lines
+      .filter((l) =>
+        intersects(
+          candidate,
+          { x0: l.x, y0: l.y, x1: l.x + l.w, y1: l.y + l.h },
+        ),
+      )
+      .reduce((sum, l) => sum + Math.min(32, l.text.length), 0);
+
+    if (!best || score < best.score) best = { rect: candidate, score };
+  }
+
+  if (!best) return null;
+  if (best.score > 44) return null;
+  return best.rect;
+}
+
+function detectPhotoImageRects(page: any, pageWidth: number, pageHeight: number, includeFallback = false): Rect[] {
+  const imageRects = collectImageRects(page, pageWidth, pageHeight);
+  if (imageRects.length === 0) return [];
+  const photoRects = detectPhotoImageRectsFromImageRects(imageRects, pageWidth, pageHeight);
+  if (photoRects.length > 0) return photoRects;
+  if (!includeFallback) return [];
+  const fallback = findPhotoFallbackRect(page, pageWidth, pageHeight);
+  return fallback ? [fallback] : [];
 }
 
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
@@ -804,7 +1020,7 @@ async function redactPdfTextLocally(
   }
 
   // Remove photo-like images from page 1.
-  rects.push(...detectPhotoImageRects(page, pageWidth, pageHeight));
+  rects.push(...detectPhotoImageRects(page, pageWidth, pageHeight, true));
 
   let uniqueRects = dedupeRects(rects).filter((r) => r.y0 < pageHeight * 0.42);
   if (!anonymizeName) {
@@ -857,7 +1073,7 @@ async function redactPdfTextLocally(
       const w = Number(b?.[2] || 0);
       const h = Number(b?.[3] || 0);
       if (!w || !h) continue;
-      const photoRects = detectPhotoImageRects(p, w, h);
+      const photoRects = detectPhotoImageRects(p, w, h, false);
       if (photoRects.length === 0) continue;
       for (const r of photoRects) {
         const annot = p.createAnnotation("Redact");
