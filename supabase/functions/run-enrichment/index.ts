@@ -762,6 +762,7 @@ Deno.serve(async (req) => {
     const allContacts: ApolloContact[] = []
     const seenEmails = new Set<string>() // Track unique contacts by email
     const seenPersonIds = new Set<string>() // Track unique Apollo person IDs to prevent double-enrichment
+    const seenNameCompany = new Set<string>() // O(1) dedup for name+company across all loops
     const companyContactCount: Record<string, number> = {}
     let processedCount = 0
     let creditsUsed = 0 // Track people/match calls for logging
@@ -1004,8 +1005,8 @@ Deno.serve(async (req) => {
           console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
         }
         
-        // Use pagination to get more results - fetch up to 5 pages per combination for better coverage
-        const maxPages = 5
+        // Speed mode defaults: fewer pages unless target-company search needs depth.
+        const maxPages = targetCompany ? 3 : 2
         let currentPage = 1
         let hasMoreResults = true
         
@@ -1139,11 +1140,8 @@ Deno.serve(async (req) => {
               }
               
               // Check if we already have this contact
-              const isDuplicate = allContacts.some(c => 
-                c.name === person.name && c.company === companyName
-              )
-              
-              if (isDuplicate) continue
+              const dedupeKey = `${(person.name || '').toLowerCase().trim()}|${companyName.toLowerCase().trim()}`
+              if (seenNameCompany.has(dedupeKey)) continue
               
               const personName = person.name || 'Unknown'
               const personTitle = person.title || 'Unknown'
@@ -1188,6 +1186,7 @@ Deno.serve(async (req) => {
                 
                 contactsWithEmail.push(newContact)
                 seenEmails.add(emailLower)
+                seenNameCompany.add(`${personName.toLowerCase().trim()}|${companyName.toLowerCase().trim()}`)
                 companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
                 if (isFromBullhorn) bullhornContactCount++
                 console.log(`[Direct] Adding contact: ${personName} at ${companyName} (email from search)${isFromBullhorn ? ' [BULLHORN]' : ''}`)
@@ -1257,17 +1256,9 @@ Deno.serve(async (req) => {
                 }
                 
                 const batch = limitedPeopleToEnrich.slice(i, i + 10)
-                
-                for (const personData of batch) {
-                  // Final check before each individual enrichment call
-                  if (allContacts.length >= maxContacts) break
-                  if (useEqualDistribution && comboIndustry) {
-                    const currentCount = industryContacts[comboIndustry]?.length || 0
-                    const quota = industryQuotas[comboIndustry] || 0
-                    if (currentCount >= quota) break
-                  }
-                  
-                  try {
+                const enrichResults = await Promise.allSettled(
+                  batch.map(async (personData) => {
+                    creditsUsed++
                     const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
                       method: 'POST',
                       headers: {
@@ -1276,92 +1267,59 @@ Deno.serve(async (req) => {
                       },
                       body: JSON.stringify({ id: personData.id }),
                     })
-                    creditsUsed++ // Track credit usage
-                    
-                    if (enrichResponse.ok) {
-                      const enriched = await enrichResponse.json()
-                      const person = enriched.person || {}
-                      
-                      // Get full details from enrichment response
-                      const email = person.email || ''
-                      const fullName = person.name || (person.first_name && person.last_name 
-                        ? `${person.first_name} ${person.last_name}`.trim() 
-                        : personData.name)
-                      
-                      // Build location from enrichment data
-                      const locationParts = [
-                        person.city,
-                        person.state,
-                        person.country
-                      ].filter(Boolean)
-                      const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
-                      
-                      // Get company from enrichment if available
-                      const companyName = person.organization?.name || personData.company
-                      
-                      // Get job title from enrichment
-                      const jobTitle = person.title || personData.title || 'Unknown'
-                      
-                      // Only add if we got an email and a valid name
-                      if (email && fullName && fullName !== 'Unknown') {
-                        const emailLower = email.toLowerCase()
-                        
-                        // Check if this contact was recently used
-                        if (usedEmails.has(emailLower)) {
-                          console.log(`Skipping recently used contact: ${fullName} (${email})`)
-                        } else if (seenEmails.has(emailLower)) {
-                          // Skip duplicates from other search combinations
-                          console.log(`Skipping duplicate from other search: ${fullName} (${email})`)
-                        } else {
-                          // Check Bullhorn 50% cap
-                          const isFromBullhorn = bullhornEmailSet.has(emailLower)
-                          if (isFromBullhorn) {
-                            const currentTotal = allContacts.length
-                            const maxBullhornAllowed = Math.floor((currentTotal + 1) * MAX_BULLHORN_PERCENTAGE)
-                            if (bullhornContactCount >= maxBullhornAllowed) {
-                              console.log(`Skipping Bullhorn contact (50% cap): ${fullName} (${email}) - ${bullhornContactCount}/${currentTotal + 1}`)
-                              continue
-                            }
-                          }
-                          
-                          const newContact: ApolloContact = {
-                            name: fullName,
-                            title: jobTitle,
-                            location: fullLocation,
-                            email: email,
-                            company: companyName,
-                          }
-                          
-                          // Track per-industry for equal distribution
-                          if (useEqualDistribution && comboIndustry) {
-                            const quota = industryQuotas[comboIndustry] || 0
-                            const currentCount = industryContacts[comboIndustry]?.length || 0
-                            if (currentCount >= quota) {
-                              console.log(`Skipping - industry ${comboIndustry} quota full (${currentCount}/${quota})`)
-                              continue
-                            }
-                            industryContacts[comboIndustry].push(newContact)
-                            console.log(`[Enriched] Adding contact for ${comboIndustry}: ${fullName} at ${companyName} (${currentCount + 1}/${quota})${isFromBullhorn ? ' [BULLHORN]' : ''}`)
-                          } else {
-                            console.log(`[Enriched] Adding contact: ${fullName} at ${companyName}${isFromBullhorn ? ' [BULLHORN]' : ''}`)
-                          }
-                          
-                          seenEmails.add(emailLower)
-                          if (isFromBullhorn) bullhornContactCount++
-                          allContacts.push(newContact)
-                        }
-                      } else {
-                        console.log('Skipping contact with missing data:', { name: fullName, email: !!email })
-                      }
-                    } else {
-                      console.log('Enrichment failed for', personData.name)
-                    }
-                    
-                    // Small delay between enrichment calls
-                    await new Promise(resolve => setTimeout(resolve, 100))
-                  } catch (enrichError) {
-                    console.error('Enrichment error for', personData.name, enrichError)
+                    if (!enrichResponse.ok) return null
+                    const enriched = await enrichResponse.json()
+                    return { personData, person: enriched.person || {} }
+                  })
+                )
+
+                for (const result of enrichResults) {
+                  if (allContacts.length >= maxContacts) break
+                  if (result.status !== 'fulfilled' || !result.value) continue
+
+                  const { personData, person } = result.value
+                  const email = person.email || ''
+                  const fullName = person.name || (person.first_name && person.last_name
+                    ? `${person.first_name} ${person.last_name}`.trim()
+                    : personData.name)
+                  const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                  const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+                  const companyName = person.organization?.name || personData.company
+                  const jobTitle = person.title || personData.title || 'Unknown'
+
+                  if (!(email && fullName && fullName !== 'Unknown')) continue
+                  const emailLower = email.toLowerCase()
+                  if (usedEmails.has(emailLower) || seenEmails.has(emailLower)) continue
+
+                  const dedupeKey = `${fullName.toLowerCase().trim()}|${companyName.toLowerCase().trim()}`
+                  if (seenNameCompany.has(dedupeKey)) continue
+
+                  const isFromBullhorn = bullhornEmailSet.has(emailLower)
+                  if (isFromBullhorn) {
+                    const currentTotal = allContacts.length
+                    const maxBullhornAllowed = Math.floor((currentTotal + 1) * MAX_BULLHORN_PERCENTAGE)
+                    if (bullhornContactCount >= maxBullhornAllowed) continue
                   }
+
+                  const newContact: ApolloContact = {
+                    name: fullName,
+                    title: jobTitle,
+                    location: fullLocation,
+                    email,
+                    company: companyName,
+                  }
+
+                  if (useEqualDistribution && comboIndustry) {
+                    const quota = industryQuotas[comboIndustry] || 0
+                    const currentCount = industryContacts[comboIndustry]?.length || 0
+                    if (currentCount >= quota) continue
+                    industryContacts[comboIndustry].push(newContact)
+                  }
+
+                  seenEmails.add(emailLower)
+                  seenNameCompany.add(dedupeKey)
+                  if (isFromBullhorn) bullhornContactCount++
+                  allContacts.push(newContact)
                 }
               }
             }
@@ -1373,17 +1331,19 @@ Deno.serve(async (req) => {
           
           currentPage++
           
-          // Small delay to avoid rate limiting between pages
-          await new Promise(resolve => setTimeout(resolve, 200))
+          // Keep a short pause between pages to reduce burst rate.
+          await new Promise(resolve => setTimeout(resolve, 50))
         } // end while loop
 
         processedCount++
         
-        // Update progress
-        await supabase
-          .from('enrichment_runs')
-          .update({ processed_count: processedCount })
-          .eq('id', runId)
+        // Update progress periodically to reduce DB write overhead.
+        if (processedCount % 5 === 0 || processedCount === searchCombinations.length) {
+          await supabase
+            .from('enrichment_runs')
+            .update({ processed_count: processedCount })
+            .eq('id', runId)
+        }
 
       } catch (error) {
         console.error(`Error searching for combination ${combo.label}:`, error)
@@ -1423,7 +1383,7 @@ Deno.serve(async (req) => {
           retryParams.append('q_organization_name', strategy.companyName)
           
           // Search more pages for retries
-          const maxRetryPages = 10
+          const maxRetryPages = 4
           let currentPage = 1
           let hasMoreResults = true
           
@@ -1485,8 +1445,8 @@ Deno.serve(async (req) => {
                 )
                 if (isExcludedCompany) continue
                 
-                const isDuplicate = allContacts.some(c => c.name === person.name && c.company === personCompanyName) ||
-                                   seenEmails.has((person.email || '').toLowerCase())
+                const dedupeKey = `${(person.name || '').toLowerCase().trim()}|${personCompanyName.toLowerCase().trim()}`
+                const isDuplicate = seenNameCompany.has(dedupeKey) || seenEmails.has((person.email || '').toLowerCase())
                 if (isDuplicate) continue
                 
                 const personName = person.name || 'Unknown'
@@ -1506,6 +1466,7 @@ Deno.serve(async (req) => {
                       company: personCompanyName,
                     })
                     seenEmails.add(emailLower)
+                    seenNameCompany.add(`${personName.toLowerCase().trim()}|${personCompanyName.toLowerCase().trim()}`)
                     console.log(`[Retry Direct] Adding: ${personName} at ${personCompanyName} (email from search)`)
                   }
                 } else if (person.id && !seenPersonIds.has(person.id)) {
@@ -1541,11 +1502,9 @@ Deno.serve(async (req) => {
                   if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
                   
                   const batch = limitedPeopleToEnrich.slice(i, i + 10)
-                  
-                  for (const personData of batch) {
-                    if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
-                    
-                    try {
+                  const retryEnrichResults = await Promise.allSettled(
+                    batch.map(async (personData) => {
+                      creditsUsed++
                       const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
                         method: 'POST',
                         headers: {
@@ -1554,39 +1513,40 @@ Deno.serve(async (req) => {
                         },
                         body: JSON.stringify({ id: personData.id }),
                       })
-                      creditsUsed++ // Track credit usage
-                      
-                      if (enrichResponse.ok) {
-                        const enriched = await enrichResponse.json()
-                        const person = enriched.person || {}
-                        
-                        const email = person.email || ''
-                        const fullName = person.name || personData.name
-                        const companyName = person.organization?.name || personData.company
-                        const jobTitle = person.title || personData.title || 'Unknown'
-                        const locationParts = [person.city, person.state, person.country].filter(Boolean)
-                        const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
-                        
-                        if (email && fullName && fullName !== 'Unknown') {
-                          const emailLower = email.toLowerCase()
-                          if (!usedEmails.has(emailLower) && !seenEmails.has(emailLower)) {
-                            seenEmails.add(emailLower)
-                            allContacts.push({
-                              name: fullName,
-                              title: jobTitle,
-                              location: fullLocation,
-                              email: email,
-                              company: companyName,
-                            })
-                            console.log(`[Retry Enriched] Added: ${fullName} at ${companyName} (total: ${allContacts.length})`)
-                          }
-                        }
-                      }
-                      
-                      await new Promise(resolve => setTimeout(resolve, 100))
-                    } catch (enrichError) {
-                      console.error('Retry enrichment error:', enrichError)
-                    }
+                      if (!enrichResponse.ok) return null
+                      const enriched = await enrichResponse.json()
+                      return { personData, person: enriched.person || {} }
+                    })
+                  )
+
+                  for (const result of retryEnrichResults) {
+                    if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
+                    if (result.status !== 'fulfilled' || !result.value) continue
+                    const { personData, person } = result.value
+
+                    const email = person.email || ''
+                    const fullName = person.name || personData.name
+                    const companyName = person.organization?.name || personData.company
+                    const jobTitle = person.title || personData.title || 'Unknown'
+                    const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                    const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+
+                    if (!(email && fullName && fullName !== 'Unknown')) continue
+                    const emailLower = email.toLowerCase()
+                    if (usedEmails.has(emailLower) || seenEmails.has(emailLower)) continue
+
+                    const dedupeKey = `${fullName.toLowerCase().trim()}|${companyName.toLowerCase().trim()}`
+                    if (seenNameCompany.has(dedupeKey)) continue
+
+                    seenEmails.add(emailLower)
+                    seenNameCompany.add(dedupeKey)
+                    allContacts.push({
+                      name: fullName,
+                      title: jobTitle,
+                      location: fullLocation,
+                      email,
+                      company: companyName,
+                    })
                   }
                 }
               }
@@ -1597,7 +1557,7 @@ Deno.serve(async (req) => {
             }
             
             currentPage++
-            await new Promise(resolve => setTimeout(resolve, 200))
+            await new Promise(resolve => setTimeout(resolve, 50))
           }
         } catch (retryError) {
           console.error(`Retry strategy ${strategy.name} failed:`, retryError)
@@ -1855,4 +1815,3 @@ function buildApolloKeywordQuery(industry: string | null, sector: string | null)
   
   return parts.join(' ')
 }
-
