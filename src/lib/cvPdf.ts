@@ -83,7 +83,7 @@ function getWatermarkBox(watermarkImageUrl?: string | null): { maxW: number; max
   const key = String(watermarkImageUrl || "").toLowerCase();
   if (key.includes("brock") || key.includes("decker")) {
     // Brock mark should be visible but not oversized.
-    return { maxW: 112, maxH: 34 };
+    return { maxW: 100, maxH: 30 };
   }
   if (key.includes("everet") || key.includes("everett")) {
     // Everet mark is naturally compact; render slightly larger for readability.
@@ -1366,8 +1366,7 @@ export async function downloadBrandedSourcePdf(
       const hasPlacement =
         Boolean(namePlacement) &&
         Number.isFinite(namePlacement?.yTop) &&
-        Number.isFinite(namePlacement?.boxHeight) &&
-        Number(namePlacement?.yTop || 0) <= height * 0.5;
+        Number.isFinite(namePlacement?.boxHeight);
       let size = namePlacement
         ? Math.min(20, Math.max(11, namePlacement.boxHeight * 0.6))
         : 16;
@@ -1380,9 +1379,13 @@ export async function downloadBrandedSourcePdf(
         }
       }
       const desiredX = hasPlacement ? namePlacement!.xCenter - textWidth / 2 : (width - textWidth) / 2;
-      const desiredY = hasPlacement
-        ? height - (namePlacement!.yTop + Math.max(0, (namePlacement!.boxHeight - size) / 2) + size)
+      const desiredYRaw = hasPlacement
+        ? Math.max(
+            namePlacement!.yTop + Math.max(0, (namePlacement!.boxHeight - size) / 2),
+            height - (namePlacement!.yTop + Math.max(0, (namePlacement!.boxHeight - size) / 2) + size),
+          )
         : height - 82;
+      const desiredY = desiredYRaw < height * 0.65 ? height - 88 : desiredYRaw;
       page.drawText(replacement, {
         x: Math.max(26, Math.min(width - 26 - textWidth, desiredX)),
         y: Math.max(26, Math.min(height - 42, desiredY)),
