@@ -137,7 +137,7 @@ export function FantasticJobsSettingsCard() {
             </div>
             <div>
               <CardTitle className="text-lg">Fantastic.jobs (Apify)</CardTitle>
-              <CardDescription>Apify actor + token for the Job Board tab (RapidAPI optional fallback)</CardDescription>
+              <CardDescription>Apify token + actor IDs for Job Board (RapidAPI optional fallback)</CardDescription>
             </div>
           </div>
           {isConfigured && (
@@ -182,10 +182,10 @@ export function FantasticJobsSettingsCard() {
             id="apifyActorId"
             value={actorId}
             onChange={(e) => setActorId(e.target.value)}
-            placeholder={isActorConfigured ? "Configured (enter to update)" : "username~actor-name"}
+            placeholder={isActorConfigured ? "Configured (enter to update)" : "actorId1, actorId2"}
           />
           <p className="text-xs text-muted-foreground">
-            Example format: <code>username~actor-name</code>
+            Paste one or multiple IDs separated by commas. Example: <code>s3dtSTZSZWFtAVLn5,vIGxjRrHqDTPuE6M4</code>
           </p>
         </div>
         <div className="space-y-2">

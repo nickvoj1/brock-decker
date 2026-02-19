@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,6 +7,18 @@ const corsHeaders = {
 };
 
 const RAPID_HOST = "active-jobs-db.p.rapidapi.com";
+
+function splitCsv(value?: string): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
+}
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -237,6 +250,28 @@ async function fetchViaApify(
   return Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
 }
 
+async function readApiSettings(): Promise<Record<string, string>> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRole) return {};
+
+  try {
+    const supabase = createClient(supabaseUrl, serviceRole);
+    const { data, error } = await supabase
+      .from("api_settings")
+      .select("setting_key, setting_value")
+      .in("setting_key", ["apify_token", "apify_actor_id", "rapidapi_key"]);
+
+    if (error || !data) return {};
+    return data.reduce((acc: Record<string, string>, row: any) => {
+      acc[String(row.setting_key)] = String(row.setting_value || "");
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -245,21 +280,26 @@ serve(async (req) => {
   try {
     const body: Record<string, unknown> = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const url = new URL(req.url);
+    const savedSettings = await readApiSettings();
 
     const apifyToken =
       (body.apify_token as string) ||
       (body.apiKey as string) ||
+      savedSettings.apify_token ||
       Deno.env.get("APIFY_TOKEN") ||
       Deno.env.get("APIFY_API_TOKEN") ||
       "";
-    const apifyActorId =
-      (body.actor_id as string) ||
-      Deno.env.get("APIFY_FANTASTIC_JOBS_ACTOR_ID") ||
-      Deno.env.get("APIFY_ACTOR_ID") ||
-      "";
+    const apifyActorIds = uniqueStrings([
+      ...splitCsv(body.actor_id as string),
+      ...splitCsv(savedSettings.apify_actor_id),
+      ...splitCsv(Deno.env.get("APIFY_FANTASTIC_JOBS_ACTOR_IDS") || ""),
+      ...splitCsv(Deno.env.get("APIFY_FANTASTIC_JOBS_ACTOR_ID") || ""),
+      ...splitCsv(Deno.env.get("APIFY_ACTOR_ID") || ""),
+    ]);
     const rapidApiKey =
       (body.rapidapi_key as string) ||
       (body.rapidApiKey as string) ||
+      savedSettings.rapidapi_key ||
       Deno.env.get("RAPIDAPI_KEY") ||
       "";
 
@@ -267,13 +307,17 @@ serve(async (req) => {
     let provider = "";
     let providerError = "";
 
-    if (apifyToken && apifyActorId) {
-      try {
-        rawJobs = await fetchViaApify(apifyToken, apifyActorId, body, url);
-        provider = "apify";
-      } catch (error) {
-        providerError = error instanceof Error ? error.message : "Apify failed";
-        console.error("[fantastic-jobs] Apify error:", providerError);
+    if (apifyToken && apifyActorIds.length > 0) {
+      for (const actorId of apifyActorIds) {
+        try {
+          rawJobs = await fetchViaApify(apifyToken, actorId, body, url);
+          provider = `apify:${actorId}`;
+          if (rawJobs.length > 0) break;
+        } catch (error) {
+          const err = error instanceof Error ? error.message : `Apify failed for ${actorId}`;
+          providerError = providerError ? `${providerError}; ${err}` : err;
+          console.error("[fantastic-jobs] Apify error:", err);
+        }
       }
     }
 
@@ -291,7 +335,7 @@ serve(async (req) => {
     if (rawJobs.length === 0 && !provider) {
       throw new Error(
         providerError ||
-          "No jobs provider available. Configure APIFY_TOKEN + APIFY_FANTASTIC_JOBS_ACTOR_ID (preferred) or RAPIDAPI_KEY.",
+          "No jobs provider available. Configure Apify token + actor IDs (preferred) or RapidAPI key.",
       );
     }
 
