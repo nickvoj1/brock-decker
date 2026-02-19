@@ -269,6 +269,72 @@ const EXCLUDED_TOPICS = [
   "murder", "shooting", "crash killed", "arrested for", "war in", "military strike",
 ];
 
+const DEAL_REGION_KEYWORDS: Record<string, string[]> = {
+  london: ["london", "uk", "united kingdom", "britain", "england", "city of london", "canary wharf", "mayfair"],
+  europe: ["europe", "eu", "germany", "france", "netherlands", "spain", "italy", "switzerland", "berlin", "paris", "amsterdam", "frankfurt", "munich", "zurich"],
+  uae: ["uae", "united arab emirates", "dubai", "abu dhabi", "difc", "adgm", "emirates"],
+  usa: ["usa", "united states", "us ", "new york", "nyc", "boston", "san francisco", "los angeles", "chicago", "miami", "wall street"],
+};
+
+type MustHaveHit = { hit: boolean; signalType?: string; tier?: string; boost: number };
+
+function detectStrictDealRegion(text: string): string | null {
+  const lower = text.toLowerCase();
+  const scores: Record<string, number> = { london: 0, europe: 0, uae: 0, usa: 0 };
+  for (const [region, keywords] of Object.entries(DEAL_REGION_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (lower.includes(kw)) scores[region] += 1;
+    }
+  }
+  const max = Math.max(...Object.values(scores));
+  if (max <= 0) return null;
+  return Object.entries(scores).find(([, score]) => score === max)?.[0] || null;
+}
+
+function extractKeyPeople(text: string): string[] {
+  const people = new Set<string>();
+  const rolePatterns = [
+    /(?:new|appointed|appoints|names|named|hired|hires)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:as|to)\s+(?:ceo|cfo|coo|chro|chief executive officer|chief financial officer)/gi,
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:joins|appointed|named)\s+as\s+(?:ceo|cfo|coo|chro)/gi,
+  ];
+  for (const pattern of rolePatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match[1]) people.add(match[1].trim());
+    }
+  }
+  return Array.from(people).slice(0, 5);
+}
+
+function extractDealSignature(text: string): string {
+  const lower = text.toLowerCase();
+  const amountMatch = lower.match(/(?:\$|€|£)\s?\d+(?:\.\d+)?\s?(?:bn|billion|m|million)?|\d+(?:\.\d+)?\s?(?:bn|billion|m|million)\s?(?:usd|eur|gbp)?/i);
+  const actionMatch = lower.match(/fund close|final close|first close|raises fund|acquires|acquisition|merger|appoints|hiring spree|office expansion/i);
+  return `${actionMatch?.[0] || "na"}|${amountMatch?.[0] || "na"}`.toLowerCase();
+}
+
+function checkMustHaveSignals(text: string): MustHaveHit {
+  const lower = text.toLowerCase();
+  if (/fund close|final close|first close|closes fund|raises fund/.test(lower)) {
+    return { hit: true, signalType: "funding", tier: "tier_1", boost: 20 };
+  }
+  if (/(appoints|appointed|names|named|hires|hired).*(?:ceo|chief executive officer)/.test(lower) && /private equity|pe|family office|fund/.test(lower)) {
+    return { hit: true, signalType: "c_suite", tier: "tier_1", boost: 18 };
+  }
+  if (/(merger|merge|combines|combination).*(family office|private equity|pe office)/.test(lower)) {
+    return { hit: true, signalType: "expansion", tier: "tier_1", boost: 16 };
+  }
+  return { hit: false, boost: 0 };
+}
+
+function isRelevantWorkSignal(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasSector = PE_FILTER_KEYWORDS.some((kw) => lower.includes(kw));
+  const hasAction = QUALITY_ACTION_WORDS.some((kw) => lower.includes(kw));
+  const isExcluded = EXCLUDED_TOPICS.some((kw) => lower.includes(kw));
+  return hasSector && hasAction && !isExcluded;
+}
+
 // ============================================================================
 // QUALITY VALIDATION - Strict checks for REAL news headlines
 // ============================================================================
@@ -984,7 +1050,7 @@ Deno.serve(async (req) => {
     const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
     const { data: recentSignals } = await supabase
       .from("signals")
-      .select("url, title, company, region, signal_type, published_at")
+      .select("url, title, company, region, signal_type, source, details, published_at")
       .gte("published_at", dedupeCutoffIso)
       .limit(5000);
 
@@ -1003,6 +1069,7 @@ Deno.serve(async (req) => {
         normalizeTextForDedup(existing.company),
         normalizeTextForDedup(existing.region),
         normalizeTextForDedup(existing.signal_type),
+        normalizeTextForDedup((existing as any).source),
         titleKey,
       ].join("|");
       if (companyTypeKey.replace(/\|/g, "").length > 0) {
@@ -1026,10 +1093,23 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      const fullText = `${signal.title || ""} ${signal.description || ""}`.toLowerCase();
+      if (!isRelevantWorkSignal(fullText)) {
+        stats.skipped++;
+        continue;
+      }
+
+      const strictDealRegion = detectStrictDealRegion(fullText);
+      if (!strictDealRegion || strictDealRegion !== signal.region) {
+        stats.skipped++;
+        continue;
+      }
+
       const classification = await classifySignalWithAI(signal, feedbackContext);
+      const mustHave = checkMustHaveSignals(fullText);
       
       // Skip low relevance signals (below 5)
-      if (classification.relevanceScore < 5) {
+      if (classification.relevanceScore < 5 && !mustHave.hit) {
         console.log(`Skipping low relevance (${classification.relevanceScore}): ${signal.title?.substring(0, 50)}`);
         stats.skipped++;
         continue;
@@ -1041,9 +1121,14 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const mappedSignalType = mapToValidSignalType(classification.signalType);
-      const fullText = `${signal.title || ""} ${signal.description || ""} ${company}`.toLowerCase();
-      if (!isSignalTypeFit(fullText, mappedSignalType)) {
+      const mappedSignalType = mustHave.signalType || mapToValidSignalType(classification.signalType);
+      const scoreBase = classification.relevanceScore * 10;
+      const boostedScore = Math.min(100, Math.max(scoreBase, scoreBase + mustHave.boost));
+      const keyPeople = extractKeyPeople(`${signal.title || ""} ${signal.description || ""}`);
+      const dealSignature = extractDealSignature(`${signal.title || ""} ${signal.description || ""}`);
+      const sourceKey = normalizeTextForDedup(signal.source);
+      const fullSignalText = `${signal.title || ""} ${signal.description || ""} ${company}`.toLowerCase();
+      if (!isSignalTypeFit(fullSignalText, mappedSignalType)) {
         console.log(`Skipping type mismatch (${mappedSignalType}): ${signal.title?.substring(0, 60)}`);
         stats.skipped++;
         continue;
@@ -1055,6 +1140,9 @@ Deno.serve(async (req) => {
         normalizeTextForDedup(company),
         normalizeTextForDedup(signal.region),
         normalizeTextForDedup(mappedSignalType),
+        sourceKey,
+        normalizeTextForDedup(keyPeople.join("|")),
+        normalizeTextForDedup(dealSignature),
         titleKey,
       ].join("|");
 
@@ -1070,13 +1158,19 @@ Deno.serve(async (req) => {
         url: signal.url,
         source: signal.source,
         region: signal.region,
-        tier: classification.tier,
+        tier: mustHave.tier || classification.tier,
         signal_type: mappedSignalType,
         ai_confidence: classification.confidence,
         ai_insight: classification.insight,
         ai_pitch: classification.pitch,
-        score: classification.relevanceScore * 10,
+        score: boostedScore,
         published_at: signal.published_at || new Date().toISOString(),
+        details: {
+          key_people: keyPeople,
+          deal_signature: dealSignature,
+          strict_deal_region: strictDealRegion,
+          source_key: sourceKey,
+        },
       };
 
       const { error } = await supabase.from("signals").insert(signalRecord);

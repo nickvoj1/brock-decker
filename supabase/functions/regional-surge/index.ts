@@ -159,6 +159,28 @@ function titleFingerprint(text?: string | null): string {
   return normalizeTextForDedup(text).split(" ").slice(0, 14).join(" ");
 }
 
+function extractKeyPeople(text: string): string[] {
+  const people = new Set<string>();
+  const patterns = [
+    /(?:appoints|appointed|names|named|hires|hired)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:as|to)\s+(?:ceo|cfo|coo|chro|chief executive|chief financial)/gi,
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:joins|appointed|named)\s+as\s+(?:ceo|cfo|coo|chro)/gi,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match[1]) people.add(match[1].trim());
+    }
+  }
+  return Array.from(people).slice(0, 5);
+}
+
+function extractDealSignature(text: string): string {
+  const lower = text.toLowerCase();
+  const amountMatch = lower.match(/(?:\$|€|£)\s?\d+(?:\.\d+)?\s?(?:bn|billion|m|million)?|\d+(?:\.\d+)?\s?(?:bn|billion|m|million)\s?(?:usd|eur|gbp)?/i);
+  const actionMatch = lower.match(/fund close|final close|first close|raises fund|acquires|acquisition|merger|appoints|hiring spree|office expansion/i);
+  return `${actionMatch?.[0] || "na"}|${amountMatch?.[0] || "na"}`.toLowerCase();
+}
+
 function classifySignalTypeFromContent(text: string): "funding" | "expansion" | "c_suite" | "hiring" | "team_growth" {
   const t = text.toLowerCase();
   if (/fund close|final close|first close|raises fund|raises \$|raises €|series [abc]|investment round/.test(t)) {
@@ -439,7 +461,7 @@ Deno.serve(async (req) => {
     const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
     const { data: recentSignals } = await supabase
       .from("signals")
-      .select("url, title, company, region, signal_type, published_at")
+      .select("url, title, company, region, signal_type, source, details, published_at")
       .gte("published_at", dedupeCutoffIso)
       .limit(5000);
 
@@ -456,6 +478,7 @@ Deno.serve(async (req) => {
         normalizeTextForDedup(existing.company),
         normalizeTextForDedup(existing.region),
         normalizeTextForDedup(existing.signal_type),
+        normalizeTextForDedup((existing as any).source),
         titleKey,
       ].join("|");
       if (companyTypeKey.replace(/\|/g, "").length > 0) seenCompanyTypeKeys.add(companyTypeKey);
@@ -530,12 +553,18 @@ Deno.serve(async (req) => {
           const contentTitle = articleContent.split("\n")[0]?.trim() || `${company} ${source.source} update`;
           const title = contentTitle.slice(0, 255);
           const signalType = classifySignalTypeFromContent(articleContent);
+          const keyPeople = extractKeyPeople(articleContent);
+          const dealSignature = extractDealSignature(articleContent);
+          const sourceKey = normalizeTextForDedup(source.source);
           const urlKey = normalizeUrlForDedup(source.url);
           const titleKey = titleFingerprint(title);
           const companyTypeKey = [
             normalizeTextForDedup(company),
             normalizeTextForDedup(region),
             normalizeTextForDedup(signalType),
+            sourceKey,
+            normalizeTextForDedup(keyPeople.join("|")),
+            normalizeTextForDedup(dealSignature),
             titleKey,
           ].join("|");
 
@@ -565,6 +594,11 @@ Deno.serve(async (req) => {
               tier: surgeScore >= 90 ? "tier_1" : surgeScore >= 70 ? "tier_2" : "tier_3",
               published_at: new Date().toISOString(),
               user_feedback: isPending ? null : "AUTO_VALIDATED",
+              details: {
+                key_people: keyPeople,
+                deal_signature: dealSignature,
+                source_key: sourceKey,
+              },
             });
           
           if (insertError) {

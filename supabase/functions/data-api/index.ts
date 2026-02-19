@@ -110,7 +110,11 @@ function normalizeTextForDedup(text?: string | null): string {
 
 function buildDisplayDedupKey(row: any): string {
   const normalizedUrl = normalizeUrlForDedup(row?.url);
-  if (normalizedUrl) return `url:${normalizedUrl}`;
+  const source = normalizeTextForDedup(row?.source);
+  const details = row?.details || {};
+  const people = normalizeTextForDedup(Array.isArray(details?.key_people) ? details.key_people.join("|") : "");
+  const dealSignature = normalizeTextForDedup(details?.deal_signature || "");
+  if (normalizedUrl) return `url:${normalizedUrl}|src:${source}|people:${people}|deal:${dealSignature}`;
 
   const titleTokens = normalizeTextForDedup(row?.title)
     .split(" ")
@@ -119,7 +123,7 @@ function buildDisplayDedupKey(row: any): string {
   const company = normalizeTextForDedup(row?.company);
   const region = normalizeTextForDedup(row?.region);
   const type = normalizeTextForDedup(row?.signal_type);
-  return `text:${company}|${region}|${type}|${titleTokens}`;
+  return `text:${company}|${region}|${type}|src:${source}|people:${people}|deal:${dealSignature}|${titleTokens}`;
 }
 
 function checkRateLimit(profileName: string): boolean {
@@ -1348,7 +1352,7 @@ Deno.serve(async (req) => {
       // Get region and tier counts
       const { data: allSignalsRaw } = await supabase
         .from("signals")
-        .select("region, tier, title, description, url, company")
+        .select("region, tier, title, description, url, company, source, signal_type, details")
         .eq("is_dismissed", false)
         .gte("published_at", cutoffDate.toISOString())
         .limit(5000);

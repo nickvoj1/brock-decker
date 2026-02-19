@@ -524,6 +524,28 @@ function titleFingerprint(text?: string | null): string {
   return normalizeTextForDedup(text).split(" ").slice(0, 14).join(" ");
 }
 
+function extractKeyPeople(text: string): string[] {
+  const people = new Set<string>();
+  const patterns = [
+    /(?:appoints|appointed|names|named|hires|hired)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:as|to)\s+(?:ceo|cfo|coo|chro|chief executive|chief financial)/gi,
+    /([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\s+(?:joins|appointed|named)\s+as\s+(?:ceo|cfo|coo|chro)/gi,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match[1]) people.add(match[1].trim());
+    }
+  }
+  return Array.from(people).slice(0, 5);
+}
+
+function extractDealSignature(text: string): string {
+  const lower = text.toLowerCase();
+  const amountMatch = lower.match(/(?:\$|€|£)\s?\d+(?:\.\d+)?\s?(?:bn|billion|m|million)?|\d+(?:\.\d+)?\s?(?:bn|billion|m|million)\s?(?:usd|eur|gbp)?/i);
+  const actionMatch = lower.match(/fund close|final close|first close|raises fund|acquires|acquisition|merger|appoints|hiring spree|office expansion/i);
+  return `${actionMatch?.[0] || "na"}|${amountMatch?.[0] || "na"}`.toLowerCase();
+}
+
 async function parseRSSFeed(url: string): Promise<any[]> {
   try {
     const response = await fetch(url, {
@@ -781,6 +803,8 @@ Deno.serve(async (req) => {
               location: validatedRegion === "london" ? "London" : 
                         validatedRegion === "uae" ? "Dubai" :
                         validatedRegion === "usa" ? "New York" : "Europe",
+              key_people: extractKeyPeople(fullText),
+              deal_signature: extractDealSignature(fullText),
             },
           });
         }
@@ -833,6 +857,8 @@ Deno.serve(async (req) => {
             location: validatedRegion === "london" ? "London" : 
                       validatedRegion === "uae" ? "Dubai" :
                       validatedRegion === "usa" ? "New York" : "Europe",
+            key_people: extractKeyPeople(fullText),
+            deal_signature: extractDealSignature(fullText),
           },
         });
       }
@@ -876,7 +902,7 @@ Deno.serve(async (req) => {
     const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString();
     const { data: recentSignals } = await supabase
       .from("signals")
-      .select("url, title, company, region, signal_type, published_at")
+      .select("url, title, company, region, signal_type, source, details, published_at")
       .gte("published_at", dedupeCutoffIso)
       .limit(5000);
 
@@ -893,6 +919,9 @@ Deno.serve(async (req) => {
         normalizeTextForDedup(existing.company),
         normalizeTextForDedup(existing.region),
         normalizeTextForDedup(existing.signal_type),
+        normalizeTextForDedup((existing as any).source),
+        normalizeTextForDedup(Array.isArray((existing as any)?.details?.key_people) ? (existing as any).details.key_people.join("|") : ""),
+        normalizeTextForDedup((existing as any)?.details?.deal_signature || ""),
         titleKey,
       ].join("|");
       if (companyTypeKey.replace(/\|/g, "").length > 0) seenCompanyTypeKeys.add(companyTypeKey);
@@ -906,6 +935,9 @@ Deno.serve(async (req) => {
         normalizeTextForDedup(signal.company),
         normalizeTextForDedup(signal.region),
         normalizeTextForDedup(signal.signal_type),
+        normalizeTextForDedup(signal.source),
+        normalizeTextForDedup(Array.isArray(signal?.details?.key_people) ? signal.details.key_people.join("|") : ""),
+        normalizeTextForDedup(signal?.details?.deal_signature || ""),
         titleKey,
       ].join("|");
 
