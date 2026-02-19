@@ -501,10 +501,16 @@ export function FantasticJobsBoard() {
         );
         const filtered = applyClientFilters(deduped);
         const capped = filtered.slice(0, requestedCount);
-        const historyResults = capped.map(toHistoryJob);
+        const visibleRows = strictPEOnly
+          ? capped.filter((job) => {
+              const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
+              return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
+            })
+          : capped;
+        const historyResults = visibleRows.map(toHistoryJob);
 
-        setJobs(capped);
-        setTotal(capped.length);
+        setJobs(visibleRows);
+        setTotal(visibleRows.length);
         setLastRefresh(new Date());
         setSearchHistory((prev) => [
           {
@@ -513,15 +519,15 @@ export function FantasticJobsBoard() {
             mode,
             filters: { ...filters },
             strictPEOnly,
-            resultCount: capped.length,
-            topResults: capped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
+            resultCount: visibleRows.length,
+            topResults: visibleRows.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
             results: historyResults,
           },
           ...prev,
         ]);
         toast({
           title: "Jobs refreshed",
-          description: `Found ${capped.length} jobs (${mode})`,
+          description: `Found ${visibleRows.length} jobs (${mode})`,
         });
       } catch (error) {
         toast({
