@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
+import { createEnrichmentRun } from "@/lib/dataApi";
 
 const DEPARTMENTS = [
   'HR / Talent Acquisition',
@@ -20,12 +21,48 @@ const DEPARTMENTS = [
   'Operations',
 ];
 
+const DEPARTMENT_TITLES: Record<string, string[]> = {
+  'HR / Talent Acquisition': ['Recruiter', 'Talent Acquisition', 'HR Manager', 'HR Director', 'People Operations', 'Head of Talent'],
+  'Leadership / C-Suite': ['CEO', 'CTO', 'CFO', 'COO', 'Managing Director', 'Partner', 'Founder'],
+  'Finance': ['Finance Director', 'CFO', 'Financial Controller', 'Head of Finance', 'Investment Director', 'Fund Manager'],
+  'Legal': ['General Counsel', 'Head of Legal', 'Legal Director', 'Legal Counsel', 'Attorney', 'Compliance Officer'],
+  'Engineering / IT': ['Engineering Manager', 'VP Engineering', 'CTO', 'IT Director', 'Head of Engineering'],
+  'Sales / Business Development': ['Sales Director', 'VP Sales', 'Head of Sales', 'Business Development', 'Partnership Manager'],
+  'Marketing': ['CMO', 'Marketing Director', 'VP Marketing', 'Head of Marketing', 'Growth Manager'],
+  'Operations': ['COO', 'Operations Director', 'VP Operations', 'Head of Operations', 'Operations Manager'],
+};
+
 interface SpecialRequestContact {
   name: string;
   title: string;
   company: string;
   email: string;
   location: string;
+}
+
+function inferRegionFromLocation(value: string): "london" | "europe" | "uae" | "usa" {
+  const t = value.toLowerCase();
+  if (t.includes("dubai") || t.includes("abu dhabi") || t.includes("uae")) return "uae";
+  if (t.includes("london") || t.includes("uk") || t.includes("united kingdom")) return "london";
+  if (
+    t.includes("new york") ||
+    t.includes("usa") ||
+    t.includes("united states") ||
+    t.includes("san francisco") ||
+    t.includes("los angeles") ||
+    t.includes("chicago") ||
+    t.includes("boston")
+  ) return "usa";
+  return "europe";
+}
+
+function isCompleteContact(contact: SpecialRequestContact): boolean {
+  const nameParts = (contact.name || "").trim().split(/\s+/).filter(Boolean);
+  const hasName = nameParts.length >= 2;
+  const hasTitle = (contact.title || "").trim().length >= 2;
+  const email = (contact.email || "").trim();
+  const hasEmail = email.includes("@") && email.length >= 5;
+  return hasName && hasTitle && hasEmail;
 }
 
 export function SpecialRequestTab() {
@@ -55,24 +92,76 @@ export function SpecialRequestTab() {
     setContacts([]);
     
     try {
-      const { data, error } = await supabase.functions.invoke('special-request', {
-        body: {
-          company: company.trim(),
+      const targetRoles = Array.from(
+        new Set(selectedDepartments.flatMap((dept) => DEPARTMENT_TITLES[dept] || []))
+      );
+      const searchName = requestName.trim() || `${company.trim()} - ${country.trim()}`;
+      const signalRegion = inferRegionFromLocation(country.trim());
+
+      let bullhornEmails: string[] = [];
+      try {
+        const { data: bhResult } = await supabase.functions.invoke('fetch-bullhorn-emails', {});
+        if (bhResult?.success && Array.isArray(bhResult.emails)) {
+          bullhornEmails = bhResult.emails as string[];
+        }
+      } catch {
+        // Non-fatal: continue without Bullhorn exclusion.
+      }
+
+      const runResult = await createEnrichmentRun(profileName, {
+        search_counter: maxContacts,
+        candidates_count: 1,
+        preferences_count: 1,
+        status: 'running',
+        bullhorn_enabled: false,
+        candidates_data: [{
+          candidate_id: `SR-${Date.now()}`,
+          name: searchName,
+          current_title: 'Special Request',
+          location: country.trim(),
+          skills: [],
+          work_history: [],
+          education: [],
+        }],
+        preferences_data: [{
+          type: 'special_request',
+          industry: 'Private Equity',
+          companies: company.trim(),
+          exclusions: '',
+          excludedIndustries: [],
+          locations: [country.trim()],
+          targetRoles,
+          sectors: selectedDepartments,
+          targetCompany: company.trim(),
+          signalTitle: `Special request: ${company.trim()}`,
+          signalRegion,
           country: country.trim(),
           departments: selectedDepartments,
-          maxContacts,
-          emailOnly: true,
-          profileName,
-          requestName: requestName.trim() || `${company.trim()} - ${country.trim()}`,
-        },
+        }],
       });
 
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Search failed');
+      if (!runResult.success || !runResult.data?.id) {
+        throw new Error(runResult.error || 'Failed to create enrichment run');
+      }
 
-      setContacts(data.contacts || []);
+      const { data, error } = await supabase.functions.invoke('run-enrichment', {
+        body: { runId: runResult.data.id, bullhornEmails }
+      });
+      if (error) throw error;
+
+      const rawContacts = Array.isArray(data?.contacts) ? data.contacts : [];
+      const normalizedContacts: SpecialRequestContact[] = rawContacts.map((c: any) => ({
+        name: String(c?.name || ''),
+        title: String(c?.title || ''),
+        company: String(c?.company || company.trim()),
+        email: String(c?.email || ''),
+        location: String(c?.location || country.trim()),
+      }));
+      const completeContacts = normalizedContacts.filter(isCompleteContact);
+
+      setContacts(completeContacts);
       toast({
-        title: `Found ${data.total} contacts`,
+        title: `Found ${completeContacts.length} contacts`,
         description: `At ${company} in ${country}`,
       });
     } catch (err: any) {
