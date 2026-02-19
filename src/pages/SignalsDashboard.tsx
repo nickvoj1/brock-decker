@@ -57,17 +57,13 @@ import {
   scrapeJobSignals,
   runRegionalSurge,
   submitSignalFeedback,
-  getJobSignals,
-  dismissJobSignal,
   huntPEFunds,
   Signal,
-  JobSignal 
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
 import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
 import { SignalCard } from "@/components/signals/SignalCard";
 import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
-import { JobSignalCard } from "@/components/signals/JobSignalCard";
 import { SignalTableView } from "@/components/signals/SignalTableView";
 import { FantasticJobsBoard } from "@/components/jobs/FantasticJobsBoard";
 import { supabase } from "@/integrations/supabase/client";
@@ -78,7 +74,7 @@ import { endOfDay, format, startOfDay, subDays, subHours } from "date-fns";
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
 type SortOption = "newest" | "relevant" | "amount" | "fit";
-type TabView = "signals" | "jobs" | "jobboard";
+type TabView = "signals" | "jobboard";
 type ViewMode = "table" | "cards";
 type DatePreset = "all" | "24h" | "7d" | "14d" | "30d" | "custom";
 
@@ -175,7 +171,6 @@ export default function SignalsDashboard() {
   const navigate = useNavigate();
   const profileName = useProfileName();
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [jobSignals, setJobSignals] = useState<JobSignal[]>([]);
   const [regionCounts, setRegionCounts] = useState<Record<string, number>>({});
   const [tierCounts, setTierCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -188,7 +183,6 @@ export default function SignalsDashboard() {
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
   const [isHunting, setIsHunting] = useState(false);
   const [activeTab, setActiveTab] = useState<TabView>("signals");
-  const [isJobsLoading, setIsJobsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchQuery, setSearchQuery] = useState("");
   const [excludeQuery, setExcludeQuery] = useState("");
@@ -265,20 +259,12 @@ export default function SignalsDashboard() {
     if (!profileName) return;
 
     fetchSignals();
-    fetchJobSignals();
 
     const cleanup = setupRealtimeSubscription();
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileName, setupRealtimeSubscription]);
   
-  // Fetch job signals when region changes
-  useEffect(() => {
-    if (activeTab === "jobs" && profileName) {
-      fetchJobSignals();
-    }
-  }, [activeRegion, activeTab, profileName]);
-
   const SIGNALS_PREFS_KEY = "signals-dashboard-preferences";
 
   useEffect(() => {
@@ -305,7 +291,7 @@ export default function SignalsDashboard() {
       if (prefs.tierFilter && TIER_FILTERS.some((f) => f.value === prefs.tierFilter)) setTierFilter(prefs.tierFilter);
       if (prefs.sortBy && SORT_OPTIONS.some((s) => s.value === prefs.sortBy)) setSortBy(prefs.sortBy);
       if (typeof prefs.minScore === "number" && prefs.minScore >= 0 && prefs.minScore <= 100) setMinScore(prefs.minScore);
-      if (prefs.activeTab && ["signals", "jobs", "jobboard"].includes(prefs.activeTab)) setActiveTab(prefs.activeTab);
+      if (prefs.activeTab && ["signals", "jobboard"].includes(prefs.activeTab)) setActiveTab(prefs.activeTab);
       if (prefs.viewMode && ["table", "cards"].includes(prefs.viewMode)) setViewMode(prefs.viewMode);
       if (typeof prefs.searchQuery === "string") setSearchQuery(prefs.searchQuery);
       if (typeof prefs.excludeQuery === "string") setExcludeQuery(prefs.excludeQuery);
@@ -363,22 +349,6 @@ export default function SignalsDashboard() {
     }
   };
   
-  const fetchJobSignals = async () => {
-    if (!profileName) return;
-    
-    setIsJobsLoading(true);
-    try {
-      const response = await getJobSignals(activeRegion);
-      if (response.success && response.data) {
-        setJobSignals(response.data);
-      }
-    } catch (error) {
-      console.error("Error fetching job signals:", error);
-    } finally {
-      setIsJobsLoading(false);
-    }
-  };
-
   const handleRefresh = async () => {
     if (!profileName) return;
     
@@ -925,14 +895,10 @@ export default function SignalsDashboard() {
 
         {/* Tabs: Signals vs Jobs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
             <TabsTrigger value="signals" className="gap-1.5">
               <Sparkles className="h-4 w-4" />
               Signals
-            </TabsTrigger>
-            <TabsTrigger value="jobs" className="gap-1.5">
-              <Briefcase className="h-4 w-4" />
-              Apollo Jobs
             </TabsTrigger>
             <TabsTrigger value="jobboard" className="gap-1.5">
               <Search className="h-4 w-4" />
@@ -1145,73 +1111,6 @@ export default function SignalsDashboard() {
                       setSignals((prev) =>
                         prev.map((s) => (s.id === updated.id ? updated : s))
                       );
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </TabsContent>
-          
-          {/* Jobs Tab */}
-          <TabsContent value="jobs" className="mt-4 space-y-4">
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-muted-foreground">
-                {jobSignals.length} job signals in {REGION_CONFIG[activeRegion].label}
-              </span>
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={async () => {
-                  setIsJobsLoading(true);
-                  toast.info("Fetching job signals via Apollo...");
-                  const result = await scrapeJobSignals(activeRegion, "apollo");
-                  if (result.success) {
-                    toast.success(`Found ${result.apolloJobsInserted || 0} new job signals`);
-                    await fetchJobSignals();
-                  } else {
-                    toast.error(result.error || "Failed to fetch jobs");
-                  }
-                  setIsJobsLoading(false);
-                }}
-                disabled={isJobsLoading}
-              >
-                {isJobsLoading ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4 mr-1" />
-                )}
-                Fetch Jobs
-              </Button>
-            </div>
-            
-            {isJobsLoading ? (
-              <div className="flex items-center justify-center py-20">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            ) : jobSignals.length === 0 ? (
-              <Card className="border-dashed">
-                <CardContent className="flex flex-col items-center justify-center py-16">
-                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Briefcase className="h-6 w-6 text-muted-foreground" />
-                  </div>
-                  <h3 className="text-lg font-medium mb-1">No job signals yet</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Fetch job postings from PE/VC companies
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                {jobSignals.map((job) => (
-                  <JobSignalCard 
-                    key={job.id} 
-                    job={job} 
-                    onDismiss={async (id) => {
-                      const result = await dismissJobSignal(id, profileName || "");
-                      if (result.success) {
-                        setJobSignals(prev => prev.filter(j => j.id !== id));
-                        toast.success("Job signal dismissed");
-                      }
                     }}
                   />
                 ))}
