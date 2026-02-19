@@ -108,6 +108,18 @@ function toNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeJobs(items: Record<string, unknown>[], actorId: string): Job[] {
   const normalized: Job[] = [];
 
@@ -148,7 +160,7 @@ function normalizeJobs(items: Record<string, unknown>[], actorId: string): Job[]
       salary_max: salaryMax,
       currency,
       posted_at: String(item.date_posted || item.posted_at || new Date().toISOString()),
-      apply_url: (item.url as string) || (item.apply_url as string) || null,
+      apply_url: normalizeUrl(item.url) || normalizeUrl(item.apply_url),
       description: String(item.description_text || item.description || ""),
       remote:
         item.location_type === "TELECOMMUTE" ||
@@ -391,6 +403,25 @@ export function FantasticJobsBoard() {
     URL.revokeObjectURL(url);
   };
 
+  const openApplyLink = (url: string | null) => {
+    if (!url) {
+      toast({
+        title: "No apply link",
+        description: "This job does not have a valid application URL.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const win = window.open(url, "_blank", "noopener,noreferrer");
+    if (!win) {
+      toast({
+        title: "Popup blocked",
+        description: "Allow popups for this site to open job links.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -614,10 +645,13 @@ export function FantasticJobsBoard() {
                       </TableCell>
                       <TableCell>
                         {job.apply_url ? (
-                          <Button variant="ghost" size="sm" asChild className="h-8 w-8 p-0">
-                            <a href={job.apply_url} target="_blank" rel="noopener noreferrer">
-                              <ExternalLink className="h-4 w-4" />
-                            </a>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => openApplyLink(job.apply_url)}
+                          >
+                            <ExternalLink className="h-4 w-4" />
                           </Button>
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
