@@ -40,6 +40,7 @@ interface Filters {
   company: string;
   exclude: string;
   industry: string;
+  jobsPerSearch: string;
   location: string;
   salaryMin: string;
   remote: boolean;
@@ -53,6 +54,7 @@ const DEFAULT_FILTERS: Filters = {
   company: "",
   exclude: "",
   industry: "all",
+  jobsPerSearch: "100",
   location: "London,United States,United Arab Emirates",
   salaryMin: "",
   remote: false,
@@ -204,7 +206,7 @@ export function FantasticJobsBoard() {
       const locationSearch = splitTerms(filters.location);
       const organizationSearch = splitTerms(filters.company);
       const timeRange = mapTimeRange(filters.postedAfter);
-      const limit = 100;
+      const limit = Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100));
 
       let merged: Job[] = [];
       for (const actorId of actorIds) {
@@ -266,7 +268,7 @@ export function FantasticJobsBoard() {
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       if (mode === "linkedin") params.actor_id = settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID;
       if (mode === "career") params.actor_id = settings.careerActorId || DEFAULT_CAREER_ACTOR_ID;
-      params.limit = "100";
+      params.limit = String(Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100)));
       params.offset = "0";
 
       const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
@@ -346,7 +348,7 @@ export function FantasticJobsBoard() {
     });
   }, [scopedJobs, sortBy, sortOrder]);
 
-  const clearFilters = () => setFilters({ ...DEFAULT_FILTERS, keyword: "", location: "", industry: "all" });
+  const clearFilters = () => setFilters({ ...DEFAULT_FILTERS, keyword: "", location: "", industry: "all", jobsPerSearch: "100" });
   const resetToDefaults = () => setFilters(DEFAULT_FILTERS);
 
   const formatDate = (dateStr: string) => {
@@ -450,6 +452,22 @@ export function FantasticJobsBoard() {
               value={filters.salaryMin}
               onChange={(e) => setFilters((f) => ({ ...f, salaryMin: e.target.value }))}
             />
+            <Select
+              value={filters.jobsPerSearch}
+              onValueChange={(value) => setFilters((f) => ({ ...f, jobsPerSearch: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Jobs per search" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="25">25 jobs</SelectItem>
+                <SelectItem value="50">50 jobs</SelectItem>
+                <SelectItem value="100">100 jobs</SelectItem>
+                <SelectItem value="200">200 jobs</SelectItem>
+                <SelectItem value="300">300 jobs</SelectItem>
+                <SelectItem value="500">500 jobs</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={filters.postedAfter} onValueChange={(value) => setFilters((f) => ({ ...f, postedAfter: value }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Posted after" />
