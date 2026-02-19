@@ -44,17 +44,17 @@ type CVBrandingStore = {
 
 const DEFAULT_ACL_BRANDING: CVBrandingAssets = {
   headerImageUrl: null,
-  watermarkImageUrl: null,
+  watermarkImageUrl: "/cv-branding/presets/acl_watermark.png",
   headerFileName: null,
-  watermarkFileName: null,
+  watermarkFileName: "acl_watermark.png",
   headerText: "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
 };
 
 const DEFAULT_EVERET_BRANDING: CVBrandingAssets = {
-  headerImageUrl: null,
-  watermarkImageUrl: null,
-  headerFileName: null,
-  watermarkFileName: null,
+  headerImageUrl: "/cv-branding/presets/everet_header.png",
+  watermarkImageUrl: "/cv-branding/presets/everet_watermark.png",
+  headerFileName: "everet-header.png",
+  watermarkFileName: "everet-watermark.png",
   headerText: "Everet Marsh",
 };
 
