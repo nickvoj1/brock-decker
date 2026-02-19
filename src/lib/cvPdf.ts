@@ -72,6 +72,15 @@ function safeText(value?: string | null): string {
   return String(value || "").trim();
 }
 
+function getWatermarkBox(watermarkImageUrl?: string | null): { maxW: number; maxH: number } {
+  const key = String(watermarkImageUrl || "").toLowerCase();
+  if (key.includes("everet") || key.includes("everett")) {
+    // Everet mark is naturally compact; render slightly larger for readability.
+    return { maxW: 110, maxH: 30 };
+  }
+  return { maxW: 92, maxH: 24 };
+}
+
 function fitInBox(sourceW: number, sourceH: number, maxW: number, maxH: number): { width: number; height: number } {
   const w = Number(sourceW || 0);
   const h = Number(sourceH || 0);
@@ -539,6 +548,46 @@ function findHeaderBandFallbackRect(
   }
 }
 
+function detectPhotoImageRects(page: any, pageWidth: number, pageHeight: number): Rect[] {
+  const rects: Rect[] = [];
+  try {
+    const stJsonRaw = page.toStructuredText().asJSON(1);
+    const st = JSON.parse(stJsonRaw);
+    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
+    for (const b of blocks) {
+      if (b?.type !== "image") continue;
+      const bb = b?.bbox || {};
+      const x = Number(bb.x || 0);
+      const y = Number(bb.y || 0);
+      const w = Number(bb.w || 0);
+      const h = Number(bb.h || 0);
+      if (w < 36 || h < 36) continue;
+      const areaRatio = (w * h) / Math.max(1, pageWidth * pageHeight);
+      const aspect = w / Math.max(1, h);
+
+      const profileLike =
+        aspect >= 0.45 &&
+        aspect <= 1.8 &&
+        areaRatio >= 0.006 &&
+        areaRatio <= 0.35;
+
+      const topPhotoLike =
+        y <= pageHeight * 0.65 &&
+        aspect >= 0.35 &&
+        aspect <= 2.2 &&
+        areaRatio >= 0.004 &&
+        (x >= pageWidth * 0.4 || x <= pageWidth * 0.2);
+
+      if (!profileLike && !topPhotoLike) continue;
+      const r = clampRect({ x0: x, y0: y, x1: x + w, y1: y + h }, pageWidth, pageHeight);
+      if (r) rects.push(r);
+    }
+  } catch {
+    // Ignore structured image parsing issues.
+  }
+  return dedupeRects(rects, 3);
+}
+
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
   try {
     // Use an isolated copy so PDF.js processing cannot detach buffers needed later.
@@ -697,26 +746,8 @@ async function redactPdfTextLocally(
     rects.push(...nameRects);
   }
 
-  // Detect likely profile photo images in top-right from structured text image blocks.
-  try {
-    const stJsonRaw = page.toStructuredText().asJSON(1);
-    const st = JSON.parse(stJsonRaw);
-    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
-    for (const b of blocks) {
-      if (b?.type !== "image") continue;
-      const bb = b?.bbox || {};
-      const x = Number(bb.x || 0);
-      const y = Number(bb.y || 0);
-      const w = Number(bb.w || 0);
-      const h = Number(bb.h || 0);
-      if (w < 50 || h < 60) continue;
-      if (x < pageWidth * 0.55 || y > pageHeight * 0.45) continue;
-      const r = clampRect({ x0: x, y0: y, x1: x + w, y1: y + h }, pageWidth, pageHeight);
-      if (r) rects.push(r);
-    }
-  } catch {
-    // Ignore image detection issues.
-  }
+  // Remove photo-like images from page 1.
+  rects.push(...detectPhotoImageRects(page, pageWidth, pageHeight));
 
   let uniqueRects = dedupeRects(rects).filter((r) => r.y0 < pageHeight * 0.42);
   if (!anonymizeName) {
@@ -760,6 +791,33 @@ async function redactPdfTextLocally(
     page.REDACT_TEXT_REMOVE,
   );
 
+  // Remove photo-like images from all remaining pages as well.
+  const pageCount = Number(pdf.countPages() || 1);
+  for (let idx = 1; idx < pageCount; idx++) {
+    try {
+      const p = pdf.loadPage(idx);
+      const b = p.getBounds();
+      const w = Number(b?.[2] || 0);
+      const h = Number(b?.[3] || 0);
+      if (!w || !h) continue;
+      const photoRects = detectPhotoImageRects(p, w, h);
+      if (photoRects.length === 0) continue;
+      for (const r of photoRects) {
+        const annot = p.createAnnotation("Redact");
+        annot.setRect([r.x0, r.y0, r.x1, r.y1]);
+        annot.update();
+      }
+      p.applyRedactions(
+        false,
+        p.REDACT_IMAGE_PIXELS,
+        p.REDACT_LINE_ART_NONE,
+        p.REDACT_TEXT_NONE,
+      );
+    } catch {
+      // Ignore per-page image redaction failures.
+    }
+  }
+
   const out = pdf.saveToBuffer("compress");
   const raw = out.asUint8Array();
   const stable = new Uint8Array(raw.length);
@@ -789,12 +847,22 @@ export async function downloadCandidatePdf(
   const margin = 40;
   const contentW = pageW - margin * 2;
   const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
+  const watermarkBox = getWatermarkBox(branding?.watermarkImageUrl);
   const headerData = await trimTransparentDataUrl(await toDataUrl(branding?.headerImageUrl));
   const headerText = safeText(branding?.headerText);
 
   if (watermarkData) {
     try {
-      doc.addImage(watermarkData, "PNG", margin, 20, 92, 24, undefined, "FAST");
+      doc.addImage(
+        watermarkData,
+        "PNG",
+        margin,
+        20,
+        watermarkBox.maxW,
+        watermarkBox.maxH,
+        undefined,
+        "FAST",
+      );
     } catch {
       // Ignore non-critical image errors.
     }
@@ -932,6 +1000,7 @@ export async function downloadBrandedSourcePdf(
 
   const pdfDoc = await PDFDocument.load(hardDeletedBytes);
   const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
+  const watermarkBox = getWatermarkBox(branding?.watermarkImageUrl);
   const headerData = await trimTransparentDataUrl(await toDataUrl(branding?.headerImageUrl));
   const headerText = safeText(branding?.headerText);
 
@@ -974,7 +1043,7 @@ export async function downloadBrandedSourcePdf(
 
     if (embeddedWatermark) {
       const natural = embeddedWatermark.scale(1);
-      const fitted = fitInBox(natural.width, natural.height, 92, 24);
+      const fitted = fitInBox(natural.width, natural.height, watermarkBox.maxW, watermarkBox.maxH);
       page.drawImage(embeddedWatermark, {
         x: 26,
         y: height - 24 - fitted.height,
