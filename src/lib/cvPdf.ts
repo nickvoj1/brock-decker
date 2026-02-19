@@ -1,8 +1,11 @@
 import { jsPDF } from "jspdf";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfJsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
 type WorkExperience = { company: string; title: string; duration?: string };
 type Education = { institution: string; degree: string; year?: string };
+type RedactionZone = { pageIndex: number; x: number; y: number; width: number; height: number };
 
 export type CandidateForPdf = {
   name: string;
@@ -21,6 +24,8 @@ export type CVBranding = {
   headerImageUrl?: string | null;
   headerText?: string | null;
 };
+
+GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
 
 async function toDataUrl(urlOrData?: string | null): Promise<string | null> {
   const raw = String(urlOrData || "").trim();
@@ -201,6 +206,90 @@ function dataUrlToUint8Array(dataUrl: string): Uint8Array | null {
   }
 }
 
+function isHeadingLike(text: string): boolean {
+  const stripped = text.replace(/[^A-Za-z]/g, "");
+  if (!stripped) return false;
+  return stripped.length >= 5 && stripped === stripped.toUpperCase();
+}
+
+function looksLikePersonalInfo(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    /@/.test(t) ||
+    /\b(\+?\d[\d\s().-]{6,})\b/.test(text) ||
+    /\b(street|strasse|road|avenue|ave|square|sq|blvd|boulevard|london|munich|berlin|paris|madrid|germany|uk|united kingdom)\b/.test(t) ||
+    /\b(linkedin|github|portfolio|website|www\.)\b/.test(t)
+  );
+}
+
+async function detectPersonalInfoZones(sourceFile: File): Promise<RedactionZone[]> {
+  try {
+    const bytes = new Uint8Array(await sourceFile.arrayBuffer());
+    const loadingTask = getDocument({ data: bytes });
+    const pdf = await loadingTask.promise;
+    const zones: RedactionZone[] = [];
+
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const textContent = await page.getTextContent();
+    const items = (textContent.items || []) as any[];
+
+    const itemBoxes = items
+      .map((item: any) => {
+        const text = String(item.str || "").trim();
+        if (!text) return null;
+        const tx = item.transform || [1, 0, 0, 1, 0, 0];
+        const x = Number(tx[4] || 0);
+        const yBottom = Number(tx[5] || 0);
+        const h = Math.max(Number(item.height || 0), 8);
+        const w = Math.max(Number(item.width || 0), 8);
+        const yTop = viewport.height - yBottom - h;
+        return { text, x, yTop, w, h };
+      })
+      .filter(Boolean) as Array<{ text: string; x: number; yTop: number; w: number; h: number }>;
+
+    if (itemBoxes.length === 0) {
+      await pdf.destroy();
+      return zones;
+    }
+
+    const nameCandidate = itemBoxes
+      .filter((b) => b.yTop < viewport.height * 0.35 && b.text.split(/\s+/).length >= 2)
+      .sort((a, b) => b.h - a.h)[0];
+
+    const topStart = nameCandidate ? nameCandidate.yTop + nameCandidate.h + 4 : viewport.height * 0.09;
+    const topEnd = nameCandidate ? Math.min(nameCandidate.yTop + 150, viewport.height * 0.40) : viewport.height * 0.33;
+
+    const matched = itemBoxes.filter((b) => {
+      if (b.yTop < topStart || b.yTop > topEnd) return false;
+      if (isHeadingLike(b.text)) return false;
+      return looksLikePersonalInfo(b.text);
+    });
+
+    for (const b of matched) {
+      const padX = 8;
+      const padY = 4;
+      const x = Math.max(0, b.x - padX);
+      const yTop = Math.max(0, b.yTop - padY);
+      const width = Math.min(viewport.width - x, b.w + padX * 2);
+      const height = b.h + padY * 2;
+
+      zones.push({
+        pageIndex: 0,
+        x,
+        y: viewport.height - (yTop + height),
+        width,
+        height,
+      });
+    }
+
+    await pdf.destroy();
+    return zones;
+  } catch {
+    return [];
+  }
+}
+
 export async function downloadBrandedSourcePdf(
   sourceFile: File,
   fileNameBase: string,
@@ -209,6 +298,7 @@ export async function downloadBrandedSourcePdf(
   const pdfBytes = new Uint8Array(await sourceFile.arrayBuffer());
   const pdfDoc = await PDFDocument.load(pdfBytes);
   const pages = pdfDoc.getPages();
+  const detectedZones = await detectPersonalInfoZones(sourceFile);
   const watermarkData = await toDataUrl(branding?.watermarkImageUrl);
   const headerData = await toDataUrl(branding?.headerImageUrl);
   const headerText = safeText(branding?.headerText);
@@ -248,14 +338,35 @@ export async function downloadBrandedSourcePdf(
     const { width, height } = page.getSize();
 
     if (idx === 0) {
-      // Redact the common personal contact strip under the candidate name.
-      page.drawRectangle({
-        x: width * 0.22,
-        y: height - 125,
-        width: width * 0.56,
-        height: 34,
-        color: rgb(1, 1, 1),
-      });
+      // Text-aware redaction for personal info lines under the name.
+      const pageZones = detectedZones.filter((z) => z.pageIndex === 0);
+      if (pageZones.length > 0) {
+        for (const z of pageZones) {
+          page.drawRectangle({
+            x: Math.max(0, z.x),
+            y: Math.max(0, z.y),
+            width: Math.min(width, z.width),
+            height: Math.min(height, z.height),
+            color: rgb(1, 1, 1),
+          });
+        }
+      } else {
+        // Fallback for CVs where text extraction is unavailable.
+        page.drawRectangle({
+          x: width * 0.14,
+          y: height - 158,
+          width: width * 0.72,
+          height: 52,
+          color: rgb(1, 1, 1),
+        });
+        page.drawRectangle({
+          x: width * 0.18,
+          y: height - 190,
+          width: width * 0.64,
+          height: 26,
+          color: rgb(1, 1, 1),
+        });
+      }
 
       // Redact common photo area (top-right), preserving all other content.
       page.drawRectangle({
