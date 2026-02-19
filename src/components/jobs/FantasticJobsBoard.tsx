@@ -193,6 +193,14 @@ function normalizeJobs(items: Record<string, unknown>[], actorId: string): Job[]
   return normalized;
 }
 
+function toHistoryJob(job: Job): Job {
+  return {
+    ...job,
+    // Keep history payload compact so localStorage stays reliable.
+    description: (job.description || "").slice(0, 300),
+  };
+}
+
 export function FantasticJobsBoard() {
   const { toast } = useToast();
 
@@ -225,7 +233,11 @@ export function FantasticJobsBoard() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 12)));
+    try {
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 12)));
+    } catch (error) {
+      console.error("Failed to persist search history:", error);
+    }
   }, [searchHistory]);
 
   const requestedCount = useMemo(
@@ -395,6 +407,7 @@ export function FantasticJobsBoard() {
         );
         const filtered = applyClientFilters(deduped);
         const capped = filtered.slice(0, requestedCount);
+        const historyResults = capped.map(toHistoryJob);
 
         setJobs(capped);
         setTotal(capped.length);
@@ -407,7 +420,7 @@ export function FantasticJobsBoard() {
             filters: { ...filters },
             resultCount: capped.length,
             topResults: capped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
-            results: capped,
+            results: historyResults,
           },
           ...prev,
         ]);
@@ -538,16 +551,20 @@ export function FantasticJobsBoard() {
   const loadHistoryItem = (item: SearchHistoryItem) => {
     setFilters(item.filters);
     setSearchMode(item.mode);
-    setJobs(item.results || []);
-    setTotal(item.resultCount || (item.results || []).length);
+    const restored = Array.isArray(item.results) ? item.results : [];
+    setJobs(restored);
+    setTotal(item.resultCount || restored.length);
     setLastRefresh(new Date(item.createdAt));
+    setLoading(false);
     setSelectedSources({
       linkedin: item.mode === "linkedin" || item.mode === "all",
       career: item.mode === "career" || item.mode === "all",
     });
     toast({
       title: "Loaded search",
-      description: `Restored ${item.resultCount} results from history.`,
+      description: restored.length > 0
+        ? `Restored ${restored.length} results from history.`
+        : "No cached rows in this history item. Run search once to cache it.",
     });
   };
 
