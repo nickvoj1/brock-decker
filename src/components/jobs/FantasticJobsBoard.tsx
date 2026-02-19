@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { useProfileName } from "@/hooks/useProfileName";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X } from "lucide-react";
+import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 import {
   DEFAULT_CAREER_ACTOR_ID,
@@ -47,6 +49,14 @@ interface Filters {
   salaryMin: string;
   remote: boolean;
   postedAfter: string;
+}
+
+interface ApolloJobContact {
+  name: string;
+  title: string;
+  company: string;
+  email: string;
+  location: string;
 }
 
 type SearchMode = "all" | "linkedin" | "career";
@@ -201,8 +211,29 @@ function toHistoryJob(job: Job): Job {
   };
 }
 
+function inferDepartmentsFromJobTitle(title: string): string[] {
+  const t = title.toLowerCase();
+  const departments = new Set<string>(["HR / Talent Acquisition", "Leadership / C-Suite"]);
+
+  if (/(cfo|finance|fp&a|controller|treasury)/i.test(t)) departments.add("Finance");
+  if (/(general counsel|legal|compliance)/i.test(t)) departments.add("Legal");
+  if (/(cto|engineer|software|data|it)/i.test(t)) departments.add("Engineering / IT");
+  if (/(sales|business development|partnerships|revenue)/i.test(t)) departments.add("Sales / Business Development");
+  if (/(marketing|brand|growth)/i.test(t)) departments.add("Marketing");
+  if (/(operations|coo|operational)/i.test(t)) departments.add("Operations");
+
+  return Array.from(departments);
+}
+
+function getApolloCountry(location: string): string {
+  const value = (location || "").trim();
+  if (!value) return "United States";
+  return value.split("|")[0].trim() || "United States";
+}
+
 export function FantasticJobsBoard() {
   const { toast } = useToast();
+  const profileName = useProfileName();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
@@ -215,6 +246,10 @@ export function FantasticJobsBoard() {
   const [settings, setSettings] = useState<JobBoardSettings>(() => loadJobBoardSettings());
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [total, setTotal] = useState(0);
+  const [apolloLoadingByJob, setApolloLoadingByJob] = useState<Record<string, boolean>>({});
+  const [apolloContacts, setApolloContacts] = useState<ApolloJobContact[]>([]);
+  const [apolloTargetJob, setApolloTargetJob] = useState<Job | null>(null);
+  const [apolloModalOpen, setApolloModalOpen] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => {
     try {
       const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
@@ -568,6 +603,57 @@ export function FantasticJobsBoard() {
     });
   };
 
+  const runApolloForJob = async (job: Job) => {
+    const company = (job.company || "").trim();
+    if (!company) {
+      toast({
+        title: "Missing company",
+        description: "This job has no company name, so Apollo contact search cannot run.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const country = getApolloCountry(job.location);
+    const departments = inferDepartmentsFromJobTitle(job.title);
+    const maxContacts = 25;
+    const effectiveProfile = profileName || "Unknown";
+
+    setApolloLoadingByJob((prev) => ({ ...prev, [job.id]: true }));
+    try {
+      const { data, error } = await supabase.functions.invoke("special-request", {
+        body: {
+          company,
+          country,
+          departments,
+          maxContacts,
+          profileName: effectiveProfile,
+          requestName: `JobBoard: ${company} - ${job.title}`,
+        },
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || "Apollo job contact search failed");
+
+      const contacts = Array.isArray(data.contacts) ? (data.contacts as ApolloJobContact[]) : [];
+      setApolloTargetJob(job);
+      setApolloContacts(contacts);
+      setApolloModalOpen(true);
+      toast({
+        title: "Apollo search complete",
+        description: `Found ${contacts.length} contacts for ${company}.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Apollo search failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setApolloLoadingByJob((prev) => ({ ...prev, [job.id]: false }));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
@@ -792,7 +878,7 @@ export function FantasticJobsBoard() {
                       Posted {sortBy === "posted" ? (sortOrder === "desc" ? "↓" : "↑") : ""}
                     </TableHead>
                     <TableHead className="min-w-[110px]">Source</TableHead>
-                    <TableHead className="w-[80px]">Apply</TableHead>
+                    <TableHead className="w-[170px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -833,18 +919,35 @@ export function FantasticJobsBoard() {
                         <Badge variant="outline">{job.source || "source"}</Badge>
                       </TableCell>
                       <TableCell>
-                        {job.apply_url ? (
+                        <div className="flex items-center gap-1">
+                          {job.apply_url ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => openApplyLink(job.apply_url)}
+                              title="Open job post"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <span className="text-muted-foreground text-xs mr-1">—</span>
+                          )}
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => openApplyLink(job.apply_url)}
+                            className="h-8 px-2 text-xs"
+                            disabled={Boolean(apolloLoadingByJob[job.id])}
+                            onClick={() => runApolloForJob(job)}
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            {apolloLoadingByJob[job.id] ? (
+                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <Users className="h-3 w-3 mr-1" />
+                            )}
+                            Apollo AI
                           </Button>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -854,6 +957,48 @@ export function FantasticJobsBoard() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={apolloModalOpen} onOpenChange={setApolloModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>
+              Apollo Contacts{apolloTargetJob ? ` - ${apolloTargetJob.company}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="rounded-md border overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Company</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Location</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {apolloContacts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                      No contacts found for this job.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  apolloContacts.map((contact, idx) => (
+                    <TableRow key={`${contact.email}-${idx}`}>
+                      <TableCell>{contact.name || "—"}</TableCell>
+                      <TableCell>{contact.title || "—"}</TableCell>
+                      <TableCell>{contact.company || "—"}</TableCell>
+                      <TableCell>{contact.email || "—"}</TableCell>
+                      <TableCell>{contact.location || "—"}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
