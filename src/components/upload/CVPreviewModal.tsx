@@ -39,6 +39,7 @@ interface CVPreviewModalProps {
   candidate: ParsedCandidate | null;
   headerImageUrl?: string | null;
   watermarkImageUrl?: string | null;
+  headerText?: string | null;
 }
 
 export function CVPreviewModal({
@@ -47,9 +48,11 @@ export function CVPreviewModal({
   candidate,
   headerImageUrl,
   watermarkImageUrl,
+  headerText,
 }: CVPreviewModalProps) {
   if (!candidate) return null;
-  const hasBranding = Boolean(headerImageUrl || watermarkImageUrl);
+  const hasHeaderText = Boolean((headerText || "").trim());
+  const hasBranding = Boolean(headerImageUrl || watermarkImageUrl || hasHeaderText);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -67,15 +70,24 @@ export function CVPreviewModal({
               <img
                 src={watermarkImageUrl}
                 alt="CV watermark"
-                className="absolute left-0 top-0 z-10 max-h-14 max-w-[180px] object-contain opacity-80"
+                className="pointer-events-none absolute left-3 top-3 z-10 h-10 w-28 object-contain object-left-top opacity-70"
               />
             ) : null}
             {headerImageUrl ? (
               <img
                 src={headerImageUrl}
                 alt="CV header"
-                className="absolute right-0 top-0 z-10 max-h-14 max-w-[220px] object-contain"
+                className="pointer-events-none absolute right-3 top-3 z-10 h-10 w-36 object-contain object-right-top"
               />
+            ) : null}
+            {!headerImageUrl && hasHeaderText ? (
+              <div className="pointer-events-none absolute right-3 top-3 z-10 max-w-[240px] text-right leading-tight text-[10px] text-foreground/75">
+                {(headerText || "")
+                  .split("\n")
+                  .map((line, i) => (
+                    <div key={`${line}-${i}`}>{line}</div>
+                  ))}
+              </div>
             ) : null}
             {/* Header Section */}
             <div className={`flex items-start gap-4 p-4 bg-muted/50 rounded-lg ${hasBranding ? "pt-20" : ""}`}>

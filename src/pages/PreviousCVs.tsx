@@ -27,19 +27,52 @@ interface SavedProfile {
 }
 
 const CV_BRANDING_STORAGE_KEY = "cv-branding-assets.v1";
+type PresetKey = "acl_partners" | "everet_marsh" | "brock_decker";
 
 type CVBrandingAssets = {
   headerImageUrl: string | null;
   watermarkImageUrl: string | null;
   headerFileName: string | null;
   watermarkFileName: string | null;
+  headerText: string;
 };
 
-const DEFAULT_CV_BRANDING: CVBrandingAssets = {
+type CVBrandingStore = {
+  selectedPreset: PresetKey;
+  presets: Record<PresetKey, CVBrandingAssets>;
+};
+
+const DEFAULT_ACL_BRANDING: CVBrandingAssets = {
   headerImageUrl: null,
   watermarkImageUrl: null,
   headerFileName: null,
   watermarkFileName: null,
+  headerText: "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
+};
+
+const DEFAULT_EVERET_BRANDING: CVBrandingAssets = {
+  headerImageUrl: null,
+  watermarkImageUrl: null,
+  headerFileName: null,
+  watermarkFileName: null,
+  headerText: "Everet Marsh",
+};
+
+const DEFAULT_BROCK_BRANDING: CVBrandingAssets = {
+  headerImageUrl: null,
+  watermarkImageUrl: null,
+  headerFileName: null,
+  watermarkFileName: null,
+  headerText: "Brock & Decker",
+};
+
+const DEFAULT_CV_BRANDING_STORE: CVBrandingStore = {
+  selectedPreset: "acl_partners",
+  presets: {
+    acl_partners: DEFAULT_ACL_BRANDING,
+    everet_marsh: DEFAULT_EVERET_BRANDING,
+    brock_decker: DEFAULT_BROCK_BRANDING,
+  },
 };
 
 export default function PreviousCVs() {
@@ -49,29 +82,69 @@ export default function PreviousCVs() {
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [cvBranding, setCvBranding] = useState<CVBrandingAssets>(() => {
+  const [cvBrandingStore, setCvBrandingStore] = useState<CVBrandingStore>(() => {
     try {
       const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      if (!parsed || typeof parsed !== "object") return DEFAULT_CV_BRANDING;
-      return {
-        headerImageUrl: typeof parsed.headerImageUrl === "string" ? parsed.headerImageUrl : null,
-        watermarkImageUrl: typeof parsed.watermarkImageUrl === "string" ? parsed.watermarkImageUrl : null,
-        headerFileName: typeof parsed.headerFileName === "string" ? parsed.headerFileName : null,
-        watermarkFileName: typeof parsed.watermarkFileName === "string" ? parsed.watermarkFileName : null,
-      };
+      if (!parsed || typeof parsed !== "object") return DEFAULT_CV_BRANDING_STORE;
+
+      // Backward compatibility: old single-preset shape.
+      if ("headerImageUrl" in parsed || "watermarkImageUrl" in parsed || "headerText" in parsed) {
+        return {
+          ...DEFAULT_CV_BRANDING_STORE,
+          selectedPreset: "acl_partners",
+          presets: {
+            ...DEFAULT_CV_BRANDING_STORE.presets,
+            acl_partners: {
+              headerImageUrl: typeof parsed.headerImageUrl === "string" ? parsed.headerImageUrl : null,
+              watermarkImageUrl: typeof parsed.watermarkImageUrl === "string" ? parsed.watermarkImageUrl : null,
+              headerFileName: typeof parsed.headerFileName === "string" ? parsed.headerFileName : null,
+              watermarkFileName: typeof parsed.watermarkFileName === "string" ? parsed.watermarkFileName : null,
+              headerText:
+                typeof parsed.headerText === "string" && parsed.headerText.trim().length > 0
+                  ? parsed.headerText
+                  : DEFAULT_ACL_BRANDING.headerText,
+            },
+          },
+        };
+      }
+
+      let selectedPreset: PresetKey = "acl_partners";
+      if (parsed.selectedPreset === "acl_partners" || parsed.selectedPreset === "brock_decker" || parsed.selectedPreset === "everet_marsh") {
+        selectedPreset = parsed.selectedPreset;
+      }
+      if (parsed.selectedPreset === "everett_marsh") {
+        selectedPreset = "everet_marsh";
+      }
+
+      const presets = { ...DEFAULT_CV_BRANDING_STORE.presets };
+      for (const key of Object.keys(presets) as PresetKey[]) {
+        const candidate =
+          parsed.presets?.[key] ||
+          (key === "everet_marsh" ? parsed.presets?.everett_marsh : undefined) ||
+          {};
+        presets[key] = {
+          headerImageUrl: typeof candidate.headerImageUrl === "string" ? candidate.headerImageUrl : presets[key].headerImageUrl,
+          watermarkImageUrl: typeof candidate.watermarkImageUrl === "string" ? candidate.watermarkImageUrl : presets[key].watermarkImageUrl,
+          headerFileName: typeof candidate.headerFileName === "string" ? candidate.headerFileName : presets[key].headerFileName,
+          watermarkFileName: typeof candidate.watermarkFileName === "string" ? candidate.watermarkFileName : presets[key].watermarkFileName,
+          headerText: typeof candidate.headerText === "string" && candidate.headerText.trim().length > 0 ? candidate.headerText : presets[key].headerText,
+        };
+      }
+
+      return { selectedPreset, presets };
     } catch {
-      return DEFAULT_CV_BRANDING;
+      return DEFAULT_CV_BRANDING_STORE;
     }
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem(CV_BRANDING_STORAGE_KEY, JSON.stringify(cvBranding));
+      localStorage.setItem(CV_BRANDING_STORAGE_KEY, JSON.stringify(cvBrandingStore));
     } catch (error) {
       console.error("Failed to persist CV branding assets:", error);
     }
-  }, [cvBranding]);
+  }, [cvBrandingStore]);
 
   const fetchProfiles = async () => {
     if (!profileName) {
@@ -176,14 +249,23 @@ export default function PreviousCVs() {
     }
     try {
       const dataUrl = await readImageAsDataUrl(file);
-      setCvBranding((prev) =>
-        type === "header"
-          ? { ...prev, headerImageUrl: dataUrl, headerFileName: file.name }
-          : { ...prev, watermarkImageUrl: dataUrl, watermarkFileName: file.name },
-      );
+      setCvBrandingStore((prev) => {
+        const presetKey = prev.selectedPreset;
+        const current = prev.presets[presetKey];
+        return {
+          ...prev,
+          presets: {
+            ...prev.presets,
+            [presetKey]:
+              type === "header"
+                ? { ...current, headerImageUrl: dataUrl, headerFileName: file.name }
+                : { ...current, watermarkImageUrl: dataUrl, watermarkFileName: file.name },
+          },
+        };
+      });
       toast({
         title: type === "header" ? "Header uploaded" : "Watermark uploaded",
-        description: "Saved in CVs tab. It will appear in CV preview.",
+        description: "Saved in selected company preset.",
       });
     } catch (error) {
       toast({
@@ -195,11 +277,20 @@ export default function PreviousCVs() {
   };
 
   const clearBrandingAsset = (type: "header" | "watermark") => {
-    setCvBranding((prev) =>
-      type === "header"
-        ? { ...prev, headerImageUrl: null, headerFileName: null }
-        : { ...prev, watermarkImageUrl: null, watermarkFileName: null },
-    );
+    setCvBrandingStore((prev) => {
+      const presetKey = prev.selectedPreset;
+      const current = prev.presets[presetKey];
+      return {
+        ...prev,
+        presets: {
+          ...prev.presets,
+          [presetKey]:
+            type === "header"
+              ? { ...current, headerImageUrl: null, headerFileName: null }
+              : { ...current, watermarkImageUrl: null, watermarkFileName: null },
+        },
+      };
+    });
   };
 
   const downloadProfileCV = (profile: SavedProfile) => {
@@ -258,6 +349,21 @@ export default function PreviousCVs() {
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-2">
         <div className="md:col-span-2">
+          <Label htmlFor="cvs-preset" className="mb-2 block">Company Preset</Label>
+          <select
+            id="cvs-preset"
+            value={cvBrandingStore.selectedPreset}
+            onChange={(e) =>
+              setCvBrandingStore((prev) => ({ ...prev, selectedPreset: e.target.value as PresetKey }))
+            }
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            <option value="acl_partners">ACL Partners</option>
+            <option value="everet_marsh">Everet Marsh</option>
+            <option value="brock_decker">Brock &amp; Decker (Coming)</option>
+          </select>
+        </div>
+        <div className="md:col-span-2">
           <Button onClick={() => navigate("/cvs/editor")} className="w-full sm:w-auto">
             Upload CV & Edit
           </Button>
@@ -270,9 +376,9 @@ export default function PreviousCVs() {
             accept="image/*"
             onChange={(e) => handleBrandingUpload("watermark", e.target.files?.[0] || null)}
           />
-          {cvBranding.watermarkFileName ? (
+          {cvBrandingStore.presets[cvBrandingStore.selectedPreset].watermarkFileName ? (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="truncate pr-2">{cvBranding.watermarkFileName}</span>
+              <span className="truncate pr-2">{cvBrandingStore.presets[cvBrandingStore.selectedPreset].watermarkFileName}</span>
               <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => clearBrandingAsset("watermark")}>
                 Remove
               </Button>
@@ -287,14 +393,37 @@ export default function PreviousCVs() {
             accept="image/*"
             onChange={(e) => handleBrandingUpload("header", e.target.files?.[0] || null)}
           />
-          {cvBranding.headerFileName ? (
+          {cvBrandingStore.presets[cvBrandingStore.selectedPreset].headerFileName ? (
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="truncate pr-2">{cvBranding.headerFileName}</span>
+              <span className="truncate pr-2">{cvBrandingStore.presets[cvBrandingStore.selectedPreset].headerFileName}</span>
               <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => clearBrandingAsset("header")}>
                 Remove
               </Button>
             </div>
           ) : null}
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="cvs-header-text">Header Text (Top Right)</Label>
+          <Input
+            id="cvs-header-text"
+            value={cvBrandingStore.presets[cvBrandingStore.selectedPreset].headerText}
+            onChange={(e) =>
+              setCvBrandingStore((prev) => {
+                const presetKey = prev.selectedPreset;
+                return {
+                  ...prev,
+                  presets: {
+                    ...prev.presets,
+                    [presetKey]: { ...prev.presets[presetKey], headerText: e.target.value },
+                  },
+                };
+              })
+            }
+            placeholder="59-60 Russell Square, London, WC1B 4HP | info@aclpartners.co.uk"
+          />
+          <p className="text-xs text-muted-foreground">
+            Used as a text header opposite the watermark when no header image is uploaded.
+          </p>
         </div>
       </CardContent>
     </Card>

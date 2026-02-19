@@ -43,6 +43,7 @@ interface CVUploadZoneProps {
   isProcessing: boolean;
   headerImageUrl?: string | null;
   watermarkImageUrl?: string | null;
+  headerText?: string | null;
 }
 
 const ACCEPTED_TYPES = [
@@ -63,6 +64,7 @@ export function CVUploadZone({
   isProcessing,
   headerImageUrl,
   watermarkImageUrl,
+  headerText,
 }: CVUploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
@@ -343,6 +345,7 @@ export function CVUploadZone({
         candidate={parsedData}
         headerImageUrl={headerImageUrl}
         watermarkImageUrl={watermarkImageUrl}
+        headerText={headerText}
       />
 
       <Dialog open={showEditor} onOpenChange={setShowEditor}>

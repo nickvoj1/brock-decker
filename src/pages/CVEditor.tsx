@@ -33,10 +33,12 @@ interface ParsedCandidate {
 }
 
 const CV_BRANDING_STORAGE_KEY = "cv-branding-assets.v1";
+type PresetKey = "acl_partners" | "everet_marsh" | "brock_decker";
 
 type CVBrandingAssets = {
   headerImageUrl: string | null;
   watermarkImageUrl: string | null;
+  headerText: string;
 };
 
 export default function CVEditor() {
@@ -51,12 +53,39 @@ export default function CVEditor() {
     try {
       const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.presets) {
+        let selectedPreset: PresetKey = "acl_partners";
+        if (parsed.selectedPreset === "acl_partners" || parsed.selectedPreset === "brock_decker" || parsed.selectedPreset === "everet_marsh") {
+          selectedPreset = parsed.selectedPreset;
+        }
+        if (parsed.selectedPreset === "everett_marsh") {
+          selectedPreset = "everet_marsh";
+        }
+        const preset = parsed.presets[selectedPreset] || {};
+        return {
+          headerImageUrl: preset.headerImageUrl || null,
+          watermarkImageUrl: preset.watermarkImageUrl || null,
+          headerText:
+            typeof preset.headerText === "string" && preset.headerText.trim().length > 0
+              ? preset.headerText
+              : "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
+        };
+      }
+
       return {
         headerImageUrl: parsed?.headerImageUrl || null,
         watermarkImageUrl: parsed?.watermarkImageUrl || null,
+        headerText:
+          typeof parsed?.headerText === "string" && parsed.headerText.trim().length > 0
+            ? parsed.headerText
+            : "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
       };
     } catch {
-      return { headerImageUrl: null, watermarkImageUrl: null };
+      return {
+        headerImageUrl: null,
+        watermarkImageUrl: null,
+        headerText: "59-60 Russell Square, London, WC1B 4HP\ninfo@aclpartners.co.uk",
+      };
     }
   })();
 
@@ -138,6 +167,7 @@ export default function CVEditor() {
               isProcessing={isParsingCV}
               headerImageUrl={branding.headerImageUrl}
               watermarkImageUrl={branding.watermarkImageUrl}
+              headerText={branding.headerText}
             />
           </CardContent>
         </Card>
