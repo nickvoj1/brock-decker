@@ -57,6 +57,7 @@ type SearchHistoryItem = {
   filters: Filters;
   resultCount: number;
   topResults: string[];
+  results: Job[];
 };
 
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
@@ -224,7 +225,7 @@ export function FantasticJobsBoard() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 30)));
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 12)));
   }, [searchHistory]);
 
   const requestedCount = useMemo(
@@ -406,6 +407,7 @@ export function FantasticJobsBoard() {
             filters: { ...filters },
             resultCount: capped.length,
             topResults: capped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
+            results: capped,
           },
           ...prev,
         ]);
@@ -531,6 +533,22 @@ export function FantasticJobsBoard() {
         variant: "destructive",
       });
     }
+  };
+
+  const loadHistoryItem = (item: SearchHistoryItem) => {
+    setFilters(item.filters);
+    setSearchMode(item.mode);
+    setJobs(item.results || []);
+    setTotal(item.resultCount || (item.results || []).length);
+    setLastRefresh(new Date(item.createdAt));
+    setSelectedSources({
+      linkedin: item.mode === "linkedin" || item.mode === "all",
+      career: item.mode === "career" || item.mode === "all",
+    });
+    toast({
+      title: "Loaded search",
+      description: `Restored ${item.resultCount} results from history.`,
+    });
   };
 
   return (
@@ -679,13 +697,23 @@ export function FantasticJobsBoard() {
               <p className="text-xs font-medium text-muted-foreground mb-2">Recent Searches</p>
               <div className="space-y-2 max-h-36 overflow-auto">
                 {searchHistory.slice(0, 8).map((h) => (
-                  <div key={h.id} className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">{formatDate(h.createdAt)}</span>
-                    {" · "}
-                    {h.mode}
-                    {" · "}
-                    {h.resultCount} results
-                    {h.topResults.length > 0 ? ` · ${h.topResults[0]}` : ""}
+                  <div key={h.id} className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <div className="truncate">
+                      <span className="font-medium text-foreground">{formatDate(h.createdAt)}</span>
+                      {" · "}
+                      {h.mode}
+                      {" · "}
+                      {h.resultCount} results
+                      {h.topResults.length > 0 ? ` · ${h.topResults[0]}` : ""}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => loadHistoryItem(h)}
+                    >
+                      Load
+                    </Button>
                   </div>
                 ))}
               </div>
