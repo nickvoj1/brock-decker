@@ -49,6 +49,17 @@ export default function CVEditor() {
   const [cvError, setCvError] = useState<string | null>(null);
   const [isParsingCV, setIsParsingCV] = useState(false);
 
+  const sanitizeCandidateForClient = (candidate: ParsedCandidate): ParsedCandidate => {
+    // Privacy-first editor mode: keep full name and professional history, strip direct personal contacts.
+    return {
+      ...candidate,
+      current_title: candidate.current_title || "",
+      location: "",
+      email: "",
+      phone: "",
+    };
+  };
+
   const branding: CVBrandingAssets = (() => {
     try {
       const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
@@ -112,10 +123,10 @@ export default function CVEditor() {
         throw new Error(result.error || "Failed to parse CV");
       }
 
-      setCvData(result.data);
+      setCvData(sanitizeCandidateForClient(result.data));
       toast({
         title: "CV parsed",
-        description: "You can now edit and download the CV.",
+        description: "Personal contact fields were removed. You can edit and download the CV.",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to parse CV";
