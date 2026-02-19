@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getCandidateProfiles, deleteCandidateProfile } from "@/lib/dataApi";
-import { downloadCandidatePdf } from "@/lib/cvPdf";
+import { downloadCandidatePdf, getCVRedactionSettings, saveCVRedactionSettings, type CVRedactionSettings } from "@/lib/cvPdf";
 
 interface SavedProfile {
   id: string;
@@ -138,6 +138,7 @@ export default function PreviousCVs() {
       return DEFAULT_CV_BRANDING_STORE;
     }
   });
+  const [redactionSettings, setRedactionSettings] = useState<CVRedactionSettings>(() => getCVRedactionSettings());
 
   useEffect(() => {
     try {
@@ -146,6 +147,10 @@ export default function PreviousCVs() {
       console.error("Failed to persist CV branding assets:", error);
     }
   }, [cvBrandingStore]);
+
+  useEffect(() => {
+    saveCVRedactionSettings(redactionSettings);
+  }, [redactionSettings]);
 
   const fetchProfiles = async () => {
     if (!profileName) {
@@ -386,6 +391,39 @@ export default function PreviousCVs() {
           <p className="text-xs text-muted-foreground">
             Used as a text header opposite the watermark when no header image is uploaded.
           </p>
+        </div>
+        <div className="space-y-2 rounded-md border p-3 md:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <Label htmlFor="cvs-hard-redaction" className="text-sm">Hard Delete Personal Info (API)</Label>
+              <p className="text-xs text-muted-foreground">
+                If enabled, CV is sent to your redaction API for true text deletion before branding.
+              </p>
+            </div>
+            <input
+              id="cvs-hard-redaction"
+              type="checkbox"
+              checked={redactionSettings.hardDeleteEnabled}
+              onChange={(e) =>
+                setRedactionSettings((prev) => ({ ...prev, hardDeleteEnabled: e.target.checked }))
+              }
+              className="h-4 w-4"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="cvs-hard-redaction-url">Hard Redaction API URL</Label>
+            <Input
+              id="cvs-hard-redaction-url"
+              value={redactionSettings.hardDeleteApiUrl}
+              onChange={(e) =>
+                setRedactionSettings((prev) => ({ ...prev, hardDeleteApiUrl: e.target.value }))
+              }
+              placeholder="https://your-redaction-service.example.com/redact"
+            />
+            <p className="text-xs text-muted-foreground">
+              Expected response: PDF bytes (or JSON with <code>pdfBase64</code> / <code>pdf_base64</code>).
+            </p>
+          </div>
         </div>
       </CardContent>
     </Card>
