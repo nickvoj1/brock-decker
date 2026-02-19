@@ -409,7 +409,9 @@ function findHeaderBandFallbackRect(page: any, pageWidth: number, pageHeight: nu
 
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
   try {
-    const loadingTask = getDocument({ data: pdfBytes });
+    // Use an isolated copy so PDF.js processing cannot detach buffers needed later.
+    const analysisBytes = new Uint8Array(pdfBytes);
+    const loadingTask = getDocument({ data: analysisBytes, disableWorker: true });
     const pdf = await loadingTask.promise;
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 1 });
@@ -505,7 +507,9 @@ async function redactPdfTextLocally(
     throw new Error("CV redaction engine failed to load. Refresh and try again.");
   }
 
-  const doc = mupdfMod.Document.openDocument(sourcePdfBytes, "application/pdf");
+  // Use a stable copy to avoid detached/out-of-bounds ArrayBuffer issues.
+  const inputBytes = new Uint8Array(sourcePdfBytes);
+  const doc = mupdfMod.Document.openDocument(inputBytes, "application/pdf");
   const pdf = doc.asPDF();
   if (!pdf) {
     throw new Error("Failed to open PDF for redaction.");
@@ -612,7 +616,10 @@ async function redactPdfTextLocally(
   );
 
   const out = pdf.saveToBuffer("compress");
-  return out.asUint8Array();
+  const raw = out.asUint8Array();
+  const stable = new Uint8Array(raw.length);
+  stable.set(raw);
+  return stable;
 }
 
 function downloadPdfBytes(bytes: Uint8Array, fileNameBase: string): void {
@@ -775,7 +782,7 @@ export async function downloadBrandedSourcePdf(
   hints?: CVPersonalHints,
 ): Promise<void> {
   const originalBytes = new Uint8Array(await sourceFile.arrayBuffer());
-  const detectedZones = await detectPersonalInfoZones(originalBytes);
+  const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
   const hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
 
   const pdfDoc = await PDFDocument.load(hardDeletedBytes);
