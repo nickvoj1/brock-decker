@@ -81,6 +81,10 @@ function safeText(value?: string | null): string {
 
 function getWatermarkBox(watermarkImageUrl?: string | null): { maxW: number; maxH: number } {
   const key = String(watermarkImageUrl || "").toLowerCase();
+  if (key.includes("brock") || key.includes("decker")) {
+    // Brock mark should be visibly larger in the top-left corner.
+    return { maxW: 132, maxH: 42 };
+  }
   if (key.includes("everet") || key.includes("everett")) {
     // Everet mark is naturally compact; render slightly larger for readability.
     return { maxW: 110, maxH: 30 };
@@ -1356,7 +1360,9 @@ export async function downloadBrandedSourcePdf(
 
     if (hints?.anonymizeName && pageIndex === 0) {
       const replacement = safeText(hints?.replacementName) || "CANDIDATE";
-      let size = namePlacement ? Math.min(34, Math.max(16, namePlacement.boxHeight * 0.9)) : 30;
+      let size = namePlacement
+        ? Math.min(22, Math.max(12, namePlacement.boxHeight * 0.66))
+        : 18;
       let textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
       if (namePlacement) {
         const maxAllowedWidth = Math.max(48, namePlacement.boxWidth - 2);
