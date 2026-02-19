@@ -39,6 +39,7 @@ interface Filters {
   keyword: string;
   company: string;
   exclude: string;
+  industry: string;
   location: string;
   salaryMin: string;
   remote: boolean;
@@ -51,11 +52,26 @@ const DEFAULT_FILTERS: Filters = {
   keyword: "private equity OR venture capital OR family office",
   company: "",
   exclude: "",
+  industry: "all",
   location: "London,United States,United Arab Emirates",
   salaryMin: "",
   remote: false,
   postedAfter: "7days",
 };
+
+const INDUSTRY_OPTIONS = [
+  "all",
+  "Finance & Accounting",
+  "Management & Leadership",
+  "Consulting",
+  "Technology",
+  "Healthcare",
+  "Software",
+  "Data & Analytics",
+  "Legal",
+  "Sales",
+  "Marketing",
+];
 
 const PE_SIGNAL_TERMS = [
   "private equity",
@@ -208,12 +224,15 @@ export function FantasticJobsBoard() {
         if (locationSearch.length > 0) input.locationSearch = locationSearch;
         if (organizationSearch.length > 0) input.organizationSearch = organizationSearch;
         if (filters.salaryMin) input.aiHasSalary = true;
+        if (filters.industry !== "all") input.aiTaxonomiesFilter = [filters.industry];
 
         if (isLinkedinActor) {
           if (filters.remote) input.remote = true;
+          if (filters.industry !== "all") input.industryFilter = [filters.industry];
         } else {
           input.includeLinkedIn = true;
           if (filters.remote) input["remote only (legacy)"] = true;
+          if (filters.industry !== "all") input.liIndustryFilter = [filters.industry];
         }
 
         const endpoint =
@@ -242,6 +261,7 @@ export function FantasticJobsBoard() {
       if (filters.keyword) params.keyword = filters.keyword;
       if (filters.location) params.location = filters.location;
       if (filters.salaryMin) params.salary_min = filters.salaryMin;
+      if (filters.industry && filters.industry !== "all") params.industry = filters.industry;
       if (filters.remote) params.remote = "true";
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       if (mode === "linkedin") params.actor_id = settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID;
@@ -305,11 +325,10 @@ export function FantasticJobsBoard() {
   const scopedJobs = useMemo(() => {
     let out = jobs;
     if (strictPEOnly) {
-      const peOnly = out.filter((job) => {
+      out = out.filter((job) => {
         const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
         return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
       });
-      out = peOnly.length === 0 && out.length > 0 ? out : peOnly;
     }
     return out;
   }, [jobs, strictPEOnly]);
@@ -327,7 +346,7 @@ export function FantasticJobsBoard() {
     });
   }, [scopedJobs, sortBy, sortOrder]);
 
-  const clearFilters = () => setFilters({ ...DEFAULT_FILTERS, keyword: "", location: "" });
+  const clearFilters = () => setFilters({ ...DEFAULT_FILTERS, keyword: "", location: "", industry: "all" });
   const resetToDefaults = () => setFilters(DEFAULT_FILTERS);
 
   const formatDate = (dateStr: string) => {
@@ -410,6 +429,21 @@ export function FantasticJobsBoard() {
               value={filters.exclude}
               onChange={(e) => setFilters((f) => ({ ...f, exclude: e.target.value }))}
             />
+            <Select
+              value={filters.industry}
+              onValueChange={(value) => setFilters((f) => ({ ...f, industry: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Industry" />
+              </SelectTrigger>
+              <SelectContent>
+                {INDUSTRY_OPTIONS.map((opt) => (
+                  <SelectItem key={opt} value={opt}>
+                    {opt === "all" ? "All industries" : opt}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               type="number"
               placeholder="Min salary"
