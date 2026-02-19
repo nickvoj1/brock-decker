@@ -126,6 +126,43 @@ function buildDisplayDedupKey(row: any): string {
   return `text:${company}|${region}|${type}|src:${source}|people:${people}|deal:${dealSignature}|${titleTokens}`;
 }
 
+function mapCurrencyToken(token?: string | null): string | null {
+  const t = String(token || "").trim().toUpperCase();
+  if (!t) return null;
+  if (t === "€" || t === "EUR") return "EUR";
+  if (t === "£" || t === "GBP") return "GBP";
+  if (t === "$" || t === "USD" || t === "US$") return "USD";
+  return null;
+}
+
+function extractAmountFromText(text: string): { amount: number; currency: string | null } | null {
+  const source = String(text || "");
+  if (!source) return null;
+
+  // Example matches:
+  // "$1.2bn", "€850 million", "US$ 3.4 billion", "1,250m USD"
+  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
+
+  let best: { amount: number; currency: string | null } | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source)) !== null) {
+    const rawValue = String(match[2] || "").replace(/,/g, "");
+    const value = Number(rawValue);
+    if (!Number.isFinite(value) || value <= 0) continue;
+
+    const unit = String(match[3] || "").toLowerCase();
+    const isBillion = unit === "bn" || unit === "billion" || unit === "b";
+    const amount = isBillion ? value * 1000 : value; // store in millions
+    const currency = mapCurrencyToken(match[1]) || mapCurrencyToken(match[4]) || null;
+
+    if (!best || amount > best.amount) {
+      best = { amount, currency };
+    }
+  }
+
+  return best;
+}
+
 function checkRateLimit(profileName: string): boolean {
   const now = Date.now();
   const entry = rateLimitMap.get(profileName);
@@ -1339,9 +1376,55 @@ Deno.serve(async (req) => {
       const { data: signalsRaw, error } = await query;
       if (error) throw error;
 
+      // Backfill missing amount/currency for funding signals from title+description.
+      // This repairs older rows without requiring a manual migration.
+      const amountBackfills: Array<{ id: string; amount: number; currency: string }> = [];
+      const signalsWithAmount = (signalsRaw || []).map((row: any) => {
+        const isFunding = String(row?.signal_type || "").toLowerCase() === "funding";
+        const missingAmount = row?.amount === null || row?.amount === undefined;
+        const missingCurrency = !row?.currency;
+
+        if (!isFunding || (!missingAmount && !missingCurrency)) return row;
+
+        const parsed = extractAmountFromText(`${row?.title || ""} ${row?.description || ""}`);
+        if (!parsed) return row;
+
+        const nextAmount = missingAmount ? parsed.amount : row.amount;
+        const nextCurrency = row.currency || parsed.currency || "USD";
+
+        if (missingAmount || missingCurrency) {
+          amountBackfills.push({
+            id: row.id,
+            amount: nextAmount,
+            currency: nextCurrency,
+          });
+        }
+
+        return {
+          ...row,
+          amount: nextAmount,
+          currency: nextCurrency,
+        };
+      });
+
+      if (amountBackfills.length > 0) {
+        const uniqueBackfills = Array.from(
+          new Map(amountBackfills.map((b) => [b.id, b])).values()
+        ).slice(0, 150);
+
+        await Promise.allSettled(
+          uniqueBackfills.map((b) =>
+            supabase
+              .from("signals")
+              .update({ amount: b.amount, currency: b.currency })
+              .eq("id", b.id)
+          )
+        );
+      }
+
       // Filter out non-news / unusable rows and hide repeated entries
       const dedupSeen = new Set<string>();
-      const signals = (signalsRaw || []).filter((row: any) => {
+      const signals = (signalsWithAmount || []).filter((row: any) => {
         if (!isDisplayableSignal(row)) return false;
         const key = buildDisplayDedupKey(row);
         if (dedupSeen.has(key)) return false;
