@@ -1,18 +1,23 @@
 import { jsPDF } from "jspdf";
-import { PDFDocument, StandardFonts, rgb, type PDFImage, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFImage } from "pdf-lib";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfJsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
 type WorkExperience = { company: string; title: string; duration?: string };
 type Education = { institution: string; degree: string; year?: string };
-type RedactionZone = { pageIndex: number; x: number; y: number; width: number; height: number };
-
-type TextBox = {
-  text: string;
+type RedactionZone = {
+  pageIndex: number;
   x: number;
   yTop: number;
   width: number;
   height: number;
+};
+
+type Rect = {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
 };
 
 export type CandidateForPdf = {
@@ -33,62 +38,12 @@ export type CVBranding = {
   headerText?: string | null;
 };
 
-export type CVRedactionSettings = {
-  hardDeleteEnabled: boolean;
-  hardDeleteApiUrl: string;
+export type CVPersonalHints = {
+  email?: string | null;
+  phone?: string | null;
 };
-
-const CV_REDACTION_SETTINGS_KEY = "cv-redaction-settings.v1";
-const DEFAULT_CV_REDACTION_SETTINGS: CVRedactionSettings = {
-  hardDeleteEnabled: true,
-  hardDeleteApiUrl: "/redact",
-};
-
-function getDefaultRedactionSettingsFromEnv(): CVRedactionSettings {
-  const envUrl = String(import.meta.env.VITE_CV_HARD_DELETE_API_URL || "").trim();
-  if (envUrl) {
-    return {
-      hardDeleteEnabled: true,
-      hardDeleteApiUrl: envUrl,
-    };
-  }
-  return DEFAULT_CV_REDACTION_SETTINGS;
-}
 
 GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
-
-export function getCVRedactionSettings(): CVRedactionSettings {
-  const envDefaults = getDefaultRedactionSettingsFromEnv();
-  if (typeof window === "undefined") return envDefaults;
-  try {
-    const raw = window.localStorage.getItem(CV_REDACTION_SETTINGS_KEY);
-    if (!raw) return envDefaults;
-    const parsed = JSON.parse(raw);
-    return {
-      // Enforce hard-delete mode for CV compliance.
-      hardDeleteEnabled: true,
-      hardDeleteApiUrl:
-        String(parsed?.hardDeleteApiUrl || "").trim() || envDefaults.hardDeleteApiUrl,
-    };
-  } catch {
-    return { ...envDefaults, hardDeleteEnabled: true };
-  }
-}
-
-export function saveCVRedactionSettings(settings: CVRedactionSettings): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      CV_REDACTION_SETTINGS_KEY,
-      JSON.stringify({
-        hardDeleteEnabled: Boolean(settings.hardDeleteEnabled),
-        hardDeleteApiUrl: String(settings.hardDeleteApiUrl || "").trim(),
-      }),
-    );
-  } catch {
-    // Ignore localStorage failures.
-  }
-}
 
 async function toDataUrl(urlOrData?: string | null): Promise<string | null> {
   const raw = String(urlOrData || "").trim();
@@ -193,58 +148,6 @@ function dataUrlToUint8Array(dataUrl: string): Uint8Array | null {
   }
 }
 
-function base64ToUint8Array(base64: string): Uint8Array | null {
-  const clean = String(base64 || "").trim().replace(/^data:application\/pdf;base64,/i, "");
-  if (!clean) return null;
-  try {
-    const bin = atob(clean);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  } catch {
-    return null;
-  }
-}
-
-function looksLikePdfBytes(bytes: Uint8Array): boolean {
-  return bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
-}
-
-async function tryHardDeleteWithApi(sourceFile: File, apiUrl: string): Promise<Uint8Array | null> {
-  const endpoint = String(apiUrl || "").trim();
-  if (!endpoint) return null;
-
-  try {
-    const form = new FormData();
-    form.append("file", sourceFile, sourceFile.name || "cv.pdf");
-
-    const res = await fetch(endpoint, {
-      method: "POST",
-      body: form,
-    });
-
-    if (!res.ok) return null;
-
-    const contentType = String(res.headers.get("content-type") || "").toLowerCase();
-    if (contentType.includes("application/json")) {
-      const payload = await res.json();
-      const candidateBase64 =
-        payload?.pdfBase64 ||
-        payload?.pdf_base64 ||
-        payload?.pdf ||
-        payload?.data ||
-        payload?.file;
-      const bytes = base64ToUint8Array(String(candidateBase64 || ""));
-      return bytes && looksLikePdfBytes(bytes) ? bytes : null;
-    }
-
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    return looksLikePdfBytes(bytes) ? bytes : null;
-  } catch {
-    return null;
-  }
-}
-
 function isHeadingLike(text: string): boolean {
   const stripped = text.replace(/[^A-Za-z]/g, "");
   if (!stripped) return false;
@@ -253,57 +156,112 @@ function isHeadingLike(text: string): boolean {
 
 function looksLikePersonalInfo(text: string): boolean {
   const t = text.toLowerCase();
+  const compact = text.replace(/\s+/g, " ").trim();
+  const hasEmail = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(compact);
+  const hasWeb = /\b(linkedin|github|website|www\.|\.com\b|\.co\.uk\b|gmail|outlook|yahoo)\b/.test(t);
+  const hasAddress = /\b(street|strasse|road|avenue|ave|square|blvd|boulevard|postal|postcode|zip)\b/.test(t);
+
+  const phoneChunkRegex = /(\+?\d[\d\s().-]{6,}\d)/g;
+  const phoneChunks = [...compact.matchAll(phoneChunkRegex)].map((m) => m[1]);
+  const hasPhone = phoneChunks.some((chunk) => {
+    const digits = chunk.replace(/\D/g, "");
+    if (digits.length < 8 || digits.length > 15) return false;
+    const hasPlus = chunk.trim().startsWith("+");
+    const hasParens = /[()]/.test(chunk);
+    const hasSeparators = /[\s.-]/.test(chunk);
+    const looksLikeYearRange = /^\d{4}\s*[-–—]\s*\d{2,4}$/u.test(chunk.trim());
+    return !looksLikeYearRange && (hasPlus || hasParens || hasSeparators);
+  });
+
   return (
-    /@/.test(t) ||
-    /\b(\+?\d[\d\s().-]{6,})\b/.test(text) ||
-    /\b(street|strasse|road|avenue|ave|square|sq|blvd|boulevard|london|munich|berlin|paris|madrid|germany|uk|united kingdom)\b/.test(t) ||
-    /\b(linkedin|github|portfolio|website|www\.)\b/.test(t)
+    hasEmail ||
+    hasPhone ||
+    hasWeb ||
+    hasAddress
   );
 }
 
-function looksLikePersonalLine(lineText: string): boolean {
-  const t = lineText.toLowerCase();
-  return (
-    looksLikePersonalInfo(lineText) ||
-    (/^\+?\d/.test(lineText) && /[a-z]/i.test(lineText)) ||
-    t.includes(".com") ||
-    t.includes(".co.uk") ||
-    t.includes("gmail") ||
-    t.includes("outlook") ||
-    t.includes("yahoo")
-  );
+function uniqueSearchTerms(hints?: CVPersonalHints): string[] {
+  const out: string[] = [];
+  const add = (v?: string | null) => {
+    const t = String(v || "").trim();
+    if (!t) return;
+    if (t.length < 5) return;
+    if (!out.includes(t)) out.push(t);
+  };
+  add(hints?.email);
+  add(hints?.phone);
+  return out;
+}
+
+function clampRect(rect: Rect, width: number, height: number): Rect | null {
+  const x0 = Math.max(0, Math.min(width, rect.x0));
+  const y0 = Math.max(0, Math.min(height, rect.y0));
+  const x1 = Math.max(0, Math.min(width, rect.x1));
+  const y1 = Math.max(0, Math.min(height, rect.y1));
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+  return { x0, y0, x1, y1 };
+}
+
+function rectArea(r: Rect): number {
+  return Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
+}
+
+function quadsToRects(quads: number[][], padX = 6, padY = 3): Rect[] {
+  const rects: Rect[] = [];
+  for (const q of quads) {
+    if (!Array.isArray(q) || q.length < 8) continue;
+    const xs = [q[0], q[2], q[4], q[6]];
+    const ys = [q[1], q[3], q[5], q[7]];
+    const minX = Math.min(...xs) - padX;
+    const maxX = Math.max(...xs) + padX;
+    const minY = Math.min(...ys) - padY;
+    const maxY = Math.max(...ys) + padY;
+    rects.push({ x0: minX, y0: minY, x1: maxX, y1: maxY });
+  }
+  return rects;
+}
+
+function dedupeRects(rects: Rect[], tolerance = 2): Rect[] {
+  const out: Rect[] = [];
+  for (const r of rects) {
+    const exists = out.some((e) =>
+      Math.abs(e.x0 - r.x0) <= tolerance &&
+      Math.abs(e.y0 - r.y0) <= tolerance &&
+      Math.abs(e.x1 - r.x1) <= tolerance &&
+      Math.abs(e.y1 - r.y1) <= tolerance,
+    );
+    if (!exists) out.push(r);
+  }
+  return out;
 }
 
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
   try {
     const loadingTask = getDocument({ data: pdfBytes });
     const pdf = await loadingTask.promise;
-    const zones: RedactionZone[] = [];
-
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 1 });
     const textContent = await page.getTextContent();
-    const rawItems = (textContent.items || []) as Array<any>;
+    const items = (textContent.items || []) as any[];
 
-    const itemBoxes = rawItems
-      .map((item): TextBox | null => {
+    const itemBoxes = items
+      .map((item) => {
         const text = String(item?.str || "").trim();
         if (!text) return null;
-
-        const tx = Array.isArray(item?.transform) ? item.transform : [1, 0, 0, 1, 0, 0];
+        const tx = item?.transform || [1, 0, 0, 1, 0, 0];
         const x = Number(tx[4] || 0);
         const yBottom = Number(tx[5] || 0);
         const h = Math.max(Number(item?.height || 0), 8);
         const w = Math.max(Number(item?.width || 0), 8);
         const yTop = viewport.height - yBottom - h;
-
         return { text, x, yTop, width: w, height: h };
       })
-      .filter(Boolean) as TextBox[];
+      .filter(Boolean) as Array<{ text: string; x: number; yTop: number; width: number; height: number }>;
 
     if (itemBoxes.length === 0) {
       await pdf.destroy();
-      return zones;
+      return [];
     }
 
     const nameCandidate = itemBoxes
@@ -311,14 +269,16 @@ async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZ
       .sort((a, b) => b.height - a.height)[0];
 
     const topStart = nameCandidate ? nameCandidate.yTop + nameCandidate.height + 4 : viewport.height * 0.09;
-    const topEnd = nameCandidate ? Math.min(nameCandidate.yTop + 150, viewport.height * 0.40) : viewport.height * 0.33;
+    const topEnd = nameCandidate
+      ? Math.min(nameCandidate.yTop + 96, viewport.height * 0.28)
+      : viewport.height * 0.24;
 
     const candidateTopItems = itemBoxes
       .filter((b) => b.yTop >= topStart && b.yTop <= topEnd)
       .sort((a, b) => a.yTop - b.yTop || a.x - b.x);
 
-    const lineGroups: TextBox[][] = [];
-    const lineThreshold = 3.5;
+    const lineGroups: Array<Array<{ text: string; x: number; yTop: number; width: number; height: number }>> = [];
+    const lineThreshold = 3.8;
 
     for (const b of candidateTopItems) {
       const current = lineGroups[lineGroups.length - 1];
@@ -334,11 +294,12 @@ async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZ
       }
     }
 
+    const zones: RedactionZone[] = [];
     for (const group of lineGroups) {
       const ordered = group.slice().sort((a, b) => a.x - b.x);
       const lineText = ordered.map((g) => g.text).join(" ").replace(/\s+/g, " ").trim();
       if (!lineText || isHeadingLike(lineText)) continue;
-      if (!looksLikePersonalLine(lineText)) continue;
+      if (!looksLikePersonalInfo(lineText)) continue;
 
       const minX = Math.min(...ordered.map((i) => i.x));
       const maxX = Math.max(...ordered.map((i) => i.x + i.width));
@@ -347,52 +308,123 @@ async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZ
 
       const padX = 10;
       const padY = 5;
-      const x = Math.max(0, minX - padX);
-      const yTop = Math.max(0, minYTop - padY);
-      const width = Math.min(viewport.width - x, maxX - minX + padX * 2);
-      const height = Math.max(12, maxYTop - minYTop + padY * 2);
-
       zones.push({
         pageIndex: 0,
-        x,
-        y: viewport.height - (yTop + height),
-        width,
-        height,
+        x: Math.max(0, minX - padX),
+        yTop: Math.max(0, minYTop - padY),
+        width: Math.max(4, maxX - minX + padX * 2),
+        height: Math.max(12, maxYTop - minYTop + padY * 2),
       });
     }
 
     await pdf.destroy();
-    return zones;
+    return zones.slice(0, 5);
   } catch {
     return [];
   }
 }
 
-function drawFallbackPersonalMasks(page: PDFPage, width: number, height: number): void {
-  page.drawRectangle({
-    x: width * 0.14,
-    y: height - 158,
-    width: width * 0.72,
-    height: 52,
-    color: rgb(1, 1, 1),
-  });
-  page.drawRectangle({
-    x: width * 0.18,
-    y: height - 190,
-    width: width * 0.64,
-    height: 26,
-    color: rgb(1, 1, 1),
-  });
-}
+async function redactPdfTextLocally(
+  sourcePdfBytes: Uint8Array,
+  detectedZones: RedactionZone[],
+  hints?: CVPersonalHints,
+): Promise<Uint8Array> {
+  const mod: any = await import("mupdf");
+  const mupdf = mod?.default || mod;
 
-function drawPhotoMask(page: PDFPage, width: number, height: number): void {
-  page.drawRectangle({
-    x: width - 150,
-    y: height - 220,
-    width: 120,
-    height: 140,
-    color: rgb(1, 1, 1),
-  });
+  const doc = mupdf.Document.openDocument(sourcePdfBytes, "application/pdf");
+  const pdf = doc.asPDF();
+  if (!pdf) {
+    throw new Error("Failed to open PDF for redaction.");
+  }
+
+  const page = pdf.loadPage(0);
+  const bounds = page.getBounds();
+  const pageWidth = Number(bounds?.[2] || 0);
+  const pageHeight = Number(bounds?.[3] || 0);
+  if (!pageWidth || !pageHeight) {
+    throw new Error("Invalid PDF page bounds.");
+  }
+
+  const rects: Rect[] = [];
+
+  for (const z of detectedZones.filter((z) => z.pageIndex === 0)) {
+    const r = clampRect(
+      { x0: z.x, y0: z.yTop, x1: z.x + z.width, y1: z.yTop + z.height },
+      pageWidth,
+      pageHeight,
+    );
+    if (!r) continue;
+    if (r.y0 > pageHeight * 0.45) continue;
+    rects.push(r);
+  }
+
+  const terms = uniqueSearchTerms(hints);
+  for (const term of terms) {
+    try {
+      const hits = page.search(term, 20) as number[][][];
+      if (!Array.isArray(hits)) continue;
+      for (const quadSet of hits) {
+        const hitRects = quadsToRects(Array.isArray(quadSet) ? quadSet : []);
+        for (const hr of hitRects) {
+          const r = clampRect(hr, pageWidth, pageHeight);
+          if (!r) continue;
+          if (r.y0 > pageHeight * 0.45) continue;
+          rects.push(r);
+        }
+      }
+    } catch {
+      // Ignore term search issues for this term.
+    }
+  }
+
+  // Detect likely profile photo images in top-right from structured text image blocks.
+  try {
+    const stJsonRaw = page.toStructuredText().asJSON(1);
+    const st = JSON.parse(stJsonRaw);
+    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
+    for (const b of blocks) {
+      if (b?.type !== "image") continue;
+      const bb = b?.bbox || {};
+      const x = Number(bb.x || 0);
+      const y = Number(bb.y || 0);
+      const w = Number(bb.w || 0);
+      const h = Number(bb.h || 0);
+      if (w < 50 || h < 60) continue;
+      if (x < pageWidth * 0.55 || y > pageHeight * 0.45) continue;
+      const r = clampRect({ x0: x, y0: y, x1: x + w, y1: y + h }, pageWidth, pageHeight);
+      if (r) rects.push(r);
+    }
+  } catch {
+    // Ignore image detection issues.
+  }
+
+  const uniqueRects = dedupeRects(rects);
+  if (uniqueRects.length === 0) {
+    throw new Error("Could not find personal info text to delete on this CV.");
+  }
+
+  const totalArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
+  const coverage = totalArea / Math.max(1, pageWidth * pageHeight);
+  if (coverage > 0.08) {
+    throw new Error("Redaction area is too large. Aborted to protect CV content.");
+  }
+
+  for (const r of uniqueRects) {
+    const annot = page.createAnnotation("Redact");
+    annot.setRect([r.x0, r.y0, r.x1, r.y1]);
+    annot.update();
+  }
+
+  page.applyRedactions(
+    false,
+    page.REDACT_IMAGE_PIXELS,
+    page.REDACT_LINE_ART_NONE,
+    page.REDACT_TEXT_REMOVE,
+  );
+
+  const out = pdf.saveToBuffer("compress");
+  return out.asUint8Array();
 }
 
 function downloadPdfBytes(bytes: Uint8Array, fileNameBase: string): void {
@@ -552,28 +584,13 @@ export async function downloadBrandedSourcePdf(
   sourceFile: File,
   fileNameBase: string,
   branding?: CVBranding,
+  hints?: CVPersonalHints,
 ): Promise<void> {
-  const settings = getCVRedactionSettings();
-
   const originalBytes = new Uint8Array(await sourceFile.arrayBuffer());
-  let sourcePdfBytes = originalBytes;
-  let usedHardDelete = false;
+  const detectedZones = await detectPersonalInfoZones(originalBytes);
+  const hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
 
-  if (settings.hardDeleteEnabled && settings.hardDeleteApiUrl) {
-    const hardDeleted = await tryHardDeleteWithApi(sourceFile, settings.hardDeleteApiUrl);
-    if (hardDeleted) {
-      sourcePdfBytes = hardDeleted;
-      usedHardDelete = true;
-    } else {
-      throw new Error(
-        "Hard redaction service is unavailable. Personal info cannot be truly deleted right now.",
-      );
-    }
-  }
-
-  const pdfDoc = await PDFDocument.load(sourcePdfBytes);
-  const detectedZones = usedHardDelete ? [] : await detectPersonalInfoZones(sourcePdfBytes);
-
+  const pdfDoc = await PDFDocument.load(hardDeletedBytes);
   const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
   const headerData = await trimTransparentDataUrl(await toDataUrl(branding?.headerImageUrl));
   const headerText = safeText(branding?.headerText);
@@ -610,27 +627,8 @@ export async function downloadBrandedSourcePdf(
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const pages = pdfDoc.getPages();
 
-  pages.forEach((page, idx) => {
+  for (const page of pages) {
     const { width, height } = page.getSize();
-
-    if (idx === 0 && !usedHardDelete) {
-      const pageZones = detectedZones.filter((z) => z.pageIndex === 0);
-      if (pageZones.length > 0) {
-        for (const z of pageZones) {
-          page.drawRectangle({
-            x: Math.max(0, z.x),
-            y: Math.max(0, z.y),
-            width: Math.min(width, z.width),
-            height: Math.min(height, z.height),
-            color: rgb(1, 1, 1),
-          });
-        }
-      } else {
-        drawFallbackPersonalMasks(page, width, height);
-      }
-
-      drawPhotoMask(page, width, height);
-    }
 
     if (embeddedWatermark) {
       const natural = embeddedWatermark.scale(1);
@@ -668,7 +666,7 @@ export async function downloadBrandedSourcePdf(
         y -= 10;
       }
     }
-  });
+  }
 
   const out = await pdfDoc.save();
   downloadPdfBytes(out, fileNameBase);

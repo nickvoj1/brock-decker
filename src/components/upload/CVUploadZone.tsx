@@ -147,7 +147,10 @@ export function CVUploadZone({
       const outName = `${(source.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
       const branding = { watermarkImageUrl, headerImageUrl, headerText };
       if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
-        await downloadBrandedSourcePdf(originalFile, outName, branding);
+        await downloadBrandedSourcePdf(originalFile, outName, branding, {
+          email: source.email || "",
+          phone: source.phone || "",
+        });
         return;
       }
       await downloadCandidatePdf(source, outName, branding);
