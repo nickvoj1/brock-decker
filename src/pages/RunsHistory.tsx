@@ -404,10 +404,17 @@ export default function RunsHistory() {
     return prefs?.[0]?.type === 'special_request';
   };
 
+  const isAdditionalRun = (run: EnrichmentRun): boolean => {
+    const prefs = run.preferences_data as any[];
+    const type = prefs?.[0]?.type;
+    return type === 'signal_ta' || type === 'jobboard_contact_search';
+  };
+
   const [activeTab, setActiveTab] = useState<string>("searches");
 
-  const regularRuns = runs?.filter(r => !isSpecialRequest(r));
+  const regularRuns = runs?.filter(r => !isSpecialRequest(r) && !isAdditionalRun(r));
   const specialRuns = runs?.filter(r => isSpecialRequest(r));
+  const additionalRuns = runs?.filter(r => isAdditionalRun(r));
 
   const copySpecialEmails = (run: EnrichmentRun) => {
     const contacts = (run.enriched_data as unknown) as ApolloContact[];
@@ -459,6 +466,10 @@ export default function RunsHistory() {
             <TabsTrigger value="special" className="gap-2">
               <Building2 className="h-4 w-4" />
               Special Requests ({specialRuns?.length || 0})
+            </TabsTrigger>
+            <TabsTrigger value="additional" className="gap-2">
+              <Sparkles className="h-4 w-4" />
+              Additional ({additionalRuns?.length || 0})
             </TabsTrigger>
           </TabsList>
 
@@ -716,6 +727,96 @@ export default function RunsHistory() {
                     <h3 className="font-medium text-foreground mb-1">No special requests yet</h3>
                     <p className="text-sm text-muted-foreground">
                       Use the Special Request tab on Upload & Run to search for contacts at a specific company
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="additional">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Sparkles className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">Additional Searches</CardTitle>
+                    <CardDescription>
+                      Signal TA and Job Board Apollo contact searches
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!profileName ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                      <Users className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <h3 className="font-medium text-foreground mb-1">Select a Profile</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Choose your profile from the header to view additional searches
+                    </p>
+                  </div>
+                ) : isLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  </div>
+                ) : additionalRuns && additionalRuns.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Contacts</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {additionalRuns.map((run) => {
+                        const prefs = (run.preferences_data as any[])?.[0] || {};
+                        const typeLabel = prefs.type === "signal_ta" ? "Signal TA" : "Job Board Apollo";
+                        const target =
+                          prefs.company || prefs.targetCompany || getCandidateName(run) || "Unknown";
+                        return (
+                          <TableRow key={run.id} className="animate-fade-in">
+                            <TableCell className="font-medium">{typeLabel}</TableCell>
+                            <TableCell>{target}</TableCell>
+                            <TableCell>{format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-muted-foreground" />
+                                {getTotalContactCount(run)}
+                              </div>
+                            </TableCell>
+                            <TableCell><StatusBadge status={run.status} /></TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="icon" onClick={() => openRunDetails(run)} title="View details">
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => downloadCSV(run)} disabled={getTotalContactCount(run) === 0} title="Download CSV">
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted mb-4">
+                      <Inbox className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                    <h3 className="font-medium text-foreground mb-1">No additional searches yet</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Run TA contacts from Signals or Apollo AI from Job Board to see history here
                     </p>
                   </div>
                 )}

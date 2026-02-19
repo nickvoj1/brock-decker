@@ -61,6 +61,7 @@ import {
   Signal,
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
+import { createEnrichmentRun, updateEnrichmentRun } from "@/lib/dataApi";
 import { CVMatchesModal } from "@/components/signals/CVMatchesModal";
 import { SignalCard } from "@/components/signals/SignalCard";
 import { SignalRetrainModal } from "@/components/signals/SignalRetrainModal";
@@ -592,6 +593,56 @@ export default function SignalsDashboard() {
           toast.warning(`No contacts found at ${targetCompany}.`, {
             id: `ta-search-${signal.id}`,
           });
+        }
+
+        // Save signal TA search into Runs History (Additional tab).
+        try {
+          const runResult = await createEnrichmentRun(profileName, {
+            search_counter: Math.max(contacts.length, 10),
+            candidates_count: 1,
+            preferences_count: 1,
+            status: contacts.length > 0 ? "success" : "failed",
+            bullhorn_enabled: false,
+            candidates_data: [{
+              candidate_id: `SIG-${signal.id}`,
+              name: targetCompany || signal.company || "Signal Search",
+              current_title: signal.title,
+              location: signal.region || "",
+              skills: [],
+              work_history: [],
+              education: [],
+            }],
+            preferences_data: [{
+              type: "signal_ta",
+              company: targetCompany || signal.company || "",
+              country: signal.region || "",
+              signalId: signal.id,
+              signalTitle: signal.title,
+              signalRegion: signal.region,
+              categoriesTried: response.data.categoriesTried || [],
+              categoriesWithResults: response.data.categoriesWithResults || [],
+            }],
+          });
+
+          if (runResult.success && runResult.data?.id) {
+            const historyContacts = contacts.map((c) => ({
+              name: c.name,
+              title: c.title,
+              company: c.company,
+              email: c.email,
+              location: c.location,
+              phone: "",
+            }));
+
+            await updateEnrichmentRun(profileName, runResult.data.id, {
+              processed_count: 1,
+              enriched_data: historyContacts,
+              status: contacts.length > 0 ? "success" : "failed",
+              error_message: contacts.length === 0 ? "No contacts found matching criteria" : null,
+            });
+          }
+        } catch (historyError) {
+          console.error("Failed to persist signal TA run:", historyError);
         }
       } else {
         toast.error(response.error || "Failed to search for contacts", {

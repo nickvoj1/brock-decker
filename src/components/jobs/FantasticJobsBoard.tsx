@@ -721,11 +721,13 @@ export function FantasticJobsBoard() {
       };
 
       const preferencesData = [{
+        type: "jobboard_contact_search",
         industry,
         companies: "",
         exclusions: "",
         excludedIndustries: [],
         locations,
+        country: job.location || "",
         targetRoles,
         sectors: departments,
         targetCompany: company,
