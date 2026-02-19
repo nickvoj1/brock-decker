@@ -1,11 +1,11 @@
 import { jsPDF } from "jspdf";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFImage } from "pdf-lib";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfJsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
 type WorkExperience = { company: string; title: string; duration?: string };
 type Education = { institution: string; degree: string; year?: string };
-type RedactionZone = { pageIndex: number; x: number; y: number; width: number; height: number };
+type RedactionZone = { pageIndex: number; x: number; y: number; yTop: number; width: number; height: number };
 
 export type CandidateForPdf = {
   name: string;
@@ -50,6 +50,14 @@ function safeText(value?: string | null): string {
   return String(value || "").trim();
 }
 
+function fitInBox(sourceW: number, sourceH: number, maxW: number, maxH: number): { width: number; height: number } {
+  const w = Number(sourceW || 0);
+  const h = Number(sourceH || 0);
+  if (w <= 0 || h <= 0) return { width: maxW, height: maxH };
+  const scale = Math.min(maxW / w, maxH / h);
+  return { width: w * scale, height: h * scale };
+}
+
 export async function downloadCandidatePdf(
   candidate: CandidateForPdf,
   fileNameBase: string,
@@ -66,7 +74,7 @@ export async function downloadCandidatePdf(
 
   if (watermarkData) {
     try {
-      doc.addImage(watermarkData, "PNG", margin, 18, 90, 28, undefined, "FAST");
+      doc.addImage(watermarkData, "PNG", margin, 20, 74, 22, undefined, "FAST");
     } catch {
       // Ignore non-critical image errors.
     }
@@ -278,6 +286,7 @@ async function detectPersonalInfoZones(sourceFile: File): Promise<RedactionZone[
         pageIndex: 0,
         x,
         y: viewport.height - (yTop + height),
+        yTop,
         width,
         height,
       });
@@ -290,6 +299,55 @@ async function detectPersonalInfoZones(sourceFile: File): Promise<RedactionZone[
   }
 }
 
+async function renderRedactedFirstPagePng(sourceFile: File, zones: RedactionZone[]): Promise<Uint8Array | null> {
+  if (typeof document === "undefined") return null;
+  try {
+    const bytes = new Uint8Array(await sourceFile.arrayBuffer());
+    const loadingTask = getDocument({ data: bytes });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const scale = 2;
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      await pdf.destroy();
+      return null;
+    }
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    ctx.fillStyle = "#ffffff";
+
+    const pageZones = zones.filter((z) => z.pageIndex === 0);
+    if (pageZones.length > 0) {
+      for (const zone of pageZones) {
+        ctx.fillRect(
+          Math.max(0, zone.x * scale),
+          Math.max(0, zone.yTop * scale),
+          Math.max(0, zone.width * scale),
+          Math.max(0, zone.height * scale),
+        );
+      }
+    } else {
+      // Fallback for image/scanned CVs where text extraction fails.
+      ctx.fillRect(viewport.width * 0.14, viewport.height * 0.12, viewport.width * 0.72, viewport.height * 0.065);
+      ctx.fillRect(viewport.width * 0.18, viewport.height * 0.19, viewport.width * 0.64, viewport.height * 0.03);
+    }
+
+    // Remove common portrait/photo area on the first page.
+    const base = page.getViewport({ scale: 1 });
+    ctx.fillRect((base.width - 150) * scale, 80 * scale, 120 * scale, 140 * scale);
+
+    const pngData = canvas.toDataURL("image/png");
+    await pdf.destroy();
+    return dataUrlToUint8Array(pngData);
+  } catch {
+    return null;
+  }
+}
+
 export async function downloadBrandedSourcePdf(
   sourceFile: File,
   fileNameBase: string,
@@ -297,14 +355,14 @@ export async function downloadBrandedSourcePdf(
 ): Promise<void> {
   const pdfBytes = new Uint8Array(await sourceFile.arrayBuffer());
   const pdfDoc = await PDFDocument.load(pdfBytes);
-  const pages = pdfDoc.getPages();
   const detectedZones = await detectPersonalInfoZones(sourceFile);
+  const redactedFirstPagePng = await renderRedactedFirstPagePng(sourceFile, detectedZones);
   const watermarkData = await toDataUrl(branding?.watermarkImageUrl);
   const headerData = await toDataUrl(branding?.headerImageUrl);
   const headerText = safeText(branding?.headerText);
 
-  let embeddedWatermark: any = null;
-  let embeddedHeader: any = null;
+  let embeddedWatermark: PDFImage | null = null;
+  let embeddedHeader: PDFImage | null = null;
 
   if (watermarkData) {
     const bytes = dataUrlToUint8Array(watermarkData);
@@ -332,13 +390,23 @@ export async function downloadBrandedSourcePdf(
     }
   }
 
+  if (redactedFirstPagePng && pdfDoc.getPageCount() > 0) {
+    const firstPage = pdfDoc.getPage(0);
+    const { width, height } = firstPage.getSize();
+    const embeddedRedactedFirst = await pdfDoc.embedPng(redactedFirstPagePng);
+    pdfDoc.removePage(0);
+    const rebuiltFirstPage = pdfDoc.insertPage(0, [width, height]);
+    rebuiltFirstPage.drawImage(embeddedRedactedFirst, { x: 0, y: 0, width, height });
+  }
+
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const pages = pdfDoc.getPages();
 
   pages.forEach((page, idx) => {
     const { width, height } = page.getSize();
 
-    if (idx === 0) {
-      // Text-aware redaction for personal info lines under the name.
+    if (idx === 0 && !redactedFirstPagePng) {
+      // Last-resort fallback if raster redaction was unavailable.
       const pageZones = detectedZones.filter((z) => z.pageIndex === 0);
       if (pageZones.length > 0) {
         for (const z of pageZones) {
@@ -351,7 +419,6 @@ export async function downloadBrandedSourcePdf(
           });
         }
       } else {
-        // Fallback for CVs where text extraction is unavailable.
         page.drawRectangle({
           x: width * 0.14,
           y: height - 158,
@@ -367,8 +434,6 @@ export async function downloadBrandedSourcePdf(
           color: rgb(1, 1, 1),
         });
       }
-
-      // Redact common photo area (top-right), preserving all other content.
       page.drawRectangle({
         x: width - 150,
         y: height - 220,
@@ -379,21 +444,25 @@ export async function downloadBrandedSourcePdf(
     }
 
     if (embeddedWatermark) {
+      const natural = embeddedWatermark.scale(1);
+      const fitted = fitInBox(natural.width, natural.height, 74, 22);
       page.drawImage(embeddedWatermark, {
         x: 26,
-        y: height - 54,
-        width: 90,
-        height: 28,
-        opacity: 0.7,
+        y: height - 24 - fitted.height,
+        width: fitted.width,
+        height: fitted.height,
+        opacity: 0.92,
       });
     }
 
     if (embeddedHeader) {
+      const natural = embeddedHeader.scale(1);
+      const fitted = fitInBox(natural.width, natural.height, 146, 32);
       page.drawImage(embeddedHeader, {
-        x: width - 166,
-        y: height - 54,
-        width: 140,
-        height: 28,
+        x: width - 26 - fitted.width,
+        y: height - 24 - fitted.height,
+        width: fitted.width,
+        height: fitted.height,
       });
     } else if (headerText) {
       const lines = headerText.split("\n").map((x) => x.trim()).filter(Boolean);
