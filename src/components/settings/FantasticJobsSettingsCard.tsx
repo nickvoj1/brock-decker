@@ -57,14 +57,14 @@ export function FantasticJobsSettingsCard() {
     try {
       const endpoint =
         `https://api.apify.com/v2/acts/${encodeURIComponent(linkedinActorId.trim())}` +
-        `/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken.trim())}&format=json&clean=true&maxItems=5`;
+        `/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken.trim())}&format=json&clean=true&maxItems=10`;
 
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           timeRange: "7d",
-          limit: 5,
+          limit: 10,
           includeAi: true,
           descriptionType: "text",
           titleSearch: ["private equity"],
@@ -73,7 +73,11 @@ export function FantasticJobsSettingsCard() {
         }),
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = err?.error?.message || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
       const data = await res.json();
       if (!Array.isArray(data)) throw new Error("Unexpected response");
       setTestStatus("success");
@@ -81,11 +85,11 @@ export function FantasticJobsSettingsCard() {
         title: "Connection successful",
         description: `Fetched ${data.length} sample jobs from LinkedIn actor.`,
       });
-    } catch {
+    } catch (error) {
       setTestStatus("error");
       toast({
         title: "Connection failed",
-        description: "Token or actor ID is invalid, or Apify rejected the request.",
+        description: error instanceof Error ? error.message : "Apify rejected the request.",
         variant: "destructive",
       });
     } finally {
