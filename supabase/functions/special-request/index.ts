@@ -80,6 +80,18 @@ Deno.serve(async (req) => {
 
     const apolloKey = apiSetting.setting_value
 
+    const normalizeValue = (v: unknown): string => String(v || '').trim()
+    const isFullName = (name: string): boolean => {
+      const parts = normalizeValue(name).split(/\s+/).filter(Boolean)
+      return parts.length >= 2
+    }
+    const isCompleteContact = (contact: { name: string; title: string; email: string }): boolean => {
+      const name = normalizeValue(contact.name)
+      const title = normalizeValue(contact.title)
+      const email = normalizeValue(contact.email).toLowerCase()
+      return isFullName(name) && title.length >= 2 && email.length >= 5 && email.includes('@')
+    }
+
     // Build person_titles from selected departments
     const personTitles: string[] = []
     for (const dept of departments) {
@@ -146,16 +158,16 @@ Deno.serve(async (req) => {
 
           const firstName = person.first_name || ''
           const lastName = person.last_name || ''
-          const name = [firstName, lastName].filter(Boolean).join(' ')
-          const email = person.email || ''
-          const location = [person.city, person.state, person.country].filter(Boolean).join(', ')
+        const name = [firstName, lastName].filter(Boolean).join(' ').trim()
+        const email = person.email || ''
+        const location = [person.city, person.state, person.country].filter(Boolean).join(', ')
 
           if (email && !usedEmails.has(email.toLowerCase())) {
-            candidates.push({
-              id: personId, firstName, lastName, name,
-              title: person.title || '',
-              company: person.organization?.name || company,
-              email, location,
+          candidates.push({
+            id: personId, firstName, lastName, name,
+            title: person.title || '',
+            company: person.organization?.name || company,
+            email, location,
             })
           } else if (!email && candidates.length < maxContacts * 3) {
             candidates.push({
@@ -205,17 +217,25 @@ Deno.serve(async (req) => {
             })
             if (!matchRes.ok) return null
             const matchData = await matchRes.json()
-            return { personId: person.id, email: matchData?.person?.email || null }
+            const personObj = matchData?.person || {}
+            return {
+              personId: person.id,
+              email: personObj?.email || null,
+              title: personObj?.title || null,
+              fullName: personObj?.name || null,
+            }
           })
         )
 
         for (const result of results) {
           if (result.status === 'fulfilled' && result.value?.email) {
-            const { personId, email } = result.value
+            const { personId, email, title, fullName } = result.value
             if (!usedEmails.has(email.toLowerCase())) {
               const person = toEnrich.find(p => p.id === personId)
               if (person) {
                 person.email = email
+                if (title && !person.title) person.title = String(title)
+                if (fullName && !person.name) person.name = String(fullName)
                 withEmail.push(person)
               }
             }
@@ -228,15 +248,15 @@ Deno.serve(async (req) => {
 
     // For job-board Apollo flow, emailOnly ensures returned contacts are actionable.
     const allContacts = emailOnly ? withEmail : [...withEmail, ...needEmail.filter(c => !c.email)]
-    const finalContacts = allContacts.slice(0, maxContacts).map(c => ({
+    const finalContacts = allContacts.map(c => ({
       name: c.name,
       title: c.title,
       company: c.company,
       email: c.email || '',
       location: c.location,
-    }))
+    })).filter(isCompleteContact).slice(0, maxContacts)
 
-    console.log(`Final contacts: ${finalContacts.length} (${finalContacts.filter(c => c.email).length} with email)`)
+    console.log(`Final contacts: ${finalContacts.length} complete contacts (full name + title + email)`)
 
     // Save used contacts (only those with email)
     const contactsWithEmails = finalContacts.filter(c => c.email)
