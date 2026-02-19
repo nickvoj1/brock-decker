@@ -19,6 +19,7 @@ import { getPitchTemplates, savePitchTemplate, deletePitchTemplate, setDefaultTe
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { format } from "date-fns";
+import { normalizeCandidateName } from "@/lib/nameUtils";
 
 interface WorkExperience {
   company: string;
@@ -286,11 +287,16 @@ export default function GenerateMail() {
         throw new Error(result.error || 'Failed to parse CV');
       }
 
-      setCvData(result.data);
+      const normalizedCandidate: ParsedCandidate = {
+        ...result.data,
+        name: normalizeCandidateName(result.data?.name) || result.data?.name || "Unknown",
+      };
+
+      setCvData(normalizedCandidate);
       
       toast({
         title: "CV parsed successfully",
-        description: `Extracted profile for ${result.data.name}`,
+        description: `Extracted profile for ${normalizedCandidate.name}`,
       });
     } catch (error: any) {
       console.error('CV parsing error:', error);
@@ -315,7 +321,7 @@ export default function GenerateMail() {
   const handleSelectSavedProfile = (profile: SavedProfile) => {
     const candidate: ParsedCandidate = {
       candidate_id: profile.candidate_id,
-      name: profile.name,
+      name: normalizeCandidateName(profile.name) || profile.name,
       current_title: profile.current_title || '',
       location: profile.location || '',
       email: profile.email || undefined,

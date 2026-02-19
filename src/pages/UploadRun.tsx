@@ -26,6 +26,7 @@ import { useProfileName } from "@/hooks/useProfileName";
 import { createEnrichmentRun, updateEnrichmentRun, saveCandidateProfile as saveProfileToApi } from "@/lib/dataApi";
 import type { Json } from "@/integrations/supabase/types";
 import { getBrandingForPreset, getStoredBrandingPreset } from "@/lib/cvBranding";
+import { normalizeCandidateName } from "@/lib/nameUtils";
 
 interface WorkExperience {
   company: string;
@@ -224,16 +225,21 @@ export default function UploadRun() {
         throw new Error(result.error || 'Failed to parse CV');
       }
 
-      setCvData(result.data);
+      const normalizedCandidate: ParsedCandidate = {
+        ...result.data,
+        name: normalizeCandidateName(result.data?.name) || result.data?.name || "Unknown",
+      };
+
+      setCvData(normalizedCandidate);
       
       // Auto-save to history if profile name is set
       if (profileName.trim()) {
-        await saveCandidateProfile(result.data);
+        await saveCandidateProfile(normalizedCandidate);
       }
       
       toast({
         title: "CV parsed successfully",
-        description: `Extracted profile for ${result.data.name} with ${result.data.work_history?.length || 0} work experiences`,
+        description: `Extracted profile for ${normalizedCandidate.name} with ${normalizedCandidate.work_history?.length || 0} work experiences`,
       });
     } catch (error: any) {
       console.error('CV parsing error:', error);
@@ -259,7 +265,7 @@ export default function UploadRun() {
   const handleSelectSavedProfile = (profile: SavedProfile) => {
     const candidate: ParsedCandidate = {
       candidate_id: profile.candidate_id,
-      name: profile.name,
+      name: normalizeCandidateName(profile.name) || profile.name,
       current_title: profile.current_title || '',
       location: profile.location || '',
       email: profile.email || undefined,

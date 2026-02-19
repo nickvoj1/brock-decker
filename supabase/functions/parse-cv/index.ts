@@ -30,6 +30,48 @@ interface ParsedCandidate {
   education: Education[]
 }
 
+function normalizeNameCasing(input: unknown): string {
+  const raw = String(input || "").replace(/\s+/g, " ").trim()
+  if (!raw) return ""
+  if (/^(unknown|not specified|could not parse)$/i.test(raw)) return raw
+
+  const fixWord = (w: string): string => {
+    if (w.length <= 1) return w
+    if (!/[A-Z]/.test(w) || /[a-z]/.test(w)) return w
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+  }
+
+  const fixToken = (token: string): string =>
+    token.replace(/[A-Za-z]+/g, (word) => fixWord(word))
+
+  let name = raw
+  const commaParts = name.split(",").map((p) => p.trim()).filter(Boolean)
+  if (commaParts.length === 2 && !/[()]/.test(name)) {
+    const leftCount = commaParts[0].split(/\s+/).filter(Boolean).length
+    const rightCount = commaParts[1].split(/\s+/).filter(Boolean).length
+    if (leftCount <= 3 && rightCount <= 3) {
+      name = `${commaParts[1]} ${commaParts[0]}`.replace(/\s+/g, " ").trim()
+    }
+  }
+
+  const hasLower = /[a-z]/.test(name)
+  const hasUpper = /[A-Z]/.test(name)
+  if (hasUpper && !hasLower) {
+    name = name.split(" ").map(fixToken).join(" ")
+  } else {
+    name = name
+      .split(" ")
+      .map((token) => {
+        const letters = token.replace(/[^A-Za-z]/g, "")
+        if (letters.length >= 3 && letters === letters.toUpperCase()) return fixToken(token)
+        return token
+      })
+      .join(" ")
+  }
+
+  return name.replace(/\s+/g, " ").trim()
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -117,6 +159,8 @@ async function parseWithAI(base64Data: string, mimeType: string, apiKey: string,
               text: `You are a CV/resume parser. Analyze this CV document and extract the candidate's information.
 
 IMPORTANT: You MUST use the extract_candidate_info function to return the data.
+IMPORTANT: Extract the candidate name only from CV document text, never from filename or metadata.
+IMPORTANT: If the CV name is all uppercase, return it in natural title case.
 
 Extract:
 - Full name
@@ -262,7 +306,7 @@ If any information is not clearly visible in the document, use "Not specified" f
           const candidateId = `CV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
           return {
             candidate_id: candidateId,
-            name: parsed.name || 'Unknown',
+            name: normalizeNameCasing(parsed.name) || 'Unknown',
             current_title: parsed.current_title || parsed.position || 'Not specified',
             location: parsed.location || 'Not specified',
             email: parsed.email || undefined,
@@ -301,7 +345,7 @@ If any information is not clearly visible in the document, use "Not specified" f
 
   return {
     candidate_id: candidateId,
-    name: parsed.name || 'Unknown',
+    name: normalizeNameCasing(parsed.name) || 'Unknown',
     current_title: parsed.current_title || 'Not specified',
     location: parsed.location || 'Not specified',
     email: parsed.email || undefined,

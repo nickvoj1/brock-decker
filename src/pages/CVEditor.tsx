@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { getBrandingForPreset, getStoredBrandingPreset } from "@/lib/cvBranding";
+import { normalizeCandidateName } from "@/lib/nameUtils";
 
 interface WorkExperience {
   company: string;
@@ -51,6 +52,7 @@ export default function CVEditor() {
     // Privacy-first editor mode: keep full name and professional history, strip direct personal contacts.
     return {
       ...candidate,
+      name: normalizeCandidateName(candidate.name) || candidate.name,
       current_title: candidate.current_title || "",
       location: "",
       email: "",
