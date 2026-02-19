@@ -4,9 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CVPreviewModal } from "./CVPreviewModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { downloadBrandedSourcePdf, downloadCandidatePdf } from "@/lib/cvPdf";
 import { useToast } from "@/hooks/use-toast";
 
@@ -131,22 +129,6 @@ export function CVUploadZone({
 
   const hasFile = file !== null;
   const isValid = hasFile && parsedData && !error;
-
-  const saveEditedCandidate = () => {
-    if (!editorDraft || !onParsed) {
-      setShowEditor(false);
-      return;
-    }
-    const normalizedSkills = Array.from(
-      new Set(
-        (editorDraft.skills || [])
-          .map((s) => String(s || "").trim())
-          .filter(Boolean),
-      ),
-    );
-    onParsed({ ...editorDraft, skills: normalizedSkills });
-    setShowEditor(false);
-  };
 
   const downloadEditedCandidate = async () => {
     try {
@@ -344,7 +326,7 @@ export function CVUploadZone({
       />
 
       <Dialog open={showEditor} onOpenChange={setShowEditor}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Edit CV</DialogTitle>
           </DialogHeader>
@@ -371,92 +353,12 @@ export function CVUploadZone({
                   </Button>
                 </div>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="cv-edit-name">Full Name</Label>
-                  <Input
-                    id="cv-edit-name"
-                    value={nameMode === "anonymous" ? "CANDIDATE" : editorDraft.name || ""}
-                    disabled={nameMode === "anonymous"}
-                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-edit-title">Current Title</Label>
-                  <Input
-                    id="cv-edit-title"
-                    value={editorDraft.current_title || ""}
-                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, current_title: e.target.value } : prev))}
-                  />
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="cv-edit-location">Location</Label>
-                  <Input
-                    id="cv-edit-location"
-                    value={editorDraft.location || ""}
-                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, location: e.target.value } : prev))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="cv-edit-email">Email</Label>
-                  <Input
-                    id="cv-edit-email"
-                    value={editorDraft.email || ""}
-                    onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, email: e.target.value } : prev))}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="cv-edit-phone">Phone</Label>
-                <Input
-                  id="cv-edit-phone"
-                  value={editorDraft.phone || ""}
-                  onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, phone: e.target.value } : prev))}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="cv-edit-skills">Skills (comma-separated)</Label>
-                <Input
-                  id="cv-edit-skills"
-                  value={(editorDraft.skills || []).join(", ")}
-                  onChange={(e) =>
-                    setEditorDraft((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            skills: e.target.value
-                              .split(",")
-                              .map((s) => s.trim())
-                              .filter(Boolean),
-                          }
-                        : prev,
-                    )
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="cv-edit-summary">Summary</Label>
-                <Textarea
-                  id="cv-edit-summary"
-                  rows={4}
-                  value={editorDraft.summary || ""}
-                  onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, summary: e.target.value } : prev))}
-                />
-              </div>
             </div>
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={downloadEditedCandidate}>
               <Download className="mr-2 h-4 w-4" />
-              Download Edited CV
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setShowEditor(false)}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={saveEditedCandidate}>
-              Save Changes
+              Download CV
             </Button>
           </DialogFooter>
         </DialogContent>
