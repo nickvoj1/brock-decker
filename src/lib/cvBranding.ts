@@ -26,7 +26,8 @@ export const CV_BRANDING_PRESETS: Record<PresetKey, CVBrandingPreset> = {
     label: "Brock & Decker",
     watermarkImageUrl: "/cv-branding/presets/brock_watermark.png",
     headerImageUrl: null,
-    headerText: "Brock & Decker",
+    headerText:
+      "25 Canada Square, Level 33,\nLondon, E14 5LQ, UK\n+44 (0) 203 858 7970\ninfo@brockdecker.com",
   },
 };
 
@@ -62,4 +63,3 @@ export function setStoredBrandingPreset(preset: PresetKey): void {
 export function getBrandingForPreset(preset: PresetKey): CVBrandingPreset {
   return CV_BRANDING_PRESETS[preset] || CV_BRANDING_PRESETS.acl_partners;
 }
-
