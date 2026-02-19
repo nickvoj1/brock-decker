@@ -16,7 +16,7 @@ type RedactionZone = {
 
 type NamePlacement = {
   xCenter: number;
-  yBottom: number;
+  yTop: number;
   boxWidth: number;
   boxHeight: number;
 };
@@ -82,8 +82,8 @@ function safeText(value?: string | null): string {
 function getWatermarkBox(watermarkImageUrl?: string | null): { maxW: number; maxH: number } {
   const key = String(watermarkImageUrl || "").toLowerCase();
   if (key.includes("brock") || key.includes("decker")) {
-    // Brock mark should be visibly larger in the top-left corner.
-    return { maxW: 132, maxH: 42 };
+    // Brock mark should be visible but not oversized.
+    return { maxW: 112, maxH: 34 };
   }
   if (key.includes("everet") || key.includes("everett")) {
     // Everet mark is naturally compact; render slightly larger for readability.
@@ -453,12 +453,15 @@ function detectNamePlacementFromPdf(sourcePdfBytes: Uint8Array, hints?: CVPerson
     const nameRects = findNameProtectionRects(page, pageWidth, pageHeight, hints);
     const bestRect = pickPrimaryNameRect(nameRects, pageWidth, pageHeight);
     if (!bestRect) return null;
+    const topY = Math.min(bestRect.y0, bestRect.y1);
+    const bottomY = Math.max(bestRect.y0, bestRect.y1);
+    if (bottomY > pageHeight * 0.52) return null;
 
     return {
       xCenter: (bestRect.x0 + bestRect.x1) / 2,
-      yBottom: bestRect.y0,
+      yTop: topY,
       boxWidth: Math.max(16, bestRect.x1 - bestRect.x0),
-      boxHeight: Math.max(10, bestRect.y1 - bestRect.y0),
+      boxHeight: Math.max(10, bottomY - topY),
     };
   } catch {
     return null;
@@ -1360,20 +1363,25 @@ export async function downloadBrandedSourcePdf(
 
     if (hints?.anonymizeName && pageIndex === 0) {
       const replacement = safeText(hints?.replacementName) || "CANDIDATE";
+      const hasPlacement =
+        Boolean(namePlacement) &&
+        Number.isFinite(namePlacement?.yTop) &&
+        Number.isFinite(namePlacement?.boxHeight) &&
+        Number(namePlacement?.yTop || 0) <= height * 0.5;
       let size = namePlacement
-        ? Math.min(22, Math.max(12, namePlacement.boxHeight * 0.66))
-        : 18;
+        ? Math.min(20, Math.max(11, namePlacement.boxHeight * 0.6))
+        : 16;
       let textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
-      if (namePlacement) {
-        const maxAllowedWidth = Math.max(48, namePlacement.boxWidth - 2);
-        while (textWidth > maxAllowedWidth && size > 12) {
+      if (hasPlacement) {
+        const maxAllowedWidth = Math.max(44, namePlacement!.boxWidth - 4);
+        while (textWidth > maxAllowedWidth && size > 10) {
           size -= 1;
           textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
         }
       }
-      const desiredX = namePlacement ? namePlacement.xCenter - textWidth / 2 : (width - textWidth) / 2;
-      const desiredY = namePlacement
-        ? namePlacement.yBottom + Math.max(0, (namePlacement.boxHeight - size) / 2)
+      const desiredX = hasPlacement ? namePlacement!.xCenter - textWidth / 2 : (width - textWidth) / 2;
+      const desiredY = hasPlacement
+        ? height - (namePlacement!.yTop + Math.max(0, (namePlacement!.boxHeight - size) / 2) + size)
         : height - 82;
       page.drawText(replacement, {
         x: Math.max(26, Math.min(width - 26 - textWidth, desiredX)),
