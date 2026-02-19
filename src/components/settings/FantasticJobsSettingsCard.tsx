@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Briefcase, CheckCircle2, XCircle, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,12 @@ export function FantasticJobsSettingsCard() {
   const queryClient = useQueryClient();
   const profileName = useProfileName();
   
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  const [apifyToken, setApifyToken] = useState("");
+  const [actorId, setActorId] = useState("");
+  const [rapidApiKey, setRapidApiKey] = useState("");
+  const [showApifyToken, setShowApifyToken] = useState(false);
+  const [showRapidApiKey, setShowRapidApiKey] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
@@ -31,40 +35,64 @@ export function FantasticJobsSettingsCard() {
     enabled: !!profileName,
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async ({ key, value }: { key: string; value: string }) => {
-      if (!profileName) throw new Error("No profile selected");
-      const response = await saveApiSetting(profileName, key, value);
-      if (!response.success) throw new Error(response.error);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['api-settings'] });
+  const handleSave = async () => {
+    if (!profileName) return;
+    if (!apifyToken || !actorId) {
       toast({
-        title: "Settings saved",
-        description: "Fantastic.jobs API key has been updated.",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error saving settings",
-        description: error.message,
+        title: "Apify details required",
+        description: "Please add both Apify token and Apify actor ID.",
         variant: "destructive",
       });
-    },
-  });
+      return;
+    }
 
-  const handleSave = () => {
-    saveMutation.mutate({ key: 'rapidapi_key', value: apiKey });
-    setApiKey("");
+    setSaving(true);
+    try {
+      const updates = [
+        saveApiSetting(profileName, "apify_token", apifyToken),
+        saveApiSetting(profileName, "apify_actor_id", actorId),
+      ];
+      if (rapidApiKey.trim()) {
+        updates.push(saveApiSetting(profileName, "rapidapi_key", rapidApiKey));
+      }
+
+      const results = await Promise.all(updates);
+      const firstError = results.find((r) => !r.success);
+      if (firstError) throw new Error(firstError.error || "Failed to save settings");
+
+      queryClient.invalidateQueries({ queryKey: ["api-settings"] });
+      setApifyToken("");
+      setRapidApiKey("");
+      toast({
+        title: "Settings saved",
+        description: "Apify and fallback settings were updated.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error saving settings",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const testConnection = async () => {
+    if (!apifyToken || !actorId) return;
     setTesting(true);
     setTestStatus('idle');
     
     try {
       const { data, error } = await supabase.functions.invoke('fantastic-jobs', {
-        body: { keyword: "test", location: "London", apiKey },
+        body: {
+          keyword: "private equity",
+          location: "London",
+          apify_token: apifyToken,
+          actor_id: actorId,
+          rapidapi_key: rapidApiKey || undefined,
+          limit: 10,
+        },
       });
       
       if (error) throw error;
@@ -76,7 +104,10 @@ export function FantasticJobsSettingsCard() {
     }
   };
 
-  const isConfigured = settings?.find((s: any) => s.setting_key === 'rapidapi_key')?.is_configured;
+  const isApifyConfigured = settings?.find((s: any) => s.setting_key === "apify_token")?.is_configured;
+  const isActorConfigured = settings?.find((s: any) => s.setting_key === "apify_actor_id")?.is_configured;
+  const isRapidConfigured = settings?.find((s: any) => s.setting_key === "rapidapi_key")?.is_configured;
+  const isConfigured = Boolean(isApifyConfigured && isActorConfigured);
 
   if (!profileName) {
     return (
@@ -105,8 +136,8 @@ export function FantasticJobsSettingsCard() {
               <Briefcase className="h-4 w-4" />
             </div>
             <div>
-              <CardTitle className="text-lg">Fantastic.jobs (RapidAPI)</CardTitle>
-              <CardDescription>API key for the Job Board tab on Signals</CardDescription>
+              <CardTitle className="text-lg">Fantastic.jobs (Apify)</CardTitle>
+              <CardDescription>Apify actor + token for the Job Board tab (RapidAPI optional fallback)</CardDescription>
             </div>
           </div>
           {isConfigured && (
@@ -119,40 +150,72 @@ export function FantasticJobsSettingsCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="rapidApiKey">RapidAPI Key</Label>
+          <Label htmlFor="apifyToken">Apify Token</Label>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Input
-                id="rapidApiKey"
-                type={showKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={isConfigured ? "••••••••••••••••" : "Enter your RapidAPI key"}
+                id="apifyToken"
+                type={showApifyToken ? "text" : "password"}
+                value={apifyToken}
+                onChange={(e) => setApifyToken(e.target.value)}
+                placeholder={isApifyConfigured ? "••••••••••••••••" : "Enter your Apify token"}
               />
               <button
                 type="button"
-                onClick={() => setShowKey(!showKey)}
+                onClick={() => setShowApifyToken(!showApifyToken)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showApifyToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Get your key at{" "}
-            <a href="https://rapidapi.com/letscrape-6bRBa3QguO5/api/active-jobs-db" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-              RapidAPI → Active Jobs DB
+            Create token at{" "}
+            <a href="https://console.apify.com/account/integrations" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+              Apify Console
             </a>
           </p>
         </div>
+        <div className="space-y-2">
+          <Label htmlFor="apifyActorId">Apify Actor ID</Label>
+          <Input
+            id="apifyActorId"
+            value={actorId}
+            onChange={(e) => setActorId(e.target.value)}
+            placeholder={isActorConfigured ? "Configured (enter to update)" : "username~actor-name"}
+          />
+          <p className="text-xs text-muted-foreground">
+            Example format: <code>username~actor-name</code>
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="rapidApiFallback">RapidAPI Key (Optional Fallback)</Label>
+          <div className="relative">
+            <Input
+              id="rapidApiFallback"
+              type={showRapidApiKey ? "text" : "password"}
+              value={rapidApiKey}
+              onChange={(e) => setRapidApiKey(e.target.value)}
+              placeholder={isRapidConfigured ? "••••••••••••••••" : "Enter RapidAPI key (optional)"}
+            />
+            <button
+              type="button"
+              onClick={() => setShowRapidApiKey(!showRapidApiKey)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showRapidApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
         <div className="flex gap-2">
-          <Button onClick={handleSave} disabled={saveMutation.isPending || !apiKey}>
+          <Button onClick={handleSave} disabled={saving || !apifyToken || !actorId}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Save
           </Button>
           <Button
             variant="outline"
             onClick={testConnection}
-            disabled={testing || !apiKey}
+            disabled={testing || !apifyToken || !actorId}
           >
             {testing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
