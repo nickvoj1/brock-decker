@@ -199,6 +199,7 @@ export function FantasticJobsBoard() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [searchMode, setSearchMode] = useState<SearchMode>("all");
+  const [selectedSources, setSelectedSources] = useState({ linkedin: false, career: false });
   const [sortBy, setSortBy] = useState<"posted" | "salary">("posted");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [strictPEOnly, setStrictPEOnly] = useState(true);
@@ -425,6 +426,26 @@ export function FantasticJobsBoard() {
     [settings, fetchDirect, fetchViaBackend, toast, filters, requestedCount, applyClientFilters],
   );
 
+  const runSelectedSearch = () => {
+    if (selectedSources.linkedin && selectedSources.career) {
+      runSearch("all");
+      return;
+    }
+    if (selectedSources.linkedin) {
+      runSearch("linkedin");
+      return;
+    }
+    if (selectedSources.career) {
+      runSearch("career");
+      return;
+    }
+    toast({
+      title: "Select source first",
+      description: "Tick LinkedIn and/or Career Sites before running search.",
+      variant: "destructive",
+    });
+  };
+
   const scopedJobs = useMemo(() => {
     let out = jobs;
     if (strictPEOnly) {
@@ -617,18 +638,28 @@ export function FantasticJobsBoard() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant={searchMode === "all" ? "default" : "outline"} disabled={loading} onClick={() => runSearch("all")}>
-              {loading && searchMode === "all" ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
-              All Sources
-            </Button>
-            <Button variant={searchMode === "linkedin" ? "default" : "outline"} disabled={loading} onClick={() => runSearch("linkedin")}>
-              {loading && searchMode === "linkedin" ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={selectedSources.linkedin}
+                onCheckedChange={(v) => setSelectedSources((s) => ({ ...s, linkedin: Boolean(v) }))}
+              />
               LinkedIn
-            </Button>
-            <Button variant={searchMode === "career" ? "default" : "outline"} disabled={loading} onClick={() => runSearch("career")}>
-              {loading && searchMode === "career" ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={selectedSources.career}
+                onCheckedChange={(v) => setSelectedSources((s) => ({ ...s, career: Boolean(v) }))}
+              />
               Career Sites
+            </label>
+            <Button
+              variant="default"
+              disabled={loading}
+              onClick={runSelectedSearch}
+            >
+              {loading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
+              Search Selected Sources
             </Button>
             <Button variant="ghost" size="sm" onClick={clearFilters}>
               <X className="h-4 w-4 mr-1" />
