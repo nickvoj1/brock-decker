@@ -148,6 +148,7 @@ export function CVUploadZone({
       const branding = { watermarkImageUrl, headerImageUrl, headerText };
       if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
         await downloadBrandedSourcePdf(originalFile, outName, branding, {
+          name: source.name || "",
           email: source.email || "",
           phone: source.phone || "",
         });

@@ -40,6 +40,7 @@ export type CVBranding = {
 };
 
 export type CVPersonalHints = {
+  name?: string | null;
   email?: string | null;
   phone?: string | null;
 };
@@ -272,6 +273,126 @@ function dedupeRects(rects: Rect[], tolerance = 2): Rect[] {
   return out;
 }
 
+function intersects(a: Rect, b: Rect): boolean {
+  return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+}
+
+function findNameProtectionRects(
+  page: any,
+  pageWidth: number,
+  pageHeight: number,
+  hints?: CVPersonalHints,
+): Rect[] {
+  const out: Rect[] = [];
+
+  const nameSeed = safeText(hints?.name);
+  const nameTerms = new Set<string>();
+  const addNameTerm = (v?: string | null) => {
+    const t = safeText(v);
+    if (t.length >= 4) nameTerms.add(t);
+  };
+
+  addNameTerm(nameSeed);
+  if (nameSeed) {
+    addNameTerm(nameSeed.replace(/[(),]/g, " ").replace(/\s+/g, " "));
+    const compactWords = nameSeed
+      .replace(/[(),]/g, " ")
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length >= 2);
+    if (compactWords.length >= 2) {
+      addNameTerm(compactWords.slice(0, 2).join(" "));
+      addNameTerm(compactWords.slice(-2).join(" "));
+    }
+  }
+
+  for (const term of nameTerms) {
+    try {
+      const hits = page.search(term, 12) as number[][][];
+      if (!Array.isArray(hits)) continue;
+      for (const quadSet of hits) {
+        const hitRects = quadsToRects(Array.isArray(quadSet) ? quadSet : [], 4, 3);
+        for (const hr of hitRects) {
+          const r = clampRect(hr, pageWidth, pageHeight);
+          if (!r) continue;
+          if (r.y1 > pageHeight * 0.33) continue;
+          out.push(r);
+        }
+      }
+    } catch {
+      // Ignore search issues.
+    }
+  }
+
+  try {
+    const stJsonRaw = page.toStructuredText().asJSON(1);
+    const st = JSON.parse(stJsonRaw);
+    const blocks = Array.isArray(st?.blocks) ? st.blocks : [];
+    const lines: Array<{ x: number; y: number; w: number; h: number; text: string }> = [];
+    for (const block of blocks) {
+      if (block?.type !== "text") continue;
+      const blockLines = Array.isArray(block?.lines) ? block.lines : [];
+      for (const line of blockLines) {
+        const bb = line?.bbox || {};
+        const text = String(line?.text || "").replace(/\s+/g, " ").trim();
+        const x = Number(bb.x || 0);
+        const y = Number(bb.y || 0);
+        const w = Number(bb.w || 0);
+        const h = Number(bb.h || 0);
+        if (!text || w <= 0 || h <= 0) continue;
+        lines.push({ x, y, w, h, text });
+      }
+    }
+
+    const nameLike = lines
+      .filter((l) => l.y < pageHeight * 0.24 && l.h >= 12 && looksLikeNameLine(l.text, l.x, l.w, pageWidth))
+      .sort((a, b) => b.h - a.h || a.y - b.y)[0];
+
+    if (nameLike) {
+      const r = clampRect(
+        {
+          x0: nameLike.x - 8,
+          y0: nameLike.y - 4,
+          x1: nameLike.x + nameLike.w + 8,
+          y1: nameLike.y + nameLike.h + 4,
+        },
+        pageWidth,
+        pageHeight,
+      );
+      if (r) out.push(r);
+    }
+  } catch {
+    // Ignore structured text parsing issues.
+  }
+
+  return dedupeRects(out, 3);
+}
+
+function protectRectsFromName(
+  rects: Rect[],
+  nameRects: Rect[],
+  pageWidth: number,
+  pageHeight: number,
+): Rect[] {
+  if (nameRects.length === 0) return rects;
+  const nameBottom = Math.max(...nameRects.map((r) => r.y1));
+  const protectedRects: Rect[] = [];
+  for (const r of rects) {
+    const overlapsName = nameRects.some((n) => intersects(r, n));
+    if (!overlapsName) {
+      protectedRects.push(r);
+      continue;
+    }
+    const moved = clampRect(
+      { x0: r.x0, y0: Math.max(r.y0, nameBottom + 3), x1: r.x1, y1: r.y1 },
+      pageWidth,
+      pageHeight,
+    );
+    if (moved) protectedRects.push(moved);
+  }
+  return dedupeRects(protectedRects, 2);
+}
+
 function findStructuredTopContactRects(
   page: any,
   pageWidth: number,
@@ -339,13 +460,21 @@ function findStructuredTopContactRects(
   }
 }
 
-function findHeaderBandFallbackRect(page: any, pageWidth: number, pageHeight: number): Rect | null {
+function findHeaderBandFallbackRect(
+  page: any,
+  pageWidth: number,
+  pageHeight: number,
+  nameFloorY?: number,
+): Rect | null {
+  const centerX0 = Math.max(24, Math.floor(pageWidth * 0.18));
+  const centerX1 = Math.min(pageWidth - 24, Math.ceil(pageWidth * 0.82));
+  const yFloor = Math.max(84, Math.floor((nameFloorY || 0) + 4));
   const defaultRect = clampRect(
     {
-      x0: 24,
-      y0: 72,
-      x1: pageWidth - 24,
-      y1: Math.min(148, pageHeight * 0.32),
+      x0: centerX0,
+      y0: yFloor,
+      x1: centerX1,
+      y1: Math.min(Math.max(yFloor + 40, 150), pageHeight * 0.34),
     },
     pageWidth,
     pageHeight,
@@ -393,15 +522,16 @@ function findHeaderBandFallbackRect(page: any, pageWidth: number, pageHeight: nu
       .filter((l) => isHeadingLike(l.text) && (!nameLine || l.y > nameLine.y + 16))
       .sort((a, b) => a.y - b.y)[0];
 
-    const y0 = nameLine
+    const y0Base = nameLine
       ? nameLine.y + nameLine.h + 2
       : Math.max(58, topLines[0].y + topLines[0].h + 2);
+    const y0 = Math.max(yFloor, y0Base);
 
     const y1Raw = heading ? heading.y - 3 : y0 + 72;
     const y1 = Math.min(y1Raw, pageHeight * 0.34);
     if (y1 <= y0 + 8) return defaultRect;
 
-    return clampRect({ x0: 24, y0, x1: pageWidth - 24, y1 }, pageWidth, pageHeight) || defaultRect;
+    return clampRect({ x0: centerX0, y0, x1: centerX1, y1 }, pageWidth, pageHeight) || defaultRect;
   } catch {
     return defaultRect;
   }
@@ -558,6 +688,9 @@ async function redactPdfTextLocally(
   // Fallback: detect personal lines from MuPDF structured text (same engine used for deletion).
   rects.push(...findStructuredTopContactRects(page, pageWidth, pageHeight, hints));
 
+  const nameRects = findNameProtectionRects(page, pageWidth, pageHeight, hints);
+  const nameBottom = nameRects.length > 0 ? Math.max(...nameRects.map((r) => r.y1)) : 0;
+
   // Detect likely profile photo images in top-right from structured text image blocks.
   try {
     const stJsonRaw = page.toStructuredText().asJSON(1);
@@ -580,8 +713,9 @@ async function redactPdfTextLocally(
   }
 
   let uniqueRects = dedupeRects(rects).filter((r) => r.y0 < pageHeight * 0.42);
+  uniqueRects = protectRectsFromName(uniqueRects, nameRects, pageWidth, pageHeight);
   if (uniqueRects.length === 0) {
-    const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight);
+    const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight, nameBottom);
     if (fallbackBand) uniqueRects = [fallbackBand];
   }
 
@@ -592,9 +726,10 @@ async function redactPdfTextLocally(
   const totalArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
   const coverage = totalArea / Math.max(1, pageWidth * pageHeight);
   if (coverage > 0.11) {
-    const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight);
+    const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight, nameBottom);
     if (fallbackBand) uniqueRects = [fallbackBand];
   }
+  uniqueRects = protectRectsFromName(uniqueRects, nameRects, pageWidth, pageHeight);
 
   const guardedArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
   const guardedCoverage = guardedArea / Math.max(1, pageWidth * pageHeight);
@@ -649,7 +784,7 @@ export async function downloadCandidatePdf(
 
   if (watermarkData) {
     try {
-      doc.addImage(watermarkData, "PNG", margin, 20, 62, 18, undefined, "FAST");
+      doc.addImage(watermarkData, "PNG", margin, 20, 92, 24, undefined, "FAST");
     } catch {
       // Ignore non-critical image errors.
     }
@@ -827,7 +962,7 @@ export async function downloadBrandedSourcePdf(
 
     if (embeddedWatermark) {
       const natural = embeddedWatermark.scale(1);
-      const fitted = fitInBox(natural.width, natural.height, 62, 18);
+      const fitted = fitInBox(natural.width, natural.height, 92, 24);
       page.drawImage(embeddedWatermark, {
         x: 26,
         y: height - 24 - fitted.height,
