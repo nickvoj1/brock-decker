@@ -10,7 +10,7 @@
  import { useToast } from "@/hooks/use-toast";
  import { supabase } from "@/integrations/supabase/client";
  import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Filter } from "lucide-react";
- import { format, parseISO, isValid } from "date-fns";
+import { format, parseISO, isValid } from "date-fns";
  
  interface Job {
    id: string;
@@ -38,6 +38,28 @@ interface Filters {
 }
 
 type SearchMode = "all" | "linkedin" | "career";
+
+function splitTerms(value: string): string[] {
+  if (!value) return [];
+  return value
+    .split(/\s+OR\s+|,|\|/i)
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function mapTimeRange(postedAfter: string): string {
+  const v = postedAfter.toLowerCase();
+  if (v === "24hours" || v === "24h") return "24h";
+  if (v === "1hour" || v === "1h") return "1h";
+  if (v === "30days" || v === "30d") return "6m";
+  return "7d";
+}
+
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
  
  const DEFAULT_FILTERS: Filters = {
    keyword: "private equity OR internship OR VC OR family office",
@@ -82,56 +104,204 @@ const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
    const [hasMore, setHasMore] = useState(false);
    const [total, setTotal] = useState(0);
    const [searchMode, setSearchMode] = useState<SearchMode>("all");
+   const [useDirectApify, setUseDirectApify] = useState(true);
+   const [apifyToken, setApifyToken] = useState("");
+   const [linkedinActorId, setLinkedinActorId] = useState(LINKEDIN_ACTOR_ID);
+   const [careerActorId, setCareerActorId] = useState(CAREER_ACTOR_ID);
    const PAGE_SIZE = 50;
+
+  useEffect(() => {
+    const savedToken = localStorage.getItem("jobs.apify_token") || "";
+    const savedLinkedin = localStorage.getItem("jobs.apify_actor_linkedin") || LINKEDIN_ACTOR_ID;
+    const savedCareer = localStorage.getItem("jobs.apify_actor_career") || CAREER_ACTOR_ID;
+    const savedMode = localStorage.getItem("jobs.use_direct_apify");
+    setApifyToken(savedToken);
+    setLinkedinActorId(savedLinkedin);
+    setCareerActorId(savedCareer);
+    if (savedMode !== null) setUseDirectApify(savedMode === "true");
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("jobs.apify_token", apifyToken);
+  }, [apifyToken]);
+
+  useEffect(() => {
+    localStorage.setItem("jobs.apify_actor_linkedin", linkedinActorId);
+  }, [linkedinActorId]);
+
+  useEffect(() => {
+    localStorage.setItem("jobs.apify_actor_career", careerActorId);
+  }, [careerActorId]);
+
+  useEffect(() => {
+    localStorage.setItem("jobs.use_direct_apify", String(useDirectApify));
+  }, [useDirectApify]);
+
+  const fetchJobsDirect = useCallback(async (mode: SearchMode): Promise<Job[]> => {
+    if (!apifyToken) {
+      throw new Error("Apify token is required for direct mode.");
+    }
+
+    const titleSearch = splitTerms(filters.keyword);
+    const locationSearch = splitTerms(filters.location);
+    const timeRange = mapTimeRange(filters.postedAfter);
+    const limit = PAGE_SIZE;
+
+    const actorIds =
+      mode === "linkedin"
+        ? [linkedinActorId]
+        : mode === "career"
+          ? [careerActorId]
+          : [linkedinActorId, careerActorId];
+
+    const normalized: Job[] = [];
+
+    for (const actorId of actorIds) {
+      const isLinkedin = actorId === linkedinActorId;
+      const input: Record<string, unknown> = {
+        timeRange,
+        limit,
+        includeAi: true,
+        descriptionType: "text",
+        removeAgency: true,
+        populateAiRemoteLocation: true,
+        populateAiRemoteLocationDerived: true,
+      };
+
+      if (titleSearch.length > 0) input.titleSearch = titleSearch;
+      if (locationSearch.length > 0) input.locationSearch = locationSearch;
+      if (filters.salaryMin) input.aiHasSalary = true;
+      if (isLinkedin && filters.remote) input.remote = true;
+      if (!isLinkedin) {
+        input.includeLinkedIn = true;
+        if (filters.remote) input["remote only (legacy)"] = true;
+      }
+
+      const endpoint =
+        `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
+        `/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}&format=json&clean=true&maxItems=${limit}`;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) continue;
+
+      const data = await res.json();
+      const items: Record<string, unknown>[] = Array.isArray(data) ? data : [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const location =
+          Array.isArray(item.locations_derived) && item.locations_derived.length > 0
+            ? item.locations_derived
+                .map((v: unknown) => {
+                  if (typeof v === "string") return v;
+                  if (typeof v === "object" && v) {
+                    const x = v as Record<string, string>;
+                    return [x.city, x.admin, x.country].filter(Boolean).join(", ");
+                  }
+                  return "";
+                })
+                .filter(Boolean)
+                .join(" | ")
+            : String(item.location || "");
+
+        const salaryMin = toNumber(item.ai_salary_minvalue) ?? toNumber(item.salary_min);
+        const salaryMax = toNumber(item.ai_salary_maxvalue) ?? toNumber(item.salary_max);
+        const currency = String(item.ai_salary_currency || item.currency || "USD");
+        const salary =
+          salaryMin && salaryMax
+            ? `${currency} ${salaryMin.toLocaleString()} - ${salaryMax.toLocaleString()}`
+            : salaryMin
+              ? `${currency} ${salaryMin.toLocaleString()}+`
+              : null;
+
+        normalized.push({
+          id: String(item.id || `${actorId}-${i}`),
+          title: String(item.title || item.job_title || "Untitled Position"),
+          company: String(item.organization || item.company || item.company_name || "Unknown Company"),
+          location: location || "Remote",
+          salary,
+          salary_min: salaryMin,
+          salary_max: salaryMax,
+          currency,
+          posted_at: String(item.date_posted || item.posted_at || new Date().toISOString()),
+          apply_url: (item.url as string) || (item.apply_url as string) || null,
+          description: String(item.description_text || item.description || ""),
+          remote:
+            item.location_type === "TELECOMMUTE" ||
+            item.remote_derived === true ||
+            item.remote === true ||
+            item.is_remote === true,
+          job_type:
+            Array.isArray(item.employment_type) && item.employment_type.length > 0
+              ? String(item.employment_type[0])
+              : String(item.job_type || "Full-time"),
+          source: String(item.source || item.provider || "fantastic.jobs"),
+        });
+      }
+    }
+
+    return normalized;
+  }, [apifyToken, filters, linkedinActorId, careerActorId]);
 
   const fetchJobs = useCallback(async (append = false, mode: SearchMode = searchMode) => {
      setLoading(true);
      try {
-       const params: Record<string, string> = {};
-       
-       if (filters.keyword) params.keyword = filters.keyword;
-       if (filters.location) params.location = filters.location;
-       if (filters.salaryMin) params.salary_min = filters.salaryMin;
-       if (filters.remote) params.remote = "true";
-       if (filters.postedAfter) params.posted_after = filters.postedAfter;
-       if (mode === "linkedin") params.actor_id = LINKEDIN_ACTOR_ID;
-       if (mode === "career") params.actor_id = CAREER_ACTOR_ID;
-       params.limit = String(PAGE_SIZE);
-       params.offset = String(append ? offset : 0);
+       let incoming: Job[] = [];
+       let totalCount = 0;
+       let hasMoreRows = false;
 
-       const { data, error } = await supabase.functions.invoke("fantastic-jobs", {
-         body: params,
-       });
- 
-       if (error) throw error;
+       if (!useDirectApify) {
+         const params: Record<string, string> = {};
+         if (filters.keyword) params.keyword = filters.keyword;
+         if (filters.location) params.location = filters.location;
+         if (filters.salaryMin) params.salary_min = filters.salaryMin;
+         if (filters.remote) params.remote = "true";
+         if (filters.postedAfter) params.posted_after = filters.postedAfter;
+         if (mode === "linkedin") params.actor_id = LINKEDIN_ACTOR_ID;
+         if (mode === "career") params.actor_id = CAREER_ACTOR_ID;
+         params.limit = String(PAGE_SIZE);
+         params.offset = String(append ? offset : 0);
 
-       if (data?.success && data?.jobs) {
-         const incoming = Array.isArray(data.jobs) ? data.jobs : [];
-         const merged = append ? [...jobs, ...incoming] : incoming;
-         const deduped = Array.from(
-           new Map(
-             merged.map((job: Job) => [
-               `${(job.apply_url || "").toLowerCase()}|${job.title.toLowerCase()}|${job.company.toLowerCase()}`,
-               job,
-             ]),
-           ).values(),
-         );
-
-         setJobs(deduped);
-         const nextOffset = append ? offset + PAGE_SIZE : PAGE_SIZE;
-         setOffset(nextOffset);
-         setTotal(Number(data.total || deduped.length));
-         setHasMore(incoming.length >= PAGE_SIZE);
-         setLastRefresh(new Date());
-         toast({
-           title: "Jobs refreshed",
-           description: append
-             ? `Loaded ${incoming.length} more jobs (${mode})`
-             : `Found ${deduped.length} jobs (${mode})`,
-         });
-       } else {
-         throw new Error(data?.error || "Failed to fetch jobs");
+         const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
+         if (!error && data?.success && Array.isArray(data.jobs) && data.jobs.length > 0) {
+           incoming = data.jobs as Job[];
+           totalCount = Number(data.total || incoming.length);
+           hasMoreRows = incoming.length >= PAGE_SIZE;
+         }
        }
+
+       if (incoming.length === 0) {
+         incoming = await fetchJobsDirect(mode);
+         totalCount = incoming.length;
+         hasMoreRows = false;
+       }
+
+       const merged = append ? [...jobs, ...incoming] : incoming;
+       const deduped = Array.from(
+         new Map(
+           merged.map((job: Job) => [
+             `${(job.apply_url || "").toLowerCase()}|${job.title.toLowerCase()}|${job.company.toLowerCase()}`,
+             job,
+           ]),
+         ).values(),
+       );
+
+       setJobs(deduped);
+       const nextOffset = append ? offset + PAGE_SIZE : PAGE_SIZE;
+       setOffset(nextOffset);
+       setTotal(totalCount || deduped.length);
+       setHasMore(hasMoreRows);
+       setLastRefresh(new Date());
+       toast({
+         title: "Jobs refreshed",
+         description: append
+           ? `Loaded ${incoming.length} more jobs (${mode})`
+           : `Found ${deduped.length} jobs (${mode})`,
+       });
      } catch (error) {
        console.error("Error fetching jobs:", error);
        toast({
@@ -142,7 +312,7 @@ const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
      } finally {
        setLoading(false);
      }
-   }, [filters, toast, offset, jobs, searchMode]);
+   }, [filters, toast, offset, jobs, searchMode, useDirectApify, fetchJobsDirect]);
  
    // Auto-refresh every 30 minutes
    useEffect(() => {
@@ -334,6 +504,25 @@ const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
                />
              </div>
            </div>
+
+           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+             <Input
+               type="password"
+               placeholder="Apify token (direct mode)"
+               value={apifyToken}
+               onChange={(e) => setApifyToken(e.target.value)}
+             />
+             <Input
+               placeholder="LinkedIn actor ID"
+               value={linkedinActorId}
+               onChange={(e) => setLinkedinActorId(e.target.value)}
+             />
+             <Input
+               placeholder="Career actor ID"
+               value={careerActorId}
+               onChange={(e) => setCareerActorId(e.target.value)}
+             />
+           </div>
  
            {/* Filter Row */}
            <div className="flex flex-wrap gap-3 items-center">
@@ -380,6 +569,17 @@ const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
                />
                <label htmlFor="strictPEOnly" className="text-sm cursor-pointer">
                  PE/VC/FO only
+               </label>
+             </div>
+
+             <div className="flex items-center gap-2">
+               <Checkbox
+                 id="directApify"
+                 checked={useDirectApify}
+                 onCheckedChange={(checked) => setUseDirectApify(!!checked)}
+               />
+               <label htmlFor="directApify" className="text-sm cursor-pointer">
+                 Direct Apify mode
                </label>
              </div>
 
