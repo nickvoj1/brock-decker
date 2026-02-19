@@ -8,6 +8,7 @@ import TeamDashboard from "./pages/TeamDashboard";
 import UploadRun from "./pages/UploadRun";
 import RunsHistory from "./pages/RunsHistory";
 import PreviousCVs from "./pages/PreviousCVs";
+import CVEditor from "./pages/CVEditor";
 import GenerateMail from "./pages/GenerateMail";
 import SettingsPage from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
@@ -29,6 +30,7 @@ const App = () => (
           <Route path="/team-dashboard" element={<TeamDashboard />} />
           <Route path="/signals" element={<SignalsDashboard />} />
           <Route path="/previous-cvs" element={<PreviousCVs />} />
+          <Route path="/cvs/editor" element={<CVEditor />} />
           <Route path="/generate-mail" element={<GenerateMail />} />
           <Route path="/history" element={<RunsHistory />} />
           <Route path="/settings" element={<SettingsPage />} />

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { User, Clock, Trash2, Search, Play } from "lucide-react";
+import { User, Clock, Trash2, Search, Play, Download } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -17,10 +18,29 @@ interface SavedProfile {
   current_title: string | null;
   location: string | null;
   email: string | null;
+  phone?: string | null;
+  summary?: string | null;
   skills: string[];
   work_history: { company: string; title: string; duration?: string }[];
+  education?: { institution: string; degree: string; year?: string }[];
   created_at: string;
 }
+
+const CV_BRANDING_STORAGE_KEY = "cv-branding-assets.v1";
+
+type CVBrandingAssets = {
+  headerImageUrl: string | null;
+  watermarkImageUrl: string | null;
+  headerFileName: string | null;
+  watermarkFileName: string | null;
+};
+
+const DEFAULT_CV_BRANDING: CVBrandingAssets = {
+  headerImageUrl: null,
+  watermarkImageUrl: null,
+  headerFileName: null,
+  watermarkFileName: null,
+};
 
 export default function PreviousCVs() {
   const navigate = useNavigate();
@@ -29,6 +49,29 @@ export default function PreviousCVs() {
   const [profiles, setProfiles] = useState<SavedProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [cvBranding, setCvBranding] = useState<CVBrandingAssets>(() => {
+    try {
+      const raw = localStorage.getItem(CV_BRANDING_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || typeof parsed !== "object") return DEFAULT_CV_BRANDING;
+      return {
+        headerImageUrl: typeof parsed.headerImageUrl === "string" ? parsed.headerImageUrl : null,
+        watermarkImageUrl: typeof parsed.watermarkImageUrl === "string" ? parsed.watermarkImageUrl : null,
+        headerFileName: typeof parsed.headerFileName === "string" ? parsed.headerFileName : null,
+        watermarkFileName: typeof parsed.watermarkFileName === "string" ? parsed.watermarkFileName : null,
+      };
+    } catch {
+      return DEFAULT_CV_BRANDING;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CV_BRANDING_STORAGE_KEY, JSON.stringify(cvBranding));
+    } catch (error) {
+      console.error("Failed to persist CV branding assets:", error);
+    }
+  }, [cvBranding]);
 
   const fetchProfiles = async () => {
     if (!profileName) {
@@ -51,8 +94,11 @@ export default function PreviousCVs() {
         current_title: p.current_title,
         location: p.location,
         email: p.email,
+        phone: p.phone,
+        summary: p.summary,
         skills: (p.skills as string[]) || [],
         work_history: (p.work_history as { company: string; title: string; duration?: string }[]) || [],
+        education: (p.education as { institution: string; degree: string; year?: string }[]) || [],
         created_at: p.created_at,
       }));
 
@@ -110,6 +156,150 @@ export default function PreviousCVs() {
     navigate("/");
   };
 
+  const readImageAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Failed to read image"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleBrandingUpload = async (type: "header" | "watermark", file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file type",
+        description: "Please upload an image file for CV branding.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const dataUrl = await readImageAsDataUrl(file);
+      setCvBranding((prev) =>
+        type === "header"
+          ? { ...prev, headerImageUrl: dataUrl, headerFileName: file.name }
+          : { ...prev, watermarkImageUrl: dataUrl, watermarkFileName: file.name },
+      );
+      toast({
+        title: type === "header" ? "Header uploaded" : "Watermark uploaded",
+        description: "Saved in CVs tab. It will appear in CV preview.",
+      });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Unable to read image file",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clearBrandingAsset = (type: "header" | "watermark") => {
+    setCvBranding((prev) =>
+      type === "header"
+        ? { ...prev, headerImageUrl: null, headerFileName: null }
+        : { ...prev, watermarkImageUrl: null, watermarkFileName: null },
+    );
+  };
+
+  const downloadProfileCV = (profile: SavedProfile) => {
+    const lines: string[] = [];
+    lines.push(profile.name || "Unknown Name");
+    lines.push(profile.current_title || "");
+    lines.push(profile.location || "");
+    lines.push("");
+    if (profile.summary) {
+      lines.push("Summary");
+      lines.push(profile.summary);
+      lines.push("");
+    }
+    if (profile.email || profile.phone) {
+      lines.push("Contact");
+      if (profile.email) lines.push(`Email: ${profile.email}`);
+      if (profile.phone) lines.push(`Phone: ${profile.phone}`);
+      lines.push("");
+    }
+    if (profile.skills.length > 0) {
+      lines.push("Skills");
+      lines.push(profile.skills.join(", "));
+      lines.push("");
+    }
+    if (profile.work_history.length > 0) {
+      lines.push("Experience");
+      for (const job of profile.work_history) {
+        const duration = job.duration ? ` (${job.duration})` : "";
+        lines.push(`- ${job.title} at ${job.company}${duration}`);
+      }
+      lines.push("");
+    }
+    if (profile.education && profile.education.length > 0) {
+      lines.push("Education");
+      for (const edu of profile.education) {
+        const year = edu.year ? ` (${edu.year})` : "";
+        lines.push(`- ${edu.degree}, ${edu.institution}${year}`);
+      }
+      lines.push("");
+    }
+    const content = lines.join("\n").trim();
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(profile.name || "candidate").replace(/\s+/g, "-").toLowerCase()}-cv.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const renderCVBrandingCard = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle>CV Branding</CardTitle>
+        <CardDescription>Upload assets once here. Watermark is top-left, header is top-right in CV preview.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <Button onClick={() => navigate("/cvs/editor")} className="w-full sm:w-auto">
+            Upload CV & Edit
+          </Button>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cvs-watermark-upload">Watermark (Top Left)</Label>
+          <Input
+            id="cvs-watermark-upload"
+            type="file"
+            accept="image/*"
+            onChange={(e) => handleBrandingUpload("watermark", e.target.files?.[0] || null)}
+          />
+          {cvBranding.watermarkFileName ? (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="truncate pr-2">{cvBranding.watermarkFileName}</span>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => clearBrandingAsset("watermark")}>
+                Remove
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="cvs-header-upload">Header (Top Right)</Label>
+          <Input
+            id="cvs-header-upload"
+            type="file"
+            accept="image/*"
+            onChange={(e) => handleBrandingUpload("header", e.target.files?.[0] || null)}
+          />
+          {cvBranding.headerFileName ? (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="truncate pr-2">{cvBranding.headerFileName}</span>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => clearBrandingAsset("header")}>
+                Remove
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   const filteredProfiles = profiles.filter((p) => {
     const query = searchQuery.toLowerCase();
     return (
@@ -131,10 +321,11 @@ export default function PreviousCVs() {
 
   return (
     <AppLayout
-      title="Previous CVs"
+      title="CVs"
       description="View and manage saved candidate profiles"
     >
       <div className="max-w-4xl space-y-6">
+        {renderCVBrandingCard()}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -210,6 +401,15 @@ export default function PreviousCVs() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => downloadProfileCV(profile)}
+                        className="gap-1"
+                      >
+                        <Download className="h-3 w-3" />
+                        Download
+                      </Button>
                       <Button
                         variant="default"
                         size="sm"

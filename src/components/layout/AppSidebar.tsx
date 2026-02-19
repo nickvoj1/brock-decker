@@ -21,7 +21,7 @@ const navItems = [
   { title: "Team Dashboard", url: "/team-dashboard", icon: UsersRound },
   { title: "Signals", url: "/signals", icon: Sparkles },
   { title: "Upload & Run", url: "/", icon: Upload },
-  { title: "Previous CVs", url: "/previous-cvs", icon: Users },
+  { title: "CVs", url: "/previous-cvs", icon: Users },
   { title: "Generate Mail", url: "/generate-mail", icon: Mail },
   { title: "Runs History", url: "/history", icon: History },
 ];
