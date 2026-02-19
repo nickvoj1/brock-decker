@@ -141,12 +141,24 @@ function extractAmountFromText(text: string): { amount: number; currency: string
 
   // Example matches:
   // "$1.2bn", "€850 million", "US$ 3.4 billion", "1,250m USD"
-  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
+  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
 
   let best: { amount: number; currency: string | null } | null = null;
   let match: RegExpExecArray | null;
   while ((match = re.exec(source)) !== null) {
-    const rawValue = String(match[2] || "").replace(/,/g, "");
+    let rawValue = String(match[2] || "").trim().replace(/\s+/g, "");
+    // Handle both "2,5" and "2.5", and keep thousands separators sane.
+    if (rawValue.includes(",") && !rawValue.includes(".")) {
+      const parts = rawValue.split(",");
+      if (parts.length === 2 && parts[1].length <= 2) {
+        rawValue = `${parts[0]}.${parts[1]}`; // decimal comma
+      } else {
+        rawValue = rawValue.replace(/,/g, ""); // thousands separators
+      }
+    } else {
+      rawValue = rawValue.replace(/,/g, "");
+    }
+
     const value = Number(rawValue);
     if (!Number.isFinite(value) || value <= 0) continue;
 
@@ -1380,12 +1392,10 @@ Deno.serve(async (req) => {
       // This repairs older rows without requiring a manual migration.
       const amountBackfills: Array<{ id: string; amount: number; currency: string }> = [];
       const signalsWithAmount = (signalsRaw || []).map((row: any) => {
-        const signalType = String(row?.signal_type || "").toLowerCase();
-        const isAmountRelevantType = ["funding", "expansion", "c_suite", "team_growth", "hiring"].includes(signalType);
         const missingAmount = row?.amount === null || row?.amount === undefined;
         const missingCurrency = !row?.currency;
 
-        if (!isAmountRelevantType || (!missingAmount && !missingCurrency)) return row;
+        if (!missingAmount && !missingCurrency) return row;
 
         const parsed = extractAmountFromText(`${row?.title || ""} ${row?.description || ""}`);
         if (!parsed) return row;
