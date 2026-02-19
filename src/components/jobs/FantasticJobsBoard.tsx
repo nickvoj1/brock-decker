@@ -185,7 +185,9 @@ const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
       })
     : jobs;
 
-  const sortedJobs = [...scopedJobs].sort((a, b) => {
+  const visibleJobs = strictPEOnly && scopedJobs.length === 0 && jobs.length > 0 ? jobs : scopedJobs;
+
+  const sortedJobs = [...visibleJobs].sort((a, b) => {
      if (sortBy === "posted") {
        const dateA = new Date(a.posted_at).getTime();
        const dateB = new Date(b.posted_at).getTime();
@@ -461,6 +463,11 @@ const CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
            {total > 0 && (
              <p className="text-xs text-muted-foreground">
                Loaded {jobs.length} of {total} available jobs
+             </p>
+           )}
+           {strictPEOnly && scopedJobs.length === 0 && jobs.length > 0 && (
+             <p className="text-xs text-amber-600">
+               No PE-only matches in current batch, showing all fetched jobs.
              </p>
            )}
          </CardHeader>

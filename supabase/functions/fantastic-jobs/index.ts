@@ -53,6 +53,8 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
     const title =
       (job.title as string) ||
       (job.job_title as string) ||
+      (job.positionName as string) ||
+      (job.role as string) ||
       (job.position as string) ||
       "Untitled Position";
 
@@ -60,6 +62,9 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       (job.organization as string) ||
       (job.company as string) ||
       (job.company_name as string) ||
+      (job.companyName as string) ||
+      (job.hiringOrganization as string) ||
+      (job.employer_name as string) ||
       (job.employer as string) ||
       "Unknown Company";
 
@@ -73,17 +78,24 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       (job.date_posted as string) ||
       (job.posted_at as string) ||
       (job.publication_date as string) ||
+      (job.publishedAt as string) ||
+      (job.postedDate as string) ||
       new Date().toISOString();
 
     const applyUrl =
       (job.url as string) ||
       (job.apply_url as string) ||
       (job.job_url as string) ||
+      (job.jobUrl as string) ||
+      (job.applyUrl as string) ||
+      (job.link as string) ||
       null;
 
     const location =
       locationFromDerived ||
       (job.location as string) ||
+      (job.jobLocation as string) ||
+      (job.locationName as string) ||
       (job.city as string) ||
       (job.country as string) ||
       "Remote";
@@ -139,7 +151,12 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       description,
       remote: isRemote,
       job_type: jobType,
-      source: (job.source as string) || (job.provider as string) || "fantastic.jobs",
+      source:
+        (job.source as string) ||
+        (job.provider as string) ||
+        (job.sourceType as string) ||
+        (job.portal as string) ||
+        "fantastic.jobs",
       ai_skills: (job.ai_key_skills as string[]) || [],
       ai_experience: (job.ai_experience_level as string) || null,
     };
@@ -226,14 +243,83 @@ async function fetchViaApify(
     offset: Number(offset),
   };
 
-  const apiUrl =
-    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
-    `/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}&format=json&clean=true`;
+  const buildRunSyncUrl = (input: Record<string, unknown>) => {
+    const maxItems = Number(input.maxItems || 50);
+    return (
+      `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
+      `/run-sync-get-dataset-items?token=${encodeURIComponent(apifyToken)}&format=json&clean=true&maxItems=${maxItems}`
+    );
+  };
 
   console.log("[fantastic-jobs] Apify actor:", actorId);
-  console.log("[fantastic-jobs] Apify input keys:", Object.keys(actorInput).filter((k) => (actorInput as Record<string, unknown>)[k] !== undefined));
+  console.log(
+    "[fantastic-jobs] Apify input keys:",
+    Object.keys(actorInput).filter((k) => (actorInput as Record<string, unknown>)[k] !== undefined),
+  );
 
-  const res = await fetch(apiUrl, {
+  const payloads: Record<string, unknown>[] = [
+    actorInput,
+    {
+      query: keyword || undefined,
+      location: location || undefined,
+      maxItems: Number(limit),
+      remote,
+    },
+    {
+      keyword: keyword || undefined,
+      location: location || undefined,
+      maxItems: Number(limit),
+    },
+    {
+      keywords: keyword || undefined,
+      location: location || undefined,
+      limit: Number(limit),
+      remote,
+    },
+    { maxItems: Number(limit) },
+  ];
+
+  const parseApifyItems = (data: unknown): Record<string, unknown>[] => {
+    if (Array.isArray(data)) return data as Record<string, unknown>[];
+    if (!data || typeof data !== "object") return [];
+
+    const maybeObj = data as Record<string, unknown>;
+    if (Array.isArray(maybeObj.items)) return maybeObj.items as Record<string, unknown>[];
+    if (Array.isArray(maybeObj.results)) return maybeObj.results as Record<string, unknown>[];
+    if (Array.isArray(maybeObj.data)) return maybeObj.data as Record<string, unknown>[];
+    return [];
+  };
+
+  for (const payload of payloads) {
+    const input = Object.fromEntries(
+      Object.entries(payload).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+    );
+
+    const syncUrl = buildRunSyncUrl(input);
+    const syncRes = await fetch(syncUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    });
+
+    if (syncRes.ok) {
+      const data = await syncRes.json();
+      const items = parseApifyItems(data);
+      if (items.length > 0) return items;
+      continue;
+    }
+
+    const syncErr = await syncRes.text();
+    console.warn(`[fantastic-jobs] Apify run-sync failed for ${actorId}: ${syncRes.status} ${syncErr.slice(0, 180)}`);
+  }
+
+  const asyncRunUrl =
+    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
+    `/runs?token=${encodeURIComponent(apifyToken)}&waitForFinish=120`;
+
+  const asyncRunRes = await fetch(asyncRunUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -241,13 +327,33 @@ async function fetchViaApify(
     body: JSON.stringify(actorInput),
   });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Apify request failed: ${res.status} - ${errText.substring(0, 200)}`);
+  if (!asyncRunRes.ok) {
+    const errText = await asyncRunRes.text();
+    throw new Error(`Apify request failed: ${asyncRunRes.status} - ${errText.substring(0, 220)}`);
   }
 
-  const data = await res.json();
-  return Array.isArray(data) ? (data as Record<string, unknown>[]) : [];
+  const asyncRunData = await asyncRunRes.json();
+  const defaultDatasetId =
+    asyncRunData?.data?.defaultDatasetId ||
+    asyncRunData?.defaultDatasetId ||
+    "";
+
+  if (!defaultDatasetId) {
+    throw new Error("Apify run completed but no default dataset was returned");
+  }
+
+  const datasetUrl =
+    `https://api.apify.com/v2/datasets/${encodeURIComponent(defaultDatasetId)}` +
+    `/items?token=${encodeURIComponent(apifyToken)}&format=json&clean=true&limit=${encodeURIComponent(limit)}`;
+
+  const datasetRes = await fetch(datasetUrl, { method: "GET" });
+  if (!datasetRes.ok) {
+    const errText = await datasetRes.text();
+    throw new Error(`Apify dataset fetch failed: ${datasetRes.status} - ${errText.substring(0, 220)}`);
+  }
+
+  const datasetItems = await datasetRes.json();
+  return parseApifyItems(datasetItems);
 }
 
 async function readApiSettings(): Promise<Record<string, string>> {
