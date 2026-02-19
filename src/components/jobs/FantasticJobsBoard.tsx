@@ -65,6 +65,7 @@ type SearchHistoryItem = {
   createdAt: string;
   mode: SearchMode;
   filters: Filters;
+  strictPEOnly: boolean;
   resultCount: number;
   topResults: string[];
   results: Job[];
@@ -453,6 +454,7 @@ export function FantasticJobsBoard() {
             createdAt: new Date().toISOString(),
             mode,
             filters: { ...filters },
+            strictPEOnly,
             resultCount: capped.length,
             topResults: capped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
             results: historyResults,
@@ -473,7 +475,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [settings, fetchDirect, fetchViaBackend, toast, filters, requestedCount, applyClientFilters],
+    [settings, fetchDirect, fetchViaBackend, toast, filters, requestedCount, applyClientFilters, strictPEOnly],
   );
 
   const runSelectedSearch = () => {
@@ -591,6 +593,7 @@ export function FantasticJobsBoard() {
     setTotal(item.resultCount || restored.length);
     setLastRefresh(new Date(item.createdAt));
     setLoading(false);
+    setStrictPEOnly(typeof item.strictPEOnly === "boolean" ? item.strictPEOnly : false);
     setSelectedSources({
       linkedin: item.mode === "linkedin" || item.mode === "all",
       career: item.mode === "career" || item.mode === "all",
