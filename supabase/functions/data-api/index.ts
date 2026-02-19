@@ -1392,12 +1392,25 @@ Deno.serve(async (req) => {
       // This repairs older rows without requiring a manual migration.
       const amountBackfills: Array<{ id: string; amount: number; currency: string }> = [];
       const signalsWithAmount = (signalsRaw || []).map((row: any) => {
-        const missingAmount = row?.amount === null || row?.amount === undefined;
+        const numericAmount = Number(row?.amount);
+        const missingAmount =
+          row?.amount === null ||
+          row?.amount === undefined ||
+          !Number.isFinite(numericAmount) ||
+          numericAmount <= 0;
         const missingCurrency = !row?.currency;
 
         if (!missingAmount && !missingCurrency) return row;
 
-        const parsed = extractAmountFromText(`${row?.title || ""} ${row?.description || ""}`);
+        const details = row?.details || {};
+        const parsed = extractAmountFromText([
+          row?.title || "",
+          row?.description || "",
+          row?.ai_insight || "",
+          row?.ai_pitch || "",
+          typeof details?.raw_content === "string" ? details.raw_content : "",
+          typeof details?.content === "string" ? details.content : "",
+        ].join(" "));
         if (!parsed) return row;
 
         const nextAmount = missingAmount ? parsed.amount : row.amount;
