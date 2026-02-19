@@ -44,7 +44,25 @@
    remote: false,
    postedAfter: "7days",
  };
- 
+
+ const REGION_PRESETS: Array<{ label: string; value: string }> = [
+   { label: "London", value: "London,UK" },
+   { label: "Europe", value: "Europe,Berlin,Paris,Amsterdam,Frankfurt,Zurich" },
+   { label: "UAE", value: "UAE,Dubai,Abu Dhabi" },
+   { label: "USA", value: "USA,New York,Boston,San Francisco,Chicago,Los Angeles" },
+ ];
+
+ const PE_SIGNAL_TERMS = [
+   "private equity",
+   "venture capital",
+   "family office",
+   "buyout",
+   "fund",
+   "portfolio",
+   "investor",
+   "capital partners",
+ ];
+
  export function FantasticJobsBoard() {
    const { toast } = useToast();
    const [jobs, setJobs] = useState<Job[]>([]);
@@ -54,8 +72,13 @@
    const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
    const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
    const [autoRefresh, setAutoRefresh] = useState(false);
- 
-   const fetchJobs = useCallback(async () => {
+   const [strictPEOnly, setStrictPEOnly] = useState(true);
+   const [offset, setOffset] = useState(0);
+   const [hasMore, setHasMore] = useState(false);
+   const [total, setTotal] = useState(0);
+   const PAGE_SIZE = 50;
+
+  const fetchJobs = useCallback(async (append = false) => {
      setLoading(true);
      try {
        const params: Record<string, string> = {};
@@ -65,19 +88,38 @@
        if (filters.salaryMin) params.salary_min = filters.salaryMin;
        if (filters.remote) params.remote = "true";
        if (filters.postedAfter) params.posted_after = filters.postedAfter;
- 
+       params.limit = String(PAGE_SIZE);
+       params.offset = String(append ? offset : 0);
+
        const { data, error } = await supabase.functions.invoke("fantastic-jobs", {
          body: params,
        });
  
        if (error) throw error;
- 
+
        if (data?.success && data?.jobs) {
-         setJobs(data.jobs);
+         const incoming = Array.isArray(data.jobs) ? data.jobs : [];
+         const merged = append ? [...jobs, ...incoming] : incoming;
+         const deduped = Array.from(
+           new Map(
+             merged.map((job: Job) => [
+               `${(job.apply_url || "").toLowerCase()}|${job.title.toLowerCase()}|${job.company.toLowerCase()}`,
+               job,
+             ]),
+           ).values(),
+         );
+
+         setJobs(deduped);
+         const nextOffset = append ? offset + PAGE_SIZE : PAGE_SIZE;
+         setOffset(nextOffset);
+         setTotal(Number(data.total || deduped.length));
+         setHasMore(incoming.length >= PAGE_SIZE);
          setLastRefresh(new Date());
          toast({
            title: "Jobs refreshed",
-           description: `Found ${data.jobs.length} jobs`,
+           description: append
+             ? `Loaded ${incoming.length} more jobs`
+             : `Found ${deduped.length} jobs`,
          });
        } else {
          throw new Error(data?.error || "Failed to fetch jobs");
@@ -92,16 +134,16 @@
      } finally {
        setLoading(false);
      }
-   }, [filters, toast]);
+   }, [filters, toast, offset, jobs]);
  
    // Auto-refresh every 30 minutes
    useEffect(() => {
      if (!autoRefresh) return;
  
      const interval = setInterval(() => {
-       fetchJobs();
+       fetchJobs(false);
      }, 30 * 60 * 1000); // 30 minutes
- 
+
      return () => clearInterval(interval);
    }, [autoRefresh, fetchJobs]);
  
@@ -115,11 +157,20 @@
      });
    };
  
-   const resetToDefaults = () => {
-     setFilters(DEFAULT_FILTERS);
-   };
- 
-   const sortedJobs = [...jobs].sort((a, b) => {
+  const resetToDefaults = () => {
+    setFilters(DEFAULT_FILTERS);
+    setOffset(0);
+    setHasMore(false);
+  };
+
+  const scopedJobs = strictPEOnly
+    ? jobs.filter((job) => {
+        const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
+        return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
+      })
+    : jobs;
+
+  const sortedJobs = [...scopedJobs].sort((a, b) => {
      if (sortBy === "posted") {
        const dateA = new Date(a.posted_at).getTime();
        const dateB = new Date(b.posted_at).getTime();
@@ -304,6 +355,17 @@
                </label>
              </div>
  
+             <div className="flex items-center gap-2">
+               <Checkbox
+                 id="strictPEOnly"
+                 checked={strictPEOnly}
+                 onCheckedChange={(checked) => setStrictPEOnly(!!checked)}
+               />
+               <label htmlFor="strictPEOnly" className="text-sm cursor-pointer">
+                 PE/VC/FO only
+               </label>
+             </div>
+
              <div className="flex-1" />
  
              <Button variant="ghost" size="sm" onClick={clearFilters}>
@@ -316,10 +378,30 @@
                PE/VC defaults
              </Button>
  
-             <Button onClick={fetchJobs} disabled={loading}>
+             <Button
+               onClick={() => {
+                 setOffset(0);
+                 setHasMore(false);
+                 fetchJobs(false);
+               }}
+               disabled={loading}
+             >
                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
                {loading ? "Searching..." : "Search Jobs"}
              </Button>
+           </div>
+
+           <div className="flex flex-wrap gap-2">
+             {REGION_PRESETS.map((preset) => (
+               <Button
+                 key={preset.label}
+                 variant="outline"
+                 size="sm"
+                 onClick={() => setFilters((prev) => ({ ...prev, location: preset.value }))}
+               >
+                 {preset.label}
+               </Button>
+             ))}
            </div>
          </CardContent>
        </Card>
@@ -329,18 +411,23 @@
          <CardHeader className="pb-3">
            <div className="flex items-center justify-between">
              <CardTitle className="text-lg">
-               {jobs.length > 0 ? `${jobs.length} Jobs Found` : "Job Results"}
+               {sortedJobs.length > 0 ? `${sortedJobs.length} Jobs Found` : "Job Results"}
              </CardTitle>
              <Button
                variant="outline"
                size="sm"
                onClick={exportToCSV}
-               disabled={jobs.length === 0}
+               disabled={sortedJobs.length === 0}
              >
                <Download className="h-4 w-4 mr-2" />
-               Export {Math.min(50, jobs.length)} PE jobs → Bullhorn
+               Export {Math.min(50, sortedJobs.length)} PE jobs → Bullhorn
              </Button>
            </div>
+           {total > 0 && (
+             <p className="text-xs text-muted-foreground">
+               Loaded {jobs.length} of {total} available jobs
+             </p>
+           )}
          </CardHeader>
          <CardContent>
            {loading ? (
@@ -349,7 +436,7 @@
                  <Skeleton key={i} className="h-16 w-full" />
                ))}
              </div>
-           ) : jobs.length === 0 ? (
+           ) : sortedJobs.length === 0 ? (
              <div className="text-center py-12 text-muted-foreground">
                <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
                <p>No jobs found. Click "Search Jobs" to fetch positions.</p>
@@ -390,8 +477,8 @@
                      <TableHead className="w-[80px]">Apply</TableHead>
                    </TableRow>
                  </TableHeader>
-                 <TableBody>
-                   {sortedJobs.map((job) => (
+                <TableBody>
+                  {sortedJobs.map((job) => (
                      <TableRow key={job.id} className="hover:bg-muted/30">
                        <TableCell>
                          <div className="font-medium">{job.title}</div>
@@ -451,9 +538,27 @@
                          )}
                        </TableCell>
                      </TableRow>
-                   ))}
-                 </TableBody>
-               </Table>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="outline"
+                  disabled={loading || !hasMore}
+                  onClick={() => fetchJobs(true)}
+                >
+                  {loading ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Loading...
+                    </>
+                  ) : hasMore ? (
+                    "Load More"
+                  ) : (
+                    "No More Jobs"
+                  )}
+                </Button>
+              </div>
              </div>
            )}
          </CardContent>
