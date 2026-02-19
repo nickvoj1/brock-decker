@@ -19,6 +19,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -71,7 +72,7 @@ import { toast } from "sonner";
 
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
-type SortOption = "newest" | "relevant" | "amount";
+type SortOption = "newest" | "relevant" | "amount" | "fit";
 type TabView = "signals" | "jobs" | "jobboard";
 type ViewMode = "table" | "cards";
 
@@ -93,7 +94,67 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "newest", label: "Newest" },
   { value: "relevant", label: "Most Relevant" },
   { value: "amount", label: "Highest Amount" },
+  { value: "fit", label: "Best Fit" },
 ];
+
+function tokenizeQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/[,\s]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 1);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function buildSignalSearchText(signal: Signal): string {
+  const details = signal.details as Record<string, unknown> | null;
+  const detailStrings = details
+    ? Object.values(details).filter(isString)
+    : [];
+
+  const parts = [
+    signal.title,
+    signal.company,
+    signal.description,
+    signal.signal_type,
+    signal.source,
+    signal.region,
+    signal.ai_insight,
+    signal.ai_pitch,
+    ...(signal.keywords || []),
+    ...detailStrings,
+  ];
+
+  return parts
+    .filter((v): v is string => Boolean(v))
+    .join(" ")
+    .toLowerCase();
+}
+
+function computeFitScore(signal: Signal, includeTerms: string[]): number {
+  if (includeTerms.length === 0) return Math.round(signal.score || 0);
+
+  const titleText = `${signal.title || ""} ${signal.company || ""}`.toLowerCase();
+  const descText = `${signal.description || ""} ${signal.ai_insight || ""} ${signal.ai_pitch || ""}`.toLowerCase();
+  const keywordText = `${(signal.keywords || []).join(" ")} ${signal.signal_type || ""}`.toLowerCase();
+
+  let points = 0;
+  const maxPoints = includeTerms.length * 4;
+
+  for (const term of includeTerms) {
+    if (titleText.includes(term)) points += 2;
+    if (descText.includes(term)) points += 1;
+    if (keywordText.includes(term)) points += 1;
+  }
+
+  const matchRatio = points / maxPoints;
+  const baseSignalScore = Math.min(100, Math.max(0, signal.score || 0));
+  const blendedScore = Math.round(baseSignalScore * 0.4 + matchRatio * 100 * 0.6);
+  return Math.min(100, Math.max(0, blendedScore));
+}
 
 export default function SignalsDashboard() {
   const navigate = useNavigate();
@@ -115,6 +176,9 @@ export default function SignalsDashboard() {
   const [isJobsLoading, setIsJobsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchQuery, setSearchQuery] = useState("");
+  const [excludeQuery, setExcludeQuery] = useState("");
+  const [fitOnly, setFitOnly] = useState(false);
+  const [minFitScore, setMinFitScore] = useState(50);
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -212,6 +276,10 @@ export default function SignalsDashboard() {
         minScore?: number;
         activeTab?: TabView;
         viewMode?: ViewMode;
+        searchQuery?: string;
+        excludeQuery?: string;
+        fitOnly?: boolean;
+        minFitScore?: number;
       };
 
       if (prefs.activeRegion && prefs.activeRegion in REGION_CONFIG) setActiveRegion(prefs.activeRegion);
@@ -220,6 +288,10 @@ export default function SignalsDashboard() {
       if (typeof prefs.minScore === "number" && prefs.minScore >= 0 && prefs.minScore <= 100) setMinScore(prefs.minScore);
       if (prefs.activeTab && ["signals", "jobs", "jobboard"].includes(prefs.activeTab)) setActiveTab(prefs.activeTab);
       if (prefs.viewMode && ["table", "cards"].includes(prefs.viewMode)) setViewMode(prefs.viewMode);
+      if (typeof prefs.searchQuery === "string") setSearchQuery(prefs.searchQuery);
+      if (typeof prefs.excludeQuery === "string") setExcludeQuery(prefs.excludeQuery);
+      if (typeof prefs.fitOnly === "boolean") setFitOnly(prefs.fitOnly);
+      if (typeof prefs.minFitScore === "number" && prefs.minFitScore >= 0 && prefs.minFitScore <= 100) setMinFitScore(prefs.minFitScore);
     } catch (error) {
       console.error("Failed to parse Signals dashboard preferences:", error);
     }
@@ -233,9 +305,13 @@ export default function SignalsDashboard() {
       minScore,
       activeTab,
       viewMode,
+      searchQuery,
+      excludeQuery,
+      fitOnly,
+      minFitScore,
     };
     localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
-  }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode]);
+  }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore]);
 
   const fetchSignals = async () => {
     if (!profileName) return;
@@ -637,24 +713,30 @@ export default function SignalsDashboard() {
 
   const filteredSignals = useMemo(() => {
     let filtered = signals.filter((s) => s.region === activeRegion && !s.is_dismissed);
+    const includeTerms = tokenizeQuery(searchQuery);
+    const excludeTerms = tokenizeQuery(excludeQuery);
+    const fitById = new Map<string, number>();
 
-    const trimmedSearch = searchQuery.trim().toLowerCase();
-    if (trimmedSearch) {
-      filtered = filtered.filter((s) => {
-        const haystack = [
-          s.company,
-          s.headline,
-          s.fund_name,
-          s.key_people,
-          s.type,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
+    filtered = filtered.filter((s) => {
+      const searchText = buildSignalSearchText(s);
 
-        return haystack.includes(trimmedSearch);
-      });
-    }
+      if (excludeTerms.some((term) => searchText.includes(term))) {
+        return false;
+      }
+
+      if (includeTerms.length > 0 && !includeTerms.every((term) => searchText.includes(term))) {
+        return false;
+      }
+
+      const fit = computeFitScore(s, includeTerms);
+      fitById.set(s.id, fit);
+
+      if (fitOnly && fit < minFitScore) {
+        return false;
+      }
+
+      return true;
+    });
     
     if (tierFilter !== "all") {
       filtered = filtered.filter((s) => s.tier === tierFilter);
@@ -674,11 +756,14 @@ export default function SignalsDashboard() {
       if (sortBy === "amount") {
         return (b.amount || 0) - (a.amount || 0);
       }
+      if (sortBy === "fit") {
+        return (fitById.get(b.id) || 0) - (fitById.get(a.id) || 0);
+      }
       return 0;
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery]);
+  }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore]);
 
   // Count pending signals for badge
   const pendingCount = useMemo(() => {
@@ -858,15 +943,46 @@ export default function SignalsDashboard() {
                 </SelectContent>
               </Select>
 
-              <div className="relative w-full sm:w-[260px]">
+              <div className="relative w-full sm:w-[280px]">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
+                <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search company, fund, people..."
-                  className="h-9 w-full rounded-md border bg-card pl-8 pr-3 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  placeholder="Must-match terms (e.g. fintech growth)"
+                  className="h-9 pl-8"
                 />
               </div>
+
+              <Input
+                value={excludeQuery}
+                onChange={(e) => setExcludeQuery(e.target.value)}
+                placeholder="Exclude terms (e.g. nordic, intern)"
+                className="h-9 w-full sm:w-[260px]"
+              />
+
+              <Button
+                variant={fitOnly ? "default" : "outline"}
+                size="sm"
+                className="h-9"
+                onClick={() => setFitOnly((prev) => !prev)}
+              >
+                Best-fit only
+              </Button>
+
+              {fitOnly && (
+                <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    Fit ≥ {minFitScore}
+                  </span>
+                  <Slider
+                    value={[minFitScore]}
+                    onValueChange={(v) => setMinFitScore(v[0])}
+                    max={100}
+                    step={5}
+                    className="w-24"
+                  />
+                </div>
+              )}
 
               <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">
