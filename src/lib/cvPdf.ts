@@ -43,6 +43,8 @@ export type CVPersonalHints = {
   name?: string | null;
   email?: string | null;
   phone?: string | null;
+  anonymizeName?: boolean;
+  replacementName?: string | null;
 };
 
 GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
@@ -649,6 +651,7 @@ async function redactPdfTextLocally(
   const bounds = page.getBounds();
   const pageWidth = Number(bounds?.[2] || 0);
   const pageHeight = Number(bounds?.[3] || 0);
+  const anonymizeName = Boolean(hints?.anonymizeName);
   if (!pageWidth || !pageHeight) {
     throw new Error("Invalid PDF page bounds.");
   }
@@ -690,6 +693,9 @@ async function redactPdfTextLocally(
 
   const nameRects = findNameProtectionRects(page, pageWidth, pageHeight, hints);
   const nameBottom = nameRects.length > 0 ? Math.max(...nameRects.map((r) => r.y1)) : 0;
+  if (anonymizeName) {
+    rects.push(...nameRects);
+  }
 
   // Detect likely profile photo images in top-right from structured text image blocks.
   try {
@@ -713,7 +719,9 @@ async function redactPdfTextLocally(
   }
 
   let uniqueRects = dedupeRects(rects).filter((r) => r.y0 < pageHeight * 0.42);
-  uniqueRects = protectRectsFromName(uniqueRects, nameRects, pageWidth, pageHeight);
+  if (!anonymizeName) {
+    uniqueRects = protectRectsFromName(uniqueRects, nameRects, pageWidth, pageHeight);
+  }
   if (uniqueRects.length === 0) {
     const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight, nameBottom);
     if (fallbackBand) uniqueRects = [fallbackBand];
@@ -729,7 +737,9 @@ async function redactPdfTextLocally(
     const fallbackBand = findHeaderBandFallbackRect(page, pageWidth, pageHeight, nameBottom);
     if (fallbackBand) uniqueRects = [fallbackBand];
   }
-  uniqueRects = protectRectsFromName(uniqueRects, nameRects, pageWidth, pageHeight);
+  if (!anonymizeName) {
+    uniqueRects = protectRectsFromName(uniqueRects, nameRects, pageWidth, pageHeight);
+  }
 
   const guardedArea = uniqueRects.reduce((sum, r) => sum + rectArea(r), 0);
   const guardedCoverage = guardedArea / Math.max(1, pageWidth * pageHeight);
@@ -955,9 +965,11 @@ export async function downloadBrandedSourcePdf(
   }
 
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const pages = pdfDoc.getPages();
 
-  for (const page of pages) {
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+    const page = pages[pageIndex];
     const { width, height } = page.getSize();
 
     if (embeddedWatermark) {
@@ -995,6 +1007,19 @@ export async function downloadBrandedSourcePdf(
         });
         y -= 10;
       }
+    }
+
+    if (hints?.anonymizeName && pageIndex === 0) {
+      const replacement = safeText(hints?.replacementName) || "CANDIDATE";
+      const size = 30;
+      const textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
+      page.drawText(replacement, {
+        x: Math.max(26, (width - textWidth) / 2),
+        y: height - 82,
+        size,
+        font: helveticaBold,
+        color: rgb(0.09, 0.09, 0.09),
+      });
     }
   }
 

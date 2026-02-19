@@ -76,10 +76,18 @@ export function CVUploadZone({
   const [showEditor, setShowEditor] = useState(false);
   const [expandedWorkHistory, setExpandedWorkHistory] = useState(false);
   const [editorDraft, setEditorDraft] = useState<ParsedCandidate | null>(null);
+  const [nameMode, setNameMode] = useState<"real" | "anonymous">("real");
 
   useEffect(() => {
     setEditorDraft(parsedData);
+    setNameMode("real");
   }, [parsedData]);
+
+  const withSelectedName = (candidate: ParsedCandidate | null): ParsedCandidate | null => {
+    if (!candidate) return null;
+    if (nameMode === "anonymous") return { ...candidate, name: "CANDIDATE" };
+    return candidate;
+  };
 
   const isValidFile = (file: File): boolean => {
     const hasValidType = ACCEPTED_TYPES.includes(file.type);
@@ -142,15 +150,19 @@ export function CVUploadZone({
 
   const downloadEditedCandidate = async () => {
     try {
-      const source = editorDraft || parsedData;
+      const sourceBase = editorDraft || parsedData;
+      if (!sourceBase) return;
+      const source = withSelectedName(sourceBase);
       if (!source) return;
-      const outName = `${(source.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
+      const outName = `${(sourceBase.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
       const branding = { watermarkImageUrl, headerImageUrl, headerText };
       if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
         await downloadBrandedSourcePdf(originalFile, outName, branding, {
-          name: source.name || "",
-          email: source.email || "",
-          phone: source.phone || "",
+          name: sourceBase.name || "",
+          email: sourceBase.email || "",
+          phone: sourceBase.phone || "",
+          anonymizeName: nameMode === "anonymous",
+          replacementName: "CANDIDATE",
         });
         return;
       }
@@ -294,7 +306,7 @@ export function CVUploadZone({
                     onClick={() => setShowEditor(true)}
                     className="w-full"
                   >
-                    Edit Parsed CV
+                    Edit CV
                   </Button>
                 </div>
               </div>
@@ -325,7 +337,7 @@ export function CVUploadZone({
       <CVPreviewModal
         isOpen={showPreview}
         onClose={() => setShowPreview(false)}
-        candidate={parsedData}
+        candidate={withSelectedName(parsedData)}
         headerImageUrl={headerImageUrl}
         watermarkImageUrl={watermarkImageUrl}
         headerText={headerText}
@@ -334,18 +346,38 @@ export function CVUploadZone({
       <Dialog open={showEditor} onOpenChange={setShowEditor}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Edit Parsed CV</DialogTitle>
+            <DialogTitle>Edit CV</DialogTitle>
           </DialogHeader>
           {!editorDraft ? (
             <p className="text-sm text-muted-foreground">No parsed CV data to edit yet.</p>
           ) : (
             <div className="grid gap-4">
+              <div className="space-y-2">
+                <Label>Name Mode</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    type="button"
+                    variant={nameMode === "real" ? "default" : "outline"}
+                    onClick={() => setNameMode("real")}
+                  >
+                    Use Real Name
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={nameMode === "anonymous" ? "default" : "outline"}
+                    onClick={() => setNameMode("anonymous")}
+                  >
+                    Use CANDIDATE
+                  </Button>
+                </div>
+              </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label htmlFor="cv-edit-name">Full Name</Label>
                   <Input
                     id="cv-edit-name"
-                    value={editorDraft.name || ""}
+                    value={nameMode === "anonymous" ? "CANDIDATE" : editorDraft.name || ""}
+                    disabled={nameMode === "anonymous"}
                     onChange={(e) => setEditorDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
                   />
                 </div>
