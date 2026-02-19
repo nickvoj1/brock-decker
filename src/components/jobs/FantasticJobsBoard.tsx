@@ -630,6 +630,7 @@ export function FantasticJobsBoard() {
           country,
           departments,
           maxContacts,
+          emailOnly: true,
           profileName: effectiveProfile,
           requestName: `JobBoard: ${company} - ${job.title}`,
         },
@@ -639,12 +640,13 @@ export function FantasticJobsBoard() {
       if (!data?.success) throw new Error(data?.error || "Apollo job contact search failed");
 
       const contacts = Array.isArray(data.contacts) ? (data.contacts as ApolloJobContact[]) : [];
+      const emailContacts = contacts.filter((c) => (c.email || "").trim().length > 0);
       setApolloTargetJob(job);
-      setApolloContacts(contacts);
+      setApolloContacts(emailContacts);
       setApolloModalOpen(true);
       toast({
         title: "Apollo search complete",
-        description: `Found ${contacts.length} contacts for ${company}.`,
+        description: `Found ${emailContacts.length} contacts with email for ${company}.`,
       });
     } catch (err) {
       toast({
@@ -948,7 +950,7 @@ export function FantasticJobsBoard() {
                             ) : (
                               <Users className="h-3 w-3 mr-1" />
                             )}
-                            Apollo AI
+                            {apolloLoadingByJob[job.id] ? "Enriching..." : "Apollo AI"}
                           </Button>
                         </div>
                       </TableCell>

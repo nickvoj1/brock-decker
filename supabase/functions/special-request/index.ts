@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { company, country, departments, maxContacts = 50, profileName, requestName } = await req.json()
+    const { company, country, departments, maxContacts = 50, emailOnly = false, profileName, requestName } = await req.json()
 
     if (!company || !country || !departments || departments.length === 0) {
       return new Response(JSON.stringify({ error: 'Company, country, and at least one department are required' }), {
@@ -170,7 +170,8 @@ Deno.serve(async (req) => {
 
     // Step 2: Enrich using people/match (1 credit each), concurrent batches
     const enrichLimit = Math.max(0, maxContacts - withEmail.length)
-    const toEnrich = needEmail.slice(0, Math.min(enrichLimit, 15))
+    const enrichCap = emailOnly ? Math.min(maxContacts, 40) : 15
+    const toEnrich = needEmail.slice(0, Math.min(enrichLimit, enrichCap))
 
     if (toEnrich.length > 0) {
       console.log(`Enriching ${toEnrich.length} people via people/match...`)
@@ -215,8 +216,8 @@ Deno.serve(async (req) => {
 
     console.log(`After enrichment: ${withEmail.length} contacts with email`)
 
-    // Return all contacts - prioritize those with emails, then without
-    const allContacts = [...withEmail, ...needEmail.filter(c => !c.email)]
+    // For job-board Apollo flow, emailOnly ensures returned contacts are actionable.
+    const allContacts = emailOnly ? withEmail : [...withEmail, ...needEmail.filter(c => !c.email)]
     const finalContacts = allContacts.slice(0, maxContacts).map(c => ({
       name: c.name,
       title: c.title,
@@ -263,7 +264,9 @@ Deno.serve(async (req) => {
         type: 'special_request',
       }],
       enriched_data: finalContacts,
-      error_message: finalContacts.length === 0 ? 'No contacts found matching criteria' : null,
+      error_message: finalContacts.length === 0
+        ? (emailOnly ? 'No contacts with email found matching criteria' : 'No contacts found matching criteria')
+        : null,
     }
 
     const { data: run, error: runError } = await supabase
