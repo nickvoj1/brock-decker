@@ -83,6 +83,35 @@ function extractKeyPeople(signal: Signal): string {
   return "—";
 }
 
+function inferCompanyFromTitle(title: string): string | null {
+  const cleaned = title
+    .replace(/^(breaking|exclusive|update|report|news|watch):\s*/i, "")
+    .trim();
+
+  const patterns = [
+    /^([A-Z][A-Za-z0-9&'().,\-\s]{1,60}?)\s+(?:raises|raised|closes|closed|acquires|acquired|announces|announced|appoints|appointed|hires|hired|merges|merged|sells|sold|backs|backed|secures|secured|launches|launched)\b/i,
+    /^([A-Z][A-Za-z0-9&'().,\-\s]{1,60}?)\s+(?:to|has|is)\b/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern);
+    if (match?.[1]) {
+      const candidate = match[1].trim().replace(/\s+/g, " ");
+      if (candidate.length >= 2 && candidate.length <= 60) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveFirmName(signal: Signal): string {
+  const company = (signal.company || "").trim();
+  if (company && company.toLowerCase() !== "unknown") return company;
+  return inferCompanyFromTitle(signal.title) || "Unknown";
+}
+
 function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoading, onSignalUpdated }: {
   signal: Signal;
   onDismiss: (id: string) => void;
@@ -99,6 +128,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   const typeLabel = TYPE_LABELS[signal.signal_type || ""] || signal.signal_type || "Signal";
   const hasInsight = Boolean(signal.ai_insight || signal.ai_pitch);
   const keyPeople = extractKeyPeople(signal);
+  const firmName = resolveFirmName(signal);
 
   const handleEnrichAI = async () => {
     setEnriching(true);
@@ -123,7 +153,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   const copyRow = () => {
     const text = [
       formatDate(signal.published_at),
-      signal.company || "",
+      firmName,
       typeLabel,
       formatAmount(signal.amount, signal.currency),
       extractFundName(signal),
@@ -153,7 +183,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
         {/* Firm */}
         <td className="py-3 px-3">
           <span className="text-sm font-semibold text-foreground">
-            {signal.company || "Unknown"}
+            {firmName}
           </span>
         </td>
         {/* Type */}

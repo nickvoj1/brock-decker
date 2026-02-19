@@ -13,7 +13,8 @@ import {
   ChevronDown,
   LayoutGrid,
   Table2,
-  Target
+  Target,
+  CalendarDays
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -42,6 +43,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { useProfileName } from "@/hooks/useProfileName";
 import { 
   getSignals, 
@@ -69,12 +72,15 @@ import { SignalTableView } from "@/components/signals/SignalTableView";
 import { FantasticJobsBoard } from "@/components/jobs/FantasticJobsBoard";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { DateRange } from "react-day-picker";
+import { endOfDay, format, startOfDay, subDays, subHours } from "date-fns";
 
 type Region = "london" | "europe" | "uae" | "usa";
 type TierFilter = "all" | "tier_1" | "tier_2" | "tier_3";
 type SortOption = "newest" | "relevant" | "amount" | "fit";
 type TabView = "signals" | "jobs" | "jobboard";
 type ViewMode = "table" | "cards";
+type DatePreset = "all" | "24h" | "7d" | "14d" | "30d" | "custom";
 
 const REGION_CONFIG = {
   london: { label: "London", emoji: "🇬🇧", description: "City, Mayfair, Canary Wharf" },
@@ -95,6 +101,15 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "relevant", label: "Most Relevant" },
   { value: "amount", label: "Highest Amount" },
   { value: "fit", label: "Best Fit" },
+];
+
+const DATE_PRESETS: { value: DatePreset; label: string }[] = [
+  { value: "all", label: "All Time" },
+  { value: "24h", label: "Last 24h" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "14d", label: "Last 14 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "custom", label: "Custom Range" },
 ];
 
 function tokenizeQuery(query: string): string[] {
@@ -179,6 +194,8 @@ export default function SignalsDashboard() {
   const [excludeQuery, setExcludeQuery] = useState("");
   const [fitOnly, setFitOnly] = useState(false);
   const [minFitScore, setMinFitScore] = useState(50);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -280,6 +297,8 @@ export default function SignalsDashboard() {
         excludeQuery?: string;
         fitOnly?: boolean;
         minFitScore?: number;
+        datePreset?: DatePreset;
+        customDateRange?: { from?: string; to?: string };
       };
 
       if (prefs.activeRegion && prefs.activeRegion in REGION_CONFIG) setActiveRegion(prefs.activeRegion);
@@ -292,6 +311,13 @@ export default function SignalsDashboard() {
       if (typeof prefs.excludeQuery === "string") setExcludeQuery(prefs.excludeQuery);
       if (typeof prefs.fitOnly === "boolean") setFitOnly(prefs.fitOnly);
       if (typeof prefs.minFitScore === "number" && prefs.minFitScore >= 0 && prefs.minFitScore <= 100) setMinFitScore(prefs.minFitScore);
+      if (prefs.datePreset && DATE_PRESETS.some((p) => p.value === prefs.datePreset)) setDatePreset(prefs.datePreset);
+      if (prefs.customDateRange?.from || prefs.customDateRange?.to) {
+        setCustomDateRange({
+          from: prefs.customDateRange.from ? new Date(prefs.customDateRange.from) : undefined,
+          to: prefs.customDateRange.to ? new Date(prefs.customDateRange.to) : undefined,
+        });
+      }
     } catch (error) {
       console.error("Failed to parse Signals dashboard preferences:", error);
     }
@@ -309,9 +335,14 @@ export default function SignalsDashboard() {
       excludeQuery,
       fitOnly,
       minFitScore,
+      datePreset,
+      customDateRange: {
+        from: customDateRange?.from?.toISOString(),
+        to: customDateRange?.to?.toISOString(),
+      },
     };
     localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
-  }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore]);
+  }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
   const fetchSignals = async () => {
     if (!profileName) return;
@@ -719,6 +750,19 @@ export default function SignalsDashboard() {
 
     filtered = filtered.filter((s) => {
       const searchText = buildSignalSearchText(s);
+      const publishedAt = s.published_at ? new Date(s.published_at) : null;
+
+      if (datePreset !== "all") {
+        if (!publishedAt || Number.isNaN(publishedAt.getTime())) return false;
+        if (datePreset === "24h" && publishedAt < subHours(new Date(), 24)) return false;
+        if (datePreset === "7d" && publishedAt < subDays(new Date(), 7)) return false;
+        if (datePreset === "14d" && publishedAt < subDays(new Date(), 14)) return false;
+        if (datePreset === "30d" && publishedAt < subDays(new Date(), 30)) return false;
+        if (datePreset === "custom") {
+          if (customDateRange?.from && publishedAt < startOfDay(customDateRange.from)) return false;
+          if (customDateRange?.to && publishedAt > endOfDay(customDateRange.to)) return false;
+        }
+      }
 
       if (excludeTerms.some((term) => searchText.includes(term))) {
         return false;
@@ -763,7 +807,7 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore]);
+  }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
   // Count pending signals for badge
   const pendingCount = useMemo(() => {
@@ -942,6 +986,48 @@ export default function SignalsDashboard() {
                   ))}
                 </SelectContent>
               </Select>
+
+              <Select value={datePreset} onValueChange={(v) => setDatePreset(v as DatePreset)}>
+                <SelectTrigger className="w-[150px] h-9 bg-card">
+                  <SelectValue placeholder="Date" />
+                </SelectTrigger>
+                <SelectContent className="bg-background border">
+                  {DATE_PRESETS.map((preset) => (
+                    <SelectItem key={preset.value} value={preset.value}>
+                      {preset.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {datePreset === "custom" && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="h-9 justify-start text-left font-normal w-[240px]">
+                      <CalendarDays className="mr-2 h-4 w-4" />
+                      {customDateRange?.from ? (
+                        customDateRange.to ? (
+                          `${format(customDateRange.from, "MMM d, yyyy")} - ${format(customDateRange.to, "MMM d, yyyy")}`
+                        ) : (
+                          format(customDateRange.from, "MMM d, yyyy")
+                        )
+                      ) : (
+                        "Pick a date range"
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      initialFocus
+                      mode="range"
+                      defaultMonth={customDateRange?.from}
+                      selected={customDateRange}
+                      onSelect={setCustomDateRange}
+                      numberOfMonths={2}
+                    />
+                  </PopoverContent>
+                </Popover>
+              )}
 
               <div className="relative w-full sm:w-[280px]">
                 <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
