@@ -48,14 +48,24 @@ interface Filters {
 }
 
 type SearchMode = "all" | "linkedin" | "career";
+type SearchHistoryItem = {
+  id: string;
+  createdAt: string;
+  mode: SearchMode;
+  filters: Filters;
+  resultCount: number;
+  topResults: string[];
+};
+
+const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
 
 const DEFAULT_FILTERS: Filters = {
-  keyword: "private equity OR venture capital OR family office",
+  keyword: "",
   company: "",
   exclude: "",
   industry: "all",
   jobsPerSearch: "100",
-  location: "London,United States,United Arab Emirates",
+  location: "",
   salaryMin: "",
   remote: false,
   postedAfter: "7days",
@@ -191,6 +201,15 @@ export function FantasticJobsBoard() {
   const [settings, setSettings] = useState<JobBoardSettings>(() => loadJobBoardSettings());
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [total, setTotal] = useState(0);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     setSettings(loadJobBoardSettings());
@@ -198,6 +217,10 @@ export function FantasticJobsBoard() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 30)));
+  }, [searchHistory]);
 
   const fetchDirect = useCallback(
     async (mode: SearchMode): Promise<Job[]> => {
@@ -319,6 +342,17 @@ export function FantasticJobsBoard() {
         setJobs(deduped);
         setTotal(deduped.length);
         setLastRefresh(new Date());
+        setSearchHistory((prev) => [
+          {
+            id: `${Date.now()}-${mode}`,
+            createdAt: new Date().toISOString(),
+            mode,
+            filters: { ...filters },
+            resultCount: deduped.length,
+            topResults: deduped.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
+          },
+          ...prev,
+        ]);
         toast({
           title: "Jobs refreshed",
           description: `Found ${deduped.length} jobs (${mode})`,
@@ -333,7 +367,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [settings, fetchDirect, fetchViaBackend, toast],
+    [settings, fetchDirect, fetchViaBackend, toast, filters],
   );
 
   const scopedJobs = useMemo(() => {
@@ -547,6 +581,24 @@ export function FantasticJobsBoard() {
               </Button>
             </div>
           </div>
+
+          {searchHistory.length > 0 ? (
+            <div className="rounded-md border border-border/60 p-3">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Recent Searches</p>
+              <div className="space-y-2 max-h-36 overflow-auto">
+                {searchHistory.slice(0, 8).map((h) => (
+                  <div key={h.id} className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{formatDate(h.createdAt)}</span>
+                    {" · "}
+                    {h.mode}
+                    {" · "}
+                    {h.resultCount} results
+                    {h.topResults.length > 0 ? ` · ${h.topResults[0]}` : ""}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
