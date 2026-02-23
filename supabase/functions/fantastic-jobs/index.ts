@@ -9,6 +9,7 @@ const corsHeaders = {
 // RapidAPI removed — Apify only
 const REMOTE_TERMS = [
   "remote",
+  "hybrid",
   "work from home",
   "wfh",
   "home based",
@@ -24,14 +25,6 @@ const RECRUITER_COMPANY_TERMS = [
   "headhunt",
   "executive search",
   "talent solutions",
-  "search partners",
-];
-
-const RECRUITER_LISTING_TERMS = [
-  "for one of our clients",
-  "on behalf of our client",
-  "for our client",
-  "our client is seeking",
 ];
 
 const LOCATION_ALIAS_MAP: Record<string, string> = {
@@ -282,16 +275,14 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
 
 function isRemoteLikeJob(job: Record<string, unknown>): boolean {
   if ((job.remote as boolean) === true) return true;
-  const text = `${String(job.location || "")} ${String(job.title || "")} ${String(job.description || "")}`.toLowerCase();
+  const text = `${String(job.location || "")} ${String(job.title || "")}`.toLowerCase();
   return REMOTE_TERMS.some((term) => text.includes(term));
 }
 
 function isRecruiterLikeJob(job: Record<string, unknown>): boolean {
   const company = String(job.company || "").toLowerCase();
-  const titleDesc = `${String(job.title || "")} ${String(job.description || "")}`.toLowerCase();
   const companyMatch = RECRUITER_COMPANY_TERMS.some((term) => company.includes(term));
-  const listingMatch = RECRUITER_LISTING_TERMS.some((term) => titleDesc.includes(term));
-  return companyMatch || listingMatch;
+  return companyMatch;
 }
 
 function applyStrictResultFilters(jobs: Record<string, unknown>[]): Record<string, unknown>[] {

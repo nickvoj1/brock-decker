@@ -168,6 +168,7 @@ const PE_SIGNAL_TERMS = [
 
 const REMOTE_TERMS = [
   "remote",
+  "hybrid",
   "work from home",
   "wfh",
   "home based",
@@ -183,15 +184,24 @@ const RECRUITER_COMPANY_TERMS = [
   "headhunt",
   "executive search",
   "talent solutions",
-  "search partners",
 ];
 
-const RECRUITER_LISTING_TERMS = [
-  "for one of our clients",
-  "on behalf of our client",
-  "for our client",
-  "our client is seeking",
-];
+const LOCATION_FALLBACK_MAP: Record<string, string[]> = {
+  london: ["london", "united kingdom", "uk", "england", "great britain"],
+  "new york": ["new york", "nyc", "united states", "usa", "us"],
+  boston: ["boston", "united states", "usa", "us"],
+  chicago: ["chicago", "united states", "usa", "us"],
+  miami: ["miami", "united states", "usa", "us"],
+  "san francisco": ["san francisco", "united states", "usa", "us"],
+  "los angeles": ["los angeles", "united states", "usa", "us"],
+  paris: ["paris", "france"],
+  munich: ["munich", "germany"],
+  frankfurt: ["frankfurt", "germany"],
+  zurich: ["zurich", "switzerland"],
+  amsterdam: ["amsterdam", "netherlands"],
+  dubai: ["dubai", "uae", "united arab emirates"],
+  "abu dhabi": ["abu dhabi", "uae", "united arab emirates"],
+};
 
 const LOCATION_ALIAS_MAP: Record<string, string> = {
   loondon: "London",
@@ -394,16 +404,25 @@ function matchesPESignal(job: Job): boolean {
 
 function isRemoteLikeJob(job: Job): boolean {
   if (job.remote) return true;
-  const text = `${job.location || ""} ${job.title || ""} ${job.description || ""}`.toLowerCase();
+  const text = `${job.location || ""} ${job.title || ""}`.toLowerCase();
   return REMOTE_TERMS.some((term) => text.includes(term));
 }
 
 function isRecruiterLikeJob(job: Job): boolean {
   const company = String(job.company || "").toLowerCase();
-  const titleDesc = `${job.title || ""} ${job.description || ""}`.toLowerCase();
   const companyMatch = RECRUITER_COMPANY_TERMS.some((term) => company.includes(term));
-  const listingMatch = RECRUITER_LISTING_TERMS.some((term) => titleDesc.includes(term));
-  return companyMatch || listingMatch;
+  return companyMatch;
+}
+
+function matchesLocationTerm(jobLocation: string, rawTerm: string): boolean {
+  const location = String(jobLocation || "").toLowerCase();
+  const term = String(rawTerm || "").trim().toLowerCase();
+  if (!term) return true;
+
+  if (location.includes(term)) return true;
+  const fallbacks = LOCATION_FALLBACK_MAP[term];
+  if (!fallbacks) return false;
+  return fallbacks.some((candidate) => location.includes(candidate));
 }
 
 function inferDepartmentsFromJobTitle(title: string): string[] {
@@ -614,7 +633,7 @@ export function FantasticJobsBoard() {
         if (industryKeywordTerms.length > 0 && !industryKeywordTerms.some((t) => haystack.includes(t))) return false;
         if (excludeTerms.length > 0 && excludeTerms.some((t) => haystack.includes(t))) return false;
         if (companyTerms.length > 0 && !companyTerms.some((t) => job.company.toLowerCase().includes(t))) return false;
-        if (locationTerms.length > 0 && !locationTerms.some((t) => job.location.toLowerCase().includes(t))) return false;
+        if (locationTerms.length > 0 && !locationTerms.some((t) => matchesLocationTerm(job.location, t))) return false;
         if (isRemoteLikeJob(job)) return false;
         if (isRecruiterLikeJob(job)) return false;
 
