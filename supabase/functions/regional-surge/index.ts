@@ -218,6 +218,137 @@ function extractDealSignature(text: string): string {
   return `${actionMatch?.[0] || "na"}|${amountMatch?.[0] || "na"}`.toLowerCase();
 }
 
+interface SignalCandidate {
+  title: string;
+  content: string;
+  url: string;
+  publishedAt: string;
+}
+
+function decodeXmlEntities(input: string): string {
+  return input
+    .replace(/<!\[CDATA\[|\]\]>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'");
+}
+
+function stripHtml(input: string): string {
+  return decodeXmlEntities(input).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function pickIsoDate(raw?: string | null): string {
+  if (!raw) return new Date().toISOString();
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return new Date().toISOString();
+  return parsed.toISOString();
+}
+
+function extractTag(xml: string, tagName: string): string | null {
+  const match = xml.match(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"));
+  return match?.[1] || null;
+}
+
+function extractFeedEntryLink(entryXml: string): string | null {
+  const hrefMatch = entryXml.match(/<link[^>]+href=["']([^"']+)["'][^>]*>/i);
+  if (hrefMatch?.[1]) return hrefMatch[1].trim();
+
+  const inlineLink = stripHtml(extractTag(entryXml, "link") || "");
+  if (inlineLink.startsWith("http")) return inlineLink;
+
+  const guid = stripHtml(extractTag(entryXml, "guid") || "");
+  if (guid.startsWith("http")) return guid;
+
+  const id = stripHtml(extractTag(entryXml, "id") || "");
+  if (id.startsWith("http")) return id;
+
+  return null;
+}
+
+async function parseRSSFeedCandidates(feedUrl: string): Promise<SignalCandidate[]> {
+  try {
+    const res = await fetch(feedUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; BrockDeckerSignals/1.0)",
+        "Accept": "application/rss+xml, application/xml, text/xml, application/atom+xml",
+      },
+    });
+    if (!res.ok) {
+      console.error(`RSS fetch failed ${feedUrl}: ${res.status}`);
+      return [];
+    }
+
+    const xml = await res.text();
+    const blocks: string[] = [];
+    for (const m of xml.matchAll(/<item[\s\S]*?<\/item>/gi)) {
+      blocks.push(m[0]);
+    }
+    for (const m of xml.matchAll(/<entry[\s\S]*?<\/entry>/gi)) {
+      blocks.push(m[0]);
+    }
+
+    const out: SignalCandidate[] = [];
+    for (const block of blocks) {
+      const title = stripHtml(extractTag(block, "title") || "");
+      const link = extractFeedEntryLink(block) || "";
+      const descriptionRaw =
+        extractTag(block, "description") ||
+        extractTag(block, "content:encoded") ||
+        extractTag(block, "content") ||
+        extractTag(block, "summary") ||
+        "";
+      const description = stripHtml(descriptionRaw);
+      const publishedAt = pickIsoDate(
+        extractTag(block, "pubDate") ||
+          extractTag(block, "published") ||
+          extractTag(block, "updated"),
+      );
+
+      if (!title || title.length < 20) continue;
+      if (!link || !link.startsWith("http")) continue;
+
+      out.push({
+        title: title.slice(0, 255),
+        content: `${title}\n${description}`.trim().slice(0, 2400),
+        url: link,
+        publishedAt,
+      });
+    }
+
+    return out;
+  } catch (error) {
+    console.error(`RSS parse failed ${feedUrl}:`, error);
+    return [];
+  }
+}
+
+function extractArticleCandidatesFromMarkdown(markdown: string, sourceUrl: string): SignalCandidate[] {
+  const chunks = markdown
+    .split(/\n#{1,6}\s+/)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 140);
+
+  const out: SignalCandidate[] = [];
+  for (const chunk of chunks.slice(0, 12)) {
+    const title = (chunk.split("\n")[0] || "").replace(/^#+\s*/, "").trim().slice(0, 255);
+    if (!title || title.length < 20) continue;
+
+    const linkMatch = chunk.match(/\[[^\]]{3,120}\]\((https?:\/\/[^)\s]+)\)/i);
+    const url = linkMatch?.[1] || sourceUrl;
+
+    out.push({
+      title,
+      content: chunk.slice(0, 2400),
+      url,
+      publishedAt: new Date().toISOString(),
+    });
+  }
+
+  return out;
+}
+
 function classifySignalTypeFromContent(text: string): "funding" | "expansion" | "c_suite" | "hiring" | "team_growth" {
   const t = text.toLowerCase();
   if (/fund close|final close|first close|raises fund|raises \$|raises €|series [abc]|investment round/.test(t)) {
@@ -540,17 +671,28 @@ Deno.serve(async (req) => {
       console.log(`Processing ${sources.length} sources for ${region}...`);
       
       for (const source of sources) {
-        console.log(`Scraping ${source.source}: ${source.url}`);
-        
-        const scraped = await scrapeWithFirecrawl(source.url, source.isRSS);
-        if (!scraped) continue;
-        
-        results.processed++;
-        
-        // Split content into articles (rough heuristic)
-        const articles = scraped.content.split(/\n#{1,3}\s/).filter(a => a.length > 100);
-        
-        for (const articleContent of articles.slice(0, 5)) { // Max 5 articles per source
+        console.log(`Collecting ${source.source}: ${source.url}`);
+        const isRssSource = Boolean((source as { isRSS?: boolean }).isRSS);
+
+        let candidates: SignalCandidate[] = [];
+        if (isRssSource) {
+          candidates = await parseRSSFeedCandidates(source.url);
+        }
+
+        if (candidates.length === 0) {
+          const scraped = await scrapeWithFirecrawl(source.url, isRssSource);
+          if (!scraped) continue;
+          candidates = extractArticleCandidatesFromMarkdown(scraped.content, source.url);
+        }
+
+        if (candidates.length === 0) continue;
+        results.processed += candidates.length;
+
+        const candidateLimit = isRssSource ? 20 : 8;
+        for (const candidate of candidates.slice(0, candidateLimit)) {
+          const articleContent = candidate.content;
+          if (!articleContent || articleContent.length < 80) continue;
+
           // Step 1: LLM Geo-Validation
           const geoResult = await validateRegionWithAI(articleContent, region);
           if (!geoResult) continue;
@@ -591,7 +733,7 @@ Deno.serve(async (req) => {
           const isPending = geoConfidence < 80;
           const validatedRegion = isPending ? null : region.toUpperCase();
           
-          const contentTitle = articleContent.split("\n")[0]?.trim() || `${company} ${source.source} update`;
+          const contentTitle = candidate.title || articleContent.split("\n")[0]?.trim() || `${company} ${source.source} update`;
           const title = contentTitle.slice(0, 255);
           const signalType = classifySignalTypeFromContent(articleContent);
           const keyPeople = extractKeyPeople(articleContent);
@@ -601,7 +743,7 @@ Deno.serve(async (req) => {
             rawContent: articleContent,
             company,
             source: source.source,
-            url: source.url,
+            url: candidate.url,
             expectedRegion: region,
             signalType,
             keyPeople,
@@ -619,7 +761,7 @@ Deno.serve(async (req) => {
           const dealSignature = quality.dealSignature;
           const dedupeKey = quality.dedupeKey.toLowerCase();
           const sourceKey = normalizeTextForDedup(source.source);
-          const urlKey = normalizeUrlForDedup(source.url);
+          const urlKey = normalizeUrlForDedup(candidate.url);
           const titleKey = titleFingerprint(title);
           const companyTypeKey = [
             normalizeTextForDedup(normalizedCompany),
@@ -655,14 +797,14 @@ Deno.serve(async (req) => {
               score: surgeScore,
               keywords_count: keywords.length,
               keywords,
-              source_urls: [source.url],
-              raw_content: rawContent,
+              source_urls: Array.from(new Set([candidate.url, source.url])),
+              raw_content: rawContent || articleContent.slice(0, 500),
               ai_confidence: geoConfidence,
               ai_insight: insight,
               source: source.source,
               signal_type: normalizedSignalType,
               tier: quality.mustHave ? "tier_1" : surgeScore >= 90 ? "tier_1" : surgeScore >= 70 ? "tier_2" : "tier_3",
-              published_at: new Date().toISOString(),
+              published_at: candidate.publishedAt || new Date().toISOString(),
               user_feedback: isPending ? null : "AUTO_VALIDATED",
               details: {
                 key_people: normalizedKeyPeople,

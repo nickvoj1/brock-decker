@@ -206,7 +206,7 @@ function extractAmount(text: string): { amount: number; currency: "USD" | "EUR" 
   const source = asText(text);
   if (!source) return null;
 
-  const regex = /(?:\b(USD|EUR|GBP|US\$)\s*|([€£$])\s*)?([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP)|\s*(dollars?|euros?|pounds?)|\s*([€£$]))?/gi;
+  const regex = /(?:\b(USD|EUR|GBP|US\$)\s*|([€£$])\s*)?([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|bln|billion|b|mn|mm|million|m)\b(?:\s*(USD|EUR|GBP)|\s*(dollars?|euros?|pounds?)|\s*([€£$]))?/gi;
   let best: { amount: number; currency: "USD" | "EUR" | "GBP" | null } | null = null;
   let match: RegExpExecArray | null;
 
@@ -216,7 +216,7 @@ function extractAmount(text: string): { amount: number; currency: "USD" | "EUR" 
     if (!value || value <= 0) continue;
 
     const unit = String(match[4] || "").toLowerCase();
-    const amount = unit === "bn" || unit === "billion" || unit === "b" ? value * 1000 : value; // millions
+    const amount = unit === "bn" || unit === "bln" || unit === "billion" || unit === "b" ? value * 1000 : value; // millions
     const currency = resolveCurrency([match[1], match[2], match[5], match[6], match[7]], source);
 
     if (!best || amount > best.amount) {

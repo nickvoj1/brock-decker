@@ -65,7 +65,7 @@ function extractAmountFromText(text: string): { amount: number; currency: string
   const source = String(text || "");
   if (!source) return null;
 
-  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
+  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|bln|billion|b|mn|mm|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
   let best: { amount: number; currency: string | null } | null = null;
   let match: RegExpExecArray | null;
 
@@ -82,7 +82,7 @@ function extractAmountFromText(text: string): { amount: number; currency: string
     if (!Number.isFinite(value) || value <= 0) continue;
 
     const unit = String(match[3] || "").toLowerCase();
-    const amount = unit === "bn" || unit === "billion" || unit === "b" ? value * 1000 : value;
+    const amount = unit === "bn" || unit === "bln" || unit === "billion" || unit === "b" ? value * 1000 : value;
     const currency = mapCurrencyToken(match[1]) || mapCurrencyToken(match[4]) || null;
 
     if (!best || amount > best.amount) best = { amount, currency };

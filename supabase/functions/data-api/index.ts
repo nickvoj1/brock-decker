@@ -65,22 +65,30 @@ function isDisplayableSignal(row: any): boolean {
   }
 
   const title = String(row?.title || "");
+  const description = typeof row?.description === "string" ? row.description : "";
+  const hasHttpUrl = row?.url && typeof row.url === "string" && row.url.startsWith("http");
+  const mustHave = Boolean(row?.details?.must_have);
   
-  // If has URL and is a real news headline, show it
-  if (row?.url && typeof row.url === "string" && row.url.startsWith("http")) {
+  // Prefer rows with clear news headline semantics.
+  if (hasHttpUrl) {
     if (isRealNewsHeadline(title)) return true;
-    const description = typeof row?.description === "string" ? row.description : "";
     if (description && isRealNewsHeadline(description.slice(0, 160))) return true;
   }
-  
-  // If no URL but has a valid company + title pattern "Company - Source", still show it
-  // These are scraped signals that reference real companies
-  if (title.includes(" - ") && row.company) {
+
+  // Keep structured must-have rows even if title is imperfect.
+  if (hasHttpUrl && mustHave) {
     return true;
   }
 
-  // Allow signals with URLs even if headline check fails (user may still find them useful)
-  if (row?.url && typeof row.url === "string" && row.url.startsWith("http")) {
+  // Secondary fallback for structured rows with adequate context.
+  const validSignalTypes = new Set(["funding", "hiring", "expansion", "c_suite", "team_growth"]);
+  if (
+    hasHttpUrl &&
+    typeof row?.source === "string" &&
+    row.source.trim().length >= 2 &&
+    validSignalTypes.has(String(row?.signal_type || "")) &&
+    description.trim().length >= 80
+  ) {
     return true;
   }
 
@@ -141,7 +149,7 @@ function extractAmountFromText(text: string): { amount: number; currency: string
 
   // Example matches:
   // "$1.2bn", "€850 million", "US$ 3.4 billion", "1,250m USD"
-  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|billion|b|mn|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
+  const re = /(US\$|USD|EUR|GBP|€|£|\$)?\s*([0-9]{1,3}(?:[,\s][0-9]{3})*(?:[.,][0-9]+)?|[0-9]+(?:[.,][0-9]+)?)\s*(bn|bln|billion|b|mn|mm|million|m)\b(?:\s*(USD|EUR|GBP|€|£|\$))?/gi;
 
   let best: { amount: number; currency: string | null } | null = null;
   let match: RegExpExecArray | null;
@@ -163,7 +171,7 @@ function extractAmountFromText(text: string): { amount: number; currency: string
     if (!Number.isFinite(value) || value <= 0) continue;
 
     const unit = String(match[3] || "").toLowerCase();
-    const isBillion = unit === "bn" || unit === "billion" || unit === "b";
+    const isBillion = unit === "bn" || unit === "bln" || unit === "billion" || unit === "b";
     const amount = isBillion ? value * 1000 : value; // store in millions
     const currency = mapCurrencyToken(match[1]) || mapCurrencyToken(match[4]) || null;
 

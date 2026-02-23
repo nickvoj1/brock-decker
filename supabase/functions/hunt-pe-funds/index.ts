@@ -167,12 +167,22 @@ function parseAmountToMillions(size: string): number | null {
   if (isNaN(num)) return null
 
   const lower = size.toLowerCase()
-  if (lower.includes('billion') || lower.includes('bn') || lower.includes('b')) {
+  const compact = lower.replace(/\s+/g, '')
+
+  const hasBillionUnit =
+    /\b(billion|bn|bln)\b/.test(lower) ||
+    /[0-9](?:\.[0-9]+)?b(?![a-z])/i.test(compact)
+  if (hasBillionUnit) {
     return num * 1000
   }
-  if (lower.includes('million') || lower.includes('mn') || lower.includes('m')) {
+
+  const hasMillionUnit =
+    /\b(million|mn|mm)\b/.test(lower) ||
+    /[0-9](?:\.[0-9]+)?m(?![a-z])/i.test(compact)
+  if (hasMillionUnit) {
     return num
   }
+
   // If number > 100 assume millions
   return num > 100 ? num : num * 1000
 }
