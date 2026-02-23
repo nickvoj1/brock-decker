@@ -532,6 +532,13 @@ Deno.serve(async (req) => {
     const jobs = dedupedJobs.slice(0, requestedLimit);
     const offset = Number(getParam(body, url, "offset", "0"));
     const limit = requestedLimit;
+    const diagnostics = {
+      raw: rawJobs.length,
+      normalized: normalizedJobs.length,
+      postedFiltered: postedFilteredJobs.length,
+      strictFiltered: strictFilteredJobs.length,
+      deduped: dedupedJobs.length,
+    };
 
     return new Response(
       JSON.stringify({
@@ -541,6 +548,7 @@ Deno.serve(async (req) => {
         total: jobs.length,
         offset,
         limit,
+        diagnostics,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

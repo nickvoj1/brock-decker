@@ -67,6 +67,19 @@ type SearchHistoryItem = {
   results: Job[];
 };
 
+type JobsDiagnostics = {
+  raw?: number;
+  normalized?: number;
+  postedFiltered?: number;
+  strictFiltered?: number;
+  deduped?: number;
+};
+
+type FetchJobsResult = {
+  jobs: Job[];
+  diagnostics?: JobsDiagnostics;
+};
+
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
 const SEARCH_CACHE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_SEARCH_HISTORY_ITEMS = 12;
@@ -588,7 +601,7 @@ export function FantasticJobsBoard() {
   );
 
   const fetchViaBackend = useCallback(
-    async (mode: SearchMode): Promise<Job[]> => {
+    async (mode: SearchMode): Promise<FetchJobsResult> => {
       const params: Record<string, string> = {};
       if (filters.title) params.keyword = filters.title;
       if (filters.industryKeywords) params.industry_keywords = filters.industryKeywords;
@@ -609,7 +622,10 @@ export function FantasticJobsBoard() {
       }
       if (error) throw error;
       if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
-      return data.jobs as Job[];
+      return {
+        jobs: data.jobs as Job[],
+        diagnostics: (data.diagnostics || undefined) as JobsDiagnostics | undefined,
+      };
     },
     [filters, requestedCount],
   );
@@ -685,7 +701,9 @@ export function FantasticJobsBoard() {
 
       setLoading(true);
       try {
-        const incoming = await fetchViaBackend(mode);
+        const backendResult = await fetchViaBackend(mode);
+        const incoming = backendResult.jobs;
+        const diagnostics = backendResult.diagnostics;
 
         const deduped = Array.from(
           new Map(
@@ -752,10 +770,16 @@ export function FantasticJobsBoard() {
             title: "No PE matches in current result set",
             description: `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, PE matches ${peMatches}. Disable PE only to see all filtered jobs.`,
           });
+        } else if (visibleRows.length === 0 && diagnostics) {
+          toast({
+            title: "0 results after filtering",
+            description: `Provider rows: ${diagnostics.raw ?? incoming.length}, normalized: ${diagnostics.normalized ?? incoming.length}, posted-date: ${diagnostics.postedFiltered ?? incoming.length}, strict: ${diagnostics.strictFiltered ?? incoming.length}, deduped: ${diagnostics.deduped ?? incoming.length}.`,
+            variant: "destructive",
+          });
         } else {
           toast({
             title: "Jobs refreshed",
-      description: usedFilterFallback
+            description: usedFilterFallback
               ? `Fetched ${incoming.length}. No explicit filters were set, so broad results were shown (${visibleRows.length}).`
               : `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, showing ${visibleRows.length} (${mode}).`,
           });
