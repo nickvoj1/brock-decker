@@ -264,6 +264,30 @@ function normalizeJobs(jobs: Record<string, unknown>[], fallbackLocation = ""): 
   });
 }
 
+function interleaveJobsBySource(jobs: Record<string, unknown>[]): Record<string, unknown>[] {
+  const buckets = new Map<string, Record<string, unknown>[]>();
+  for (const job of jobs) {
+    const key = String(job.source || "unknown");
+    const list = buckets.get(key);
+    if (list) list.push(job);
+    else buckets.set(key, [job]);
+  }
+
+  const keys = Array.from(buckets.keys());
+  const out: Record<string, unknown>[] = [];
+  let pushed = true;
+  while (pushed) {
+    pushed = false;
+    for (const key of keys) {
+      const list = buckets.get(key);
+      if (!list || list.length === 0) continue;
+      out.push(list.shift() as Record<string, unknown>);
+      pushed = true;
+    }
+  }
+  return out;
+}
+
 async function fetchWithRetry(
   fetchFn: () => Promise<Response>,
   maxRetries = 3,
@@ -472,12 +496,14 @@ Deno.serve(async (req) => {
     }
 
     const normalizedJobs = normalizeJobs(rawJobs, normalizeLocationExpression(getParam(body, url, "location")));
-    const jobs = normalizedJobs.slice(0, requestedLimit);
+    const mixedJobs = sourceMode === "all" ? interleaveJobsBySource(normalizedJobs) : normalizedJobs;
+    const jobs = mixedJobs.slice(0, requestedLimit);
     const offset = Number(getParam(body, url, "offset", "0"));
     const limit = requestedLimit;
     const diagnostics = {
       raw: rawJobs.length,
       normalized: normalizedJobs.length,
+      mixed: mixedJobs.length,
       returned: jobs.length,
     };
 
