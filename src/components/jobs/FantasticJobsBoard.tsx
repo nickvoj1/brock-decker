@@ -405,7 +405,9 @@ export function FantasticJobsBoard() {
 
         if (cutoff) {
           const postedTs = new Date(job.posted_at).getTime();
-          if (!Number.isFinite(postedTs) || postedTs < cutoff) return false;
+          // Keep rows when provider date format is non-standard; only exclude when a valid
+          // timestamp exists and is clearly older than the selected window.
+          if (Number.isFinite(postedTs) && postedTs < cutoff) return false;
         }
 
         if (filters.remote && !job.remote) return false;
@@ -449,7 +451,9 @@ export function FantasticJobsBoard() {
           ).values(),
         );
         const filtered = applyClientFilters(deduped);
-        const capped = filtered.slice(0, requestedCount);
+        const usedFilterFallback = filtered.length === 0 && deduped.length > 0;
+        const effectiveFiltered = usedFilterFallback ? deduped : filtered;
+        const capped = effectiveFiltered.slice(0, requestedCount);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
         const visibleRows = strictPEOnly
@@ -473,15 +477,17 @@ export function FantasticJobsBoard() {
           },
           ...prev,
         ]);
-        if (strictPEOnly && visibleRows.length === 0 && filtered.length > 0) {
+        if (strictPEOnly && visibleRows.length === 0 && effectiveFiltered.length > 0) {
           toast({
             title: "No PE matches in current result set",
-            description: `Fetched ${incoming.length}, after filters ${filtered.length}, PE matches ${peMatches}. Disable PE only to see all filtered jobs.`,
+            description: `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, PE matches ${peMatches}. Disable PE only to see all filtered jobs.`,
           });
         } else {
           toast({
             title: "Jobs refreshed",
-            description: `Fetched ${incoming.length}, after filters ${filtered.length}, showing ${visibleRows.length} (${mode}).`,
+            description: usedFilterFallback
+              ? `Fetched ${incoming.length}. Current filters returned 0, so broad results were shown (${visibleRows.length}).`
+              : `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, showing ${visibleRows.length} (${mode}).`,
           });
         }
       } catch (error) {
