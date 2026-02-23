@@ -588,8 +588,10 @@ function extractCompanyFromSignalTitle(title: string): string {
 
 // Region to country-level locations mapping (for widening)
 const REGION_COUNTRY_LOCATIONS: Record<string, string[]> = {
+  london: ['United Kingdom'],
   europe: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Switzerland', 'Ireland', 'Spain', 'Italy', 'Belgium', 'Luxembourg', 'Sweden', 'Denmark', 'Norway', 'Finland', 'Austria', 'Poland', 'Portugal'],
   uae: ['United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Bahrain', 'Kuwait', 'Oman'],
+  usa: ['United States'],
   east_usa: ['New York', 'Massachusetts', 'Connecticut', 'New Jersey', 'Pennsylvania', 'Washington D.C.', 'Virginia', 'Maryland', 'Florida', 'Georgia', 'Illinois'],
   west_usa: ['California', 'Washington', 'Oregon', 'Colorado', 'Texas', 'Arizona'],
 }
@@ -598,15 +600,208 @@ interface RetryStrategy {
   name: string
   companyName: string
   locations: string[]
+  locationMode: 'city' | 'country' | 'none'
+}
+
+const COUNTRY_ALIASES: Record<string, string> = {
+  uk: 'united kingdom',
+  u k: 'united kingdom',
+  england: 'united kingdom',
+  britain: 'united kingdom',
+  great britain: 'united kingdom',
+  united states of america: 'united states',
+  usa: 'united states',
+  us: 'united states',
+  u s: 'united states',
+  ny: 'united states',
+  ma: 'united states',
+  ca: 'united states',
+  il: 'united states',
+  wa: 'united states',
+  tx: 'united states',
+  fl: 'united states',
+  dc: 'united states',
+  new york: 'united states',
+  massachusetts: 'united states',
+  california: 'united states',
+  illinois: 'united states',
+  washington: 'united states',
+  texas: 'united states',
+  florida: 'united states',
+  georgia: 'united states',
+  virginia: 'united states',
+  maryland: 'united states',
+  connecticut: 'united states',
+  new jersey: 'united states',
+  pennsylvania: 'united states',
+  oregon: 'united states',
+  colorado: 'united states',
+  arizona: 'united states',
+  london: 'united kingdom',
+  manchester: 'united kingdom',
+  birmingham: 'united kingdom',
+  edinburgh: 'united kingdom',
+  paris: 'france',
+  lyon: 'france',
+  marseille: 'france',
+  berlin: 'germany',
+  frankfurt: 'germany',
+  munich: 'germany',
+  hamburg: 'germany',
+  dusseldorf: 'germany',
+  amsterdam: 'netherlands',
+  rotterdam: 'netherlands',
+  zurich: 'switzerland',
+  geneva: 'switzerland',
+  basel: 'switzerland',
+  dublin: 'ireland',
+  cork: 'ireland',
+  madrid: 'spain',
+  barcelona: 'spain',
+  milan: 'italy',
+  rome: 'italy',
+  lisbon: 'portugal',
+  porto: 'portugal',
+  vienna: 'austria',
+  brussels: 'belgium',
+  antwerp: 'belgium',
+  luxembourg city: 'luxembourg',
+  stockholm: 'sweden',
+  gothenburg: 'sweden',
+  copenhagen: 'denmark',
+  oslo: 'norway',
+  helsinki: 'finland',
+  warsaw: 'poland',
+  krakow: 'poland',
+  dubai: 'united arab emirates',
+  abu dhabi: 'united arab emirates',
+  riyadh: 'saudi arabia',
+  bahrain: 'bahrain',
+  doha: 'qatar',
+  new york city: 'united states',
+  boston: 'united states',
+  chicago: 'united states',
+  san francisco: 'united states',
+  los angeles: 'united states',
+  seattle: 'united states',
+  miami: 'united states',
+  dallas: 'united states',
+  houston: 'united states',
+  atlanta: 'united states',
+  austin: 'united states',
+  denver: 'united states',
+  washington dc: 'united states',
+  washington d c: 'united states',
+  uae: 'united arab emirates',
+  emirates: 'united arab emirates',
+}
+
+function normalizeLocationToken(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[().]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeCountry(value: string): string {
+  const normalized = normalizeLocationToken(value)
+  if (!normalized) return ''
+  return COUNTRY_ALIASES[normalized] || normalized
+}
+
+function isLocationCountryOnly(value: string): boolean {
+  if (!value) return false
+  return !value.includes(',')
+}
+
+function extractCountryFromApolloLocation(value: string): string | null {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (raw.includes(',')) {
+    const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
+    if (parts.length > 1) {
+      return normalizeCountry(parts[parts.length - 1])
+    }
+  }
+  if (isLocationCountryOnly(raw)) {
+    return normalizeCountry(raw)
+  }
+  return null
+}
+
+function countryTokenToQueryLabel(token: string): string {
+  const normalized = normalizeCountry(token)
+  if (!normalized) return ''
+  const map: Record<string, string> = {
+    'united kingdom': 'United Kingdom',
+    'united states': 'United States',
+    'united arab emirates': 'United Arab Emirates',
+    'germany': 'Germany',
+    'france': 'France',
+    'netherlands': 'Netherlands',
+    'switzerland': 'Switzerland',
+    'ireland': 'Ireland',
+    'spain': 'Spain',
+    'italy': 'Italy',
+    'belgium': 'Belgium',
+    'luxembourg': 'Luxembourg',
+    'saudi arabia': 'Saudi Arabia',
+    'qatar': 'Qatar',
+    'bahrain': 'Bahrain',
+    'kuwait': 'Kuwait',
+    'oman': 'Oman',
+    'austria': 'Austria',
+    'poland': 'Poland',
+    'portugal': 'Portugal',
+    'sweden': 'Sweden',
+    'denmark': 'Denmark',
+    'norway': 'Norway',
+    'finland': 'Finland',
+  }
+  if (map[normalized]) return map[normalized]
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function matchesStrictLocation(
+  person: { city?: string | null; state?: string | null; country?: string | null },
+  mode: 'city' | 'country' | 'none',
+  allowedCities: Set<string>,
+  allowedCountries: Set<string>
+): boolean {
+  if (mode === 'none') return true
+
+  const city = normalizeLocationToken(person.city || '')
+  const state = normalizeLocationToken(person.state || '')
+  const country = normalizeCountry(person.country || '')
+
+  if (mode === 'city') {
+    if (allowedCities.size === 0) return true
+    if (city && allowedCities.has(city)) return true
+    if (state && allowedCities.has(state)) return true
+    return false
+  }
+
+  if (allowedCountries.size === 0) return true
+  return !!country && allowedCountries.has(country)
 }
 
 function buildRetryStrategies(
   originalCompany: string,
   signalTitle: string,
   signalRegion: string,
-  originalLocations: string[]
+  originalLocations: string[],
+  countryFallbackLocations: string[],
+  strictLocationEnabled: boolean
 ): RetryStrategy[] {
   const strategies: RetryStrategy[] = []
+  const originalLocationMode: 'city' | 'country' =
+    originalLocations.some((loc) => String(loc || '').includes(',')) ? 'city' : 'country'
   
   // Strategy 1: Original company, original locations (already tried)
   
@@ -617,6 +812,7 @@ function buildRetryStrategies(
       name: 'stripped_suffixes',
       companyName: strippedCompany,
       locations: originalLocations,
+      locationMode: originalLocationMode,
     })
   }
   
@@ -627,16 +823,20 @@ function buildRetryStrategies(
       name: 'title_derived',
       companyName: titleCompany,
       locations: originalLocations,
+      locationMode: originalLocationMode,
     })
   }
   
   // Strategy 4: Widen to country-level locations
-  const countryLocations = REGION_COUNTRY_LOCATIONS[signalRegion] || []
+  const countryLocations = countryFallbackLocations.length > 0
+    ? countryFallbackLocations
+    : (REGION_COUNTRY_LOCATIONS[signalRegion] || [])
   if (countryLocations.length > 0) {
     strategies.push({
       name: 'widen_location',
       companyName: originalCompany,
       locations: countryLocations,
+      locationMode: 'country',
     })
     
     // Also try stripped company + widened locations
@@ -645,16 +845,20 @@ function buildRetryStrategies(
         name: 'stripped_widen',
         companyName: strippedCompany,
         locations: countryLocations,
+        locationMode: 'country',
       })
     }
   }
   
-  // Strategy 5: No location filter (last resort)
-  strategies.push({
-    name: 'no_location_filter',
-    companyName: originalCompany,
-    locations: [],
-  })
+  // Strategy 5: No location filter (last resort, disabled for strict location mode)
+  if (!strictLocationEnabled) {
+    strategies.push({
+      name: 'no_location_filter',
+      companyName: originalCompany,
+      locations: [],
+      locationMode: 'none',
+    })
+  }
   
   return strategies
 }
@@ -873,6 +1077,47 @@ Deno.serve(async (req) => {
     }
     
     const apolloLocations = searchLocations.map(loc => locationLabels[loc] || loc)
+    const strictLocationEnabled = Boolean(targetCompany)
+    const strictCityLocations = Array.from(
+      new Set(apolloLocations.filter((loc) => !isLocationCountryOnly(loc)))
+    )
+    const explicitCountryTokens = apolloLocations
+      .filter((loc) => isLocationCountryOnly(loc))
+      .map((loc) => normalizeCountry(loc))
+      .filter(Boolean)
+    const derivedCountryTokens = strictCityLocations
+      .map((loc) => {
+        const parts = String(loc || '').split(',').map((p) => p.trim()).filter(Boolean)
+        return parts.length > 1 ? normalizeCountry(parts[parts.length - 1]) : ''
+      })
+      .filter(Boolean)
+    const strictCountryTokens = Array.from(new Set([
+      ...explicitCountryTokens,
+      ...derivedCountryTokens,
+    ].filter(Boolean)))
+    const strictCountryLocations = Array.from(
+      new Set(strictCountryTokens.map((token) => countryTokenToQueryLabel(token)).filter(Boolean))
+    )
+    const primarySearchLocations = strictLocationEnabled && strictCityLocations.length > 0
+      ? strictCityLocations
+      : apolloLocations
+    const initialLocationMode: 'city' | 'country' =
+      strictLocationEnabled && strictCityLocations.length > 0 ? 'city' : 'country'
+
+    const allowedCityTokens = new Set(
+      primarySearchLocations
+        .map((loc) => normalizeLocationToken(loc.split(',')[0] || loc))
+        .filter(Boolean)
+    )
+    const allowedCountryTokens = new Set(
+      strictCountryTokens
+    )
+
+    if (strictLocationEnabled) {
+      console.log('Strict location mode enabled for target-company search')
+      console.log(`Primary city locations: ${primarySearchLocations.join(' | ') || 'none'}`)
+      console.log(`Country fallback locations: ${strictCountryLocations.join(' | ') || 'none'}`)
+    }
 
     // Build all search combinations: industries × sectors (OR logic for maximum coverage)
     // If no sectors, just use industries. If no industries, just use sectors.
@@ -985,8 +1230,8 @@ Deno.serve(async (req) => {
         targetRoles.forEach(title => queryParams.append('person_titles[]', title))
         
         // Add locations
-        if (apolloLocations.length > 0) {
-          apolloLocations.forEach(loc => queryParams.append('person_locations[]', loc))
+        if (primarySearchLocations.length > 0) {
+          primarySearchLocations.forEach(loc => queryParams.append('person_locations[]', loc))
         }
         
         // Add target company filter if specified (signal-based search)
@@ -1104,6 +1349,18 @@ Deno.serve(async (req) => {
               const companyName = person.organization?.name || person.organization_name || 'Unknown'
               const personIndustry = person.organization?.industry || null
               const personLocation = person.city || person.state || person.country || 'Unknown'
+
+              if (strictLocationEnabled) {
+                const isLocationMatch = matchesStrictLocation(
+                  { city: person.city, state: person.state, country: person.country },
+                  initialLocationMode,
+                  allowedCityTokens,
+                  allowedCountryTokens
+                )
+                if (!isLocationMatch) {
+                  continue
+                }
+              }
               
               // For signal-based searches: STRICT company matching
               if (targetCompany) {
@@ -1287,6 +1544,16 @@ Deno.serve(async (req) => {
                   const companyName = person.organization?.name || personData.company
                   const jobTitle = person.title || personData.title || 'Unknown'
 
+                  if (strictLocationEnabled) {
+                    const isLocationMatch = matchesStrictLocation(
+                      { city: person.city, state: person.state, country: person.country },
+                      initialLocationMode,
+                      allowedCityTokens,
+                      allowedCountryTokens
+                    )
+                    if (!isLocationMatch) continue
+                  }
+
                   if (!(email && fullName && fullName !== 'Unknown')) continue
                   const emailLower = email.toLowerCase()
                   if (usedEmails.has(emailLower) || seenEmails.has(emailLower)) continue
@@ -1357,7 +1624,14 @@ Deno.serve(async (req) => {
       console.log(`\n=== SIGNAL RETRY LOOP ===`)
       console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${TARGET_COMPANY_MIN_CONTACTS}`)
       
-      const retryStrategies = buildRetryStrategies(targetCompany, signalTitle, signalRegion, apolloLocations)
+      const retryStrategies = buildRetryStrategies(
+        targetCompany,
+        signalTitle,
+        signalRegion,
+        primarySearchLocations,
+        strictCountryLocations,
+        strictLocationEnabled
+      )
       console.log(`Trying ${retryStrategies.length} retry strategies...`)
       
       for (const strategy of retryStrategies) {
@@ -1368,6 +1642,17 @@ Deno.serve(async (req) => {
         
         console.log(`\n--- Retry strategy: ${strategy.name} ---`)
         console.log(`Company: "${strategy.companyName}", Locations: ${strategy.locations.length > 0 ? strategy.locations.slice(0, 3).join(', ') + '...' : 'none'}`)
+
+        const retryAllowedCityTokens = new Set(
+          (strategy.locationMode === 'city' ? strategy.locations : [])
+            .map((loc) => normalizeLocationToken(loc.split(',')[0] || loc))
+            .filter(Boolean)
+        )
+        const retryAllowedCountryTokens = new Set(
+          (strategy.locationMode === 'country' ? strategy.locations : strictCountryLocations)
+            .map((loc) => normalizeCountry(loc))
+            .filter(Boolean)
+        )
         
         try {
           // Build query params for retry
@@ -1425,6 +1710,16 @@ Deno.serve(async (req) => {
                 const personCompanyName = person.organization?.name || person.organization_name || 'Unknown'
                 const personIndustry = person.organization?.industry || null
                 const personLocation = person.city || person.state || person.country || 'Unknown'
+
+                if (strictLocationEnabled) {
+                  const locationMatch = matchesStrictLocation(
+                    { city: person.city, state: person.state, country: person.country },
+                    strategy.locationMode,
+                    retryAllowedCityTokens,
+                    retryAllowedCountryTokens
+                  )
+                  if (!locationMatch) continue
+                }
                 
                 // STRICT company matching - must match target
                 if (!companiesMatch(targetCompany, personCompanyName)) {
@@ -1530,6 +1825,16 @@ Deno.serve(async (req) => {
                     const jobTitle = person.title || personData.title || 'Unknown'
                     const locationParts = [person.city, person.state, person.country].filter(Boolean)
                     const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
+
+                    if (strictLocationEnabled) {
+                      const locationMatch = matchesStrictLocation(
+                        { city: person.city, state: person.state, country: person.country },
+                        strategy.locationMode,
+                        retryAllowedCityTokens,
+                        retryAllowedCountryTokens
+                      )
+                      if (!locationMatch) continue
+                    }
 
                     if (!(email && fullName && fullName !== 'Unknown')) continue
                     const emailLower = email.toLowerCase()

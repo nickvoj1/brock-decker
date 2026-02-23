@@ -132,8 +132,8 @@ const DEFAULT_CATEGORY_PRIORITY = [
 
 // Region to locations mapping
 const REGION_LOCATIONS: Record<string, string[]> = {
-  london: ['London, United Kingdom', 'Manchester, United Kingdom', 'Birmingham, United Kingdom'],
-  europe: ['London, United Kingdom', 'Frankfurt, Germany', 'Paris, France', 'Amsterdam, Netherlands', 'Zurich, Switzerland'],
+  london: ['London, United Kingdom'],
+  europe: ['Frankfurt, Germany', 'Paris, France', 'Amsterdam, Netherlands', 'Zurich, Switzerland'],
   uae: ['Dubai, UAE', 'Abu Dhabi, UAE'],
   usa: ['New York, NY', 'Boston, MA', 'Chicago, IL', 'San Francisco, CA', 'Los Angeles, CA', 'Seattle, WA'],
   east_usa: ['New York, NY', 'Boston, MA', 'Chicago, IL', 'Washington D.C.'],
@@ -142,12 +142,188 @@ const REGION_LOCATIONS: Record<string, string[]> = {
 
 // Wider region locations for fallback
 const REGION_COUNTRY_LOCATIONS: Record<string, string[]> = {
-  london: ['United Kingdom', 'England'],
-  europe: ['United Kingdom', 'Germany', 'France', 'Netherlands', 'Switzerland', 'Ireland', 'Spain', 'Italy', 'Belgium', 'Luxembourg'],
-  uae: ['United Arab Emirates', 'Saudi Arabia', 'Qatar', 'Bahrain'],
-  usa: ['United States', 'New York', 'Massachusetts', 'California', 'Illinois', 'Washington', 'Texas', 'Florida'],
-  east_usa: ['New York', 'Massachusetts', 'Connecticut', 'New Jersey', 'Pennsylvania', 'Illinois', 'Florida'],
-  west_usa: ['California', 'Washington', 'Oregon', 'Colorado', 'Texas'],
+  london: ['United Kingdom'],
+  europe: ['Germany', 'France', 'Netherlands', 'Switzerland', 'Ireland', 'Spain', 'Italy', 'Belgium', 'Luxembourg'],
+  uae: ['United Arab Emirates'],
+  usa: ['United States'],
+  east_usa: ['United States'],
+  west_usa: ['United States'],
+}
+
+const COUNTRY_ALIASES: Record<string, string> = {
+  uk: 'united kingdom',
+  u k: 'united kingdom',
+  england: 'united kingdom',
+  britain: 'united kingdom',
+  great britain: 'united kingdom',
+  united states of america: 'united states',
+  usa: 'united states',
+  us: 'united states',
+  u s: 'united states',
+  ny: 'united states',
+  ma: 'united states',
+  ca: 'united states',
+  il: 'united states',
+  wa: 'united states',
+  tx: 'united states',
+  fl: 'united states',
+  dc: 'united states',
+  new york: 'united states',
+  massachusetts: 'united states',
+  california: 'united states',
+  illinois: 'united states',
+  washington: 'united states',
+  texas: 'united states',
+  florida: 'united states',
+  georgia: 'united states',
+  virginia: 'united states',
+  maryland: 'united states',
+  connecticut: 'united states',
+  new jersey: 'united states',
+  pennsylvania: 'united states',
+  oregon: 'united states',
+  colorado: 'united states',
+  arizona: 'united states',
+  london: 'united kingdom',
+  manchester: 'united kingdom',
+  birmingham: 'united kingdom',
+  edinburgh: 'united kingdom',
+  paris: 'france',
+  lyon: 'france',
+  marseille: 'france',
+  berlin: 'germany',
+  frankfurt: 'germany',
+  munich: 'germany',
+  hamburg: 'germany',
+  dusseldorf: 'germany',
+  amsterdam: 'netherlands',
+  rotterdam: 'netherlands',
+  zurich: 'switzerland',
+  geneva: 'switzerland',
+  basel: 'switzerland',
+  dublin: 'ireland',
+  cork: 'ireland',
+  madrid: 'spain',
+  barcelona: 'spain',
+  milan: 'italy',
+  rome: 'italy',
+  lisbon: 'portugal',
+  porto: 'portugal',
+  vienna: 'austria',
+  brussels: 'belgium',
+  antwerp: 'belgium',
+  luxembourg city: 'luxembourg',
+  stockholm: 'sweden',
+  gothenburg: 'sweden',
+  copenhagen: 'denmark',
+  oslo: 'norway',
+  helsinki: 'finland',
+  warsaw: 'poland',
+  krakow: 'poland',
+  dubai: 'united arab emirates',
+  abu dhabi: 'united arab emirates',
+  riyadh: 'saudi arabia',
+  bahrain: 'bahrain',
+  doha: 'qatar',
+  new york city: 'united states',
+  boston: 'united states',
+  chicago: 'united states',
+  san francisco: 'united states',
+  los angeles: 'united states',
+  seattle: 'united states',
+  miami: 'united states',
+  dallas: 'united states',
+  houston: 'united states',
+  atlanta: 'united states',
+  austin: 'united states',
+  denver: 'united states',
+  washington dc: 'united states',
+  washington d c: 'united states',
+  uae: 'united arab emirates',
+  emirates: 'united arab emirates',
+}
+
+function normalizeLocationToken(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[().]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeCountry(value: string): string {
+  const normalized = normalizeLocationToken(value)
+  if (!normalized) return ''
+  return COUNTRY_ALIASES[normalized] || normalized
+}
+
+function extractCountryFromLocationLabel(value: string): string | null {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  if (raw.includes(',')) {
+    const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
+    if (parts.length > 1) return normalizeCountry(parts[parts.length - 1])
+  }
+  return normalizeCountry(raw)
+}
+
+function countryTokenToQueryLabel(token: string): string {
+  const normalized = normalizeCountry(token)
+  if (!normalized) return ''
+  const map: Record<string, string> = {
+    'united kingdom': 'United Kingdom',
+    'united states': 'United States',
+    'united arab emirates': 'United Arab Emirates',
+    'germany': 'Germany',
+    'france': 'France',
+    'netherlands': 'Netherlands',
+    'switzerland': 'Switzerland',
+    'ireland': 'Ireland',
+    'spain': 'Spain',
+    'italy': 'Italy',
+    'belgium': 'Belgium',
+    'luxembourg': 'Luxembourg',
+    'saudi arabia': 'Saudi Arabia',
+    'qatar': 'Qatar',
+    'bahrain': 'Bahrain',
+    'kuwait': 'Kuwait',
+    'oman': 'Oman',
+  }
+  if (map[normalized]) return map[normalized]
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function isGenericRegionLabel(value: string): boolean {
+  const token = normalizeLocationToken(value)
+  return token === 'europe' || token === 'usa' || token === 'uae' || token === 'london'
+}
+
+function isPersonInAllowedLocation(
+  person: { city?: string | null; state?: string | null; country?: string | null },
+  mode: 'city' | 'country' | 'none',
+  allowedCityTokens: Set<string>,
+  allowedCountryTokens: Set<string>
+): boolean {
+  if (mode === 'none') return true
+
+  const city = normalizeLocationToken(person.city || '')
+  const state = normalizeLocationToken(person.state || '')
+  const country = normalizeCountry(person.country || '')
+
+  if (mode === 'city') {
+    if (allowedCityTokens.size === 0) return true
+    if (city && allowedCityTokens.has(city)) return true
+    if (state && allowedCityTokens.has(state)) return true
+    return false
+  }
+
+  if (allowedCountryTokens.size === 0) return true
+  return !!country && allowedCountryTokens.has(country)
 }
 
 function getSignalLocationOverrides(signal: any): { exactLocations: string[]; countryHints: string[] } {
@@ -160,13 +336,14 @@ function getSignalLocationOverrides(signal: any): { exactLocations: string[]; co
         .split('|')
         .map((part: string) => part.trim())
         .filter((part: string) => part.length > 1)
+        .filter((part: string) => !isGenericRegionLabel(part))
     )
   )
 
   const countryHints = Array.from(
     new Set(
       exactLocations
-        .map((loc) => loc.split(',').map((p) => p.trim()).filter(Boolean).pop() || '')
+        .map((loc) => extractCountryFromLocationLabel(loc) || '')
         .filter((v) => v.length > 1)
     )
   )
@@ -496,6 +673,9 @@ interface SearchStrategy {
   name: string
   company: string
   locations: string[]
+  locationMode: 'city' | 'country' | 'none'
+  allowedCityTokens: Set<string>
+  allowedCountryTokens: Set<string>
 }
 
 async function revealEmail(apolloApiKey: string, personId: string): Promise<string | null> {
@@ -604,6 +784,16 @@ async function searchWithStrategy(
 
         const personCompany = person.organization?.name || ''
         const personIndustry = person.organization?.industry || null
+
+        const locationPasses = isPersonInAllowedLocation(
+          { city: person.city, state: person.state, country: person.country },
+          strategy.locationMode,
+          strategy.allowedCityTokens,
+          strategy.allowedCountryTokens
+        )
+        if (!locationPasses) {
+          continue
+        }
         
         // Strict company match
         if (!companiesMatch(strategy.company, personCompany)) {
@@ -712,6 +902,18 @@ async function searchWithStrategy(
           const lastName = enrichedPerson.last_name || person.last_name || ''
           const fullName = `${firstName} ${lastName}`.trim()
           const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
+
+          const locationPasses = isPersonInAllowedLocation(
+            {
+              city: enrichedPerson.city || person.city,
+              state: enrichedPerson.state || person.state,
+              country: enrichedPerson.country || person.country,
+            },
+            strategy.locationMode,
+            strategy.allowedCityTokens,
+            strategy.allowedCountryTokens
+          )
+          if (!locationPasses) continue
           
           const locationParts = [
             enrichedPerson.city || person.city,
@@ -853,10 +1055,33 @@ Deno.serve(async (req) => {
     const regionCityLocations = REGION_LOCATIONS[region] || REGION_LOCATIONS.europe
     const regionCountryLocations = REGION_COUNTRY_LOCATIONS[region] || REGION_COUNTRY_LOCATIONS.europe
     const { exactLocations, countryHints } = getSignalLocationOverrides(signal)
-    const cityLocations = Array.from(new Set([...exactLocations, ...regionCityLocations]))
-    const countryLocations = Array.from(new Set([...countryHints, ...regionCountryLocations]))
+    const cityLocations = exactLocations.length > 0
+      ? Array.from(new Set(exactLocations))
+      : Array.from(new Set(regionCityLocations))
+    const countriesFromCities = cityLocations
+      .map((loc) => extractCountryFromLocationLabel(loc) || '')
+      .filter(Boolean)
+    const countryLocationTokensRaw = Array.from(new Set([
+      ...countryHints.map((country) => normalizeCountry(country)).filter(Boolean),
+      ...countriesFromCities,
+      ...(exactLocations.length > 0 ? [] : regionCountryLocations.map((country) => normalizeCountry(country)).filter(Boolean)),
+    ]))
+    const countryLocations = countryLocationTokensRaw
+      .map((country) => countryTokenToQueryLabel(country))
+      .filter(Boolean)
+    const cityLocationTokens = new Set(
+      cityLocations
+        .map((loc) => normalizeLocationToken(loc.split(',')[0] || loc))
+        .filter(Boolean)
+    )
+    const countryLocationTokens = new Set(
+      countryLocations
+        .map((country) => normalizeCountry(country))
+        .filter(Boolean)
+    )
 
-    console.log(`Region: ${region}, Locations: ${cityLocations.join(', ')}`)
+    console.log(`Region: ${region}, City-first locations: ${cityLocations.join(', ')}`)
+    console.log(`Country fallback locations: ${Array.from(countryLocationTokens).join(', ')}`)
 
     // Build company name variants (combine AI variants + regex variants)
     const allCompanyVariants = new Set<string>([targetCompany])
@@ -884,11 +1109,27 @@ Deno.serve(async (req) => {
     // Build search strategies (company variant × location level)
     const strategies: SearchStrategy[] = []
     for (const company of uniqueVariants) {
-      strategies.push({ name: `${company}_cities`, company, locations: cityLocations })
-      strategies.push({ name: `${company}_countries`, company, locations: countryLocations })
+      if (cityLocations.length > 0) {
+        strategies.push({
+          name: `${company}_cities`,
+          company,
+          locations: cityLocations,
+          locationMode: 'city',
+          allowedCityTokens: cityLocationTokens,
+          allowedCountryTokens: countryLocationTokens,
+        })
+      }
+      if (countryLocations.length > 0) {
+        strategies.push({
+          name: `${company}_countries`,
+          company,
+          locations: countryLocations,
+          locationMode: 'country',
+          allowedCityTokens: cityLocationTokens,
+          allowedCountryTokens: countryLocationTokens,
+        })
+      }
     }
-    // Final fallback: no location filter
-    strategies.push({ name: 'no_location', company: targetCompany, locations: [] })
 
     const TARGET_MIN_CONTACTS = 10
     const MAX_PER_COMPANY = 10 // Allow more contacts per company for exhaustive search
