@@ -68,6 +68,7 @@ type SearchHistoryItem = {
 };
 
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
+const SEARCH_CACHE_WINDOW_MS = 10 * 60 * 1000;
 
 const DEFAULT_FILTERS: Filters = {
   title: "",
@@ -358,31 +359,15 @@ export function FantasticJobsBoard() {
       params.limit = String(requestedCount);
       params.offset = "0";
 
-      const MAX_RETRIES = 2;
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
-
-        // Handle rate limiting with retry
-        if (data?.rateLimited || (error && String(error).includes("429"))) {
-          if (attempt < MAX_RETRIES) {
-            const delay = 3000 * Math.pow(2, attempt);
-            toast({
-              title: "Rate limited",
-              description: `Waiting ${Math.round(delay / 1000)}s before retrying... (attempt ${attempt + 1}/${MAX_RETRIES})`,
-            });
-            await new Promise((r) => setTimeout(r, delay));
-            continue;
-          }
-          throw new Error("Rate limit exceeded. Please wait a minute and try again.");
-        }
-
-        if (error) throw error;
-        if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
-        return data.jobs as Job[];
+      const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
+      if (data?.rateLimited) {
+        throw new Error("Rate limited by provider. Wait 1-2 minutes before searching again.");
       }
-      throw new Error("Search failed after retries");
+      if (error) throw error;
+      if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
+      return data.jobs as Job[];
     },
-    [filters, requestedCount, toast],
+    [filters, requestedCount],
   );
 
   const applyClientFilters = useCallback(
@@ -433,6 +418,24 @@ export function FantasticJobsBoard() {
   const runSearch = useCallback(
     async (mode: SearchMode) => {
       setSearchMode(mode);
+
+      const cached = searchHistory.find((item) => {
+        if (item.mode !== mode) return false;
+        if (item.strictPEOnly !== strictPEOnly) return false;
+        if (JSON.stringify(item.filters) !== JSON.stringify(filters)) return false;
+        const ts = new Date(item.createdAt).getTime();
+        return Number.isFinite(ts) && Date.now() - ts <= SEARCH_CACHE_WINDOW_MS;
+      });
+
+      if (cached) {
+        loadHistoryItem(cached);
+        toast({
+          title: "Loaded cached search",
+          description: "Used recent results to avoid extra API credits.",
+        });
+        return;
+      }
+
       setLoading(true);
       try {
         const incoming = await fetchViaBackend(mode);
@@ -491,7 +494,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [fetchViaBackend, toast, filters, requestedCount, applyClientFilters, strictPEOnly],
+    [fetchViaBackend, toast, filters, requestedCount, applyClientFilters, strictPEOnly, searchHistory],
   );
 
   const runSelectedSearch = () => {

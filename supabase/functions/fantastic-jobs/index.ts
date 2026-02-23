@@ -224,45 +224,38 @@ function filterByPostedAfter(
   if (!windowMs) return jobs;
 
   const cutoff = Date.now() - windowMs;
-  return jobs.filter((job) => {
+  let validDates = 0;
+  const filtered = jobs.filter((job) => {
     const postedAt = String(job.posted_at || "");
     const ts = new Date(postedAt).getTime();
-    return Number.isFinite(ts) && ts >= cutoff;
+    if (!Number.isFinite(ts)) return false;
+    validDates += 1;
+    return ts >= cutoff;
   });
-}
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  // Fail open if provider date formats are inconsistent and filtering would hide all jobs.
+  if (jobs.length > 0 && (validDates === 0 || filtered.length === 0)) {
+    console.warn("[fantastic-jobs] posted_after filter produced zero rows; returning unfiltered jobs");
+    return jobs;
+  }
+  return filtered;
 }
 
 async function fetchWithRetry(
   fetchFn: () => Promise<Response>,
-  maxRetries = 3,
-  baseDelayMs = 2000,
+  maxRetries = 0,
+  _baseDelayMs = 0,
 ): Promise<Response> {
-  let lastError: Error | null = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetchFn();
     if (res.status === 429) {
-      const retryAfter = res.headers.get("Retry-After");
-      let delayMs = baseDelayMs * Math.pow(2, attempt);
-      if (retryAfter) {
-        const parsed = parseInt(retryAfter, 10);
-        if (!isNaN(parsed)) delayMs = Math.max(delayMs, parsed * 1000);
-      }
-      // Consume body to avoid leak
       await res.text();
-      console.warn(`[fantastic-jobs] 429 rate limited, retry ${attempt + 1}/${maxRetries} after ${delayMs}ms`);
-      if (attempt < maxRetries) {
-        await sleep(delayMs);
-        continue;
-      }
-      lastError = new Error("Rate limit exceeded after retries");
-    } else {
-      return res;
+      if (attempt < maxRetries) continue;
+      throw new Error("Rate limit exceeded");
     }
+    return res;
   }
-  throw lastError || new Error("Rate limit exceeded");
+  throw new Error("Rate limit exceeded");
 }
 
 async function fetchViaRapidAPI(
@@ -374,40 +367,6 @@ async function fetchViaApify(
     Object.keys(actorInput).filter((k) => (actorInput as Record<string, unknown>)[k] !== undefined),
   );
 
-  const payloads: Record<string, unknown>[] = [
-    actorInput,
-    {
-      timeRange,
-      limit: maxItems,
-      includeAi: true,
-      descriptionType: "text",
-      titleSearch,
-      locationSearch,
-      removeAgency: true,
-      remote: isLinkedInActor && remote ? true : undefined,
-      "remote only (legacy)": isCareerActor && remote ? true : undefined,
-    },
-    {
-      timeRange,
-      limit: maxItems,
-      includeAi: true,
-      titleSearch,
-      locationSearch,
-    },
-    {
-      query: keyword || undefined,
-      keyword,
-      location,
-      posted_after: postedAfter,
-      salary_min: salaryMin ? Number(salaryMin) : undefined,
-      remote,
-      maxItems,
-      limit: maxItems,
-      offset: Number(offset),
-    },
-    { timeRange, limit: maxItems },
-  ];
-
   const parseApifyItems = (data: unknown): Record<string, unknown>[] => {
     if (Array.isArray(data)) return data as Record<string, unknown>[];
     if (!data || typeof data !== "object") return [];
@@ -419,39 +378,9 @@ async function fetchViaApify(
     return [];
   };
 
-  for (const payload of payloads) {
-    const input = Object.fromEntries(
-      Object.entries(payload).filter(([, v]) => v !== undefined && v !== null && v !== ""),
-    );
-
-    const syncUrl = buildRunSyncUrl(input);
-    const syncRes = await fetchWithRetry(() =>
-      fetch(syncUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(input),
-      }),
-    );
-
-    if (syncRes.ok) {
-      const data = await syncRes.json();
-      const items = parseApifyItems(data);
-      if (items.length > 0) return items;
-      continue;
-    }
-
-    const syncErr = await syncRes.text();
-    console.warn(`[fantastic-jobs] Apify run-sync failed for ${actorId}: ${syncRes.status} ${syncErr.slice(0, 180)}`);
-  }
-
-  const asyncRunUrl =
-    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
-    `/runs?token=${encodeURIComponent(apifyToken)}&waitForFinish=120`;
-
-  const asyncRunRes = await fetchWithRetry(() =>
-    fetch(asyncRunUrl, {
+  const syncUrl = buildRunSyncUrl(actorInput);
+  const syncRes = await fetchWithRetry(() =>
+    fetch(syncUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -460,33 +389,13 @@ async function fetchViaApify(
     }),
   );
 
-  if (!asyncRunRes.ok) {
-    const errText = await asyncRunRes.text();
-    throw new Error(`Apify request failed: ${asyncRunRes.status} - ${errText.substring(0, 220)}`);
+  if (!syncRes.ok) {
+    const syncErr = await syncRes.text();
+    throw new Error(`Apify request failed for ${actorId}: ${syncRes.status} - ${syncErr.slice(0, 220)}`);
   }
 
-  const asyncRunData = await asyncRunRes.json();
-  const defaultDatasetId =
-    asyncRunData?.data?.defaultDatasetId ||
-    asyncRunData?.defaultDatasetId ||
-    "";
-
-  if (!defaultDatasetId) {
-    throw new Error("Apify run completed but no default dataset was returned");
-  }
-
-  const datasetUrl =
-    `https://api.apify.com/v2/datasets/${encodeURIComponent(defaultDatasetId)}` +
-    `/items?token=${encodeURIComponent(apifyToken)}&format=json&clean=true&limit=${encodeURIComponent(limit)}`;
-
-  const datasetRes = await fetch(datasetUrl, { method: "GET" });
-  if (!datasetRes.ok) {
-    const errText = await datasetRes.text();
-    throw new Error(`Apify dataset fetch failed: ${datasetRes.status} - ${errText.substring(0, 220)}`);
-  }
-
-  const datasetItems = await datasetRes.json();
-  return parseApifyItems(datasetItems);
+  const data = await syncRes.json();
+  return parseApifyItems(data);
 }
 
 async function readApiSettings(): Promise<Record<string, string>> {
