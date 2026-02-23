@@ -946,12 +946,18 @@ export default function SignalsDashboard() {
 
         {/* Tabs: Signals vs Jobs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="signals" className="gap-1.5">
+          <TabsList className="grid h-12 w-full max-w-lg grid-cols-2 rounded-xl border border-primary/30 bg-primary/5 p-1.5 shadow-sm">
+            <TabsTrigger
+              value="signals"
+              className="gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+            >
               <Sparkles className="h-4 w-4" />
-              Signals
+              Signals Feed
             </TabsTrigger>
-            <TabsTrigger value="jobboard" className="gap-1.5">
+            <TabsTrigger
+              value="jobboard"
+              className="gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+            >
               <Search className="h-4 w-4" />
               Job Board
             </TabsTrigger>
