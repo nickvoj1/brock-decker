@@ -497,13 +497,18 @@ Deno.serve(async (req) => {
 
     const normalizedJobs = normalizeJobs(rawJobs, normalizeLocationExpression(getParam(body, url, "location")));
     const mixedJobs = sourceMode === "all" ? interleaveJobsBySource(normalizedJobs) : normalizedJobs;
-    const jobs = mixedJobs.slice(0, requestedLimit);
+    const effectiveLimit = sourceMode === "all" && apifyActorIds.length > 1
+      ? requestedLimit * apifyActorIds.length
+      : requestedLimit;
+    const jobs = mixedJobs.slice(0, effectiveLimit);
     const offset = Number(getParam(body, url, "offset", "0"));
-    const limit = requestedLimit;
+    const limit = effectiveLimit;
     const diagnostics = {
       raw: rawJobs.length,
       normalized: normalizedJobs.length,
       mixed: mixedJobs.length,
+      requested: requestedLimit,
+      effective_limit: effectiveLimit,
       returned: jobs.length,
     };
 

@@ -621,7 +621,8 @@ export function FantasticJobsBoard() {
           ...job,
           location: withLocationFallback(job.location, searchLocation),
         }));
-        const capped = normalizedIncoming.slice(0, requestedCount);
+        const effectiveLimit = mode === "all" ? requestedCount * 2 : requestedCount;
+        const capped = normalizedIncoming.slice(0, effectiveLimit);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
         const visibleRows = strictPEOnly
@@ -736,7 +737,7 @@ export function FantasticJobsBoard() {
     );
   }, [jobs]);
 
-  const showSourceTabs = sourceCounts.linkedin > 0 && sourceCounts.career > 0;
+  const showSourceTabs = searchMode === "all";
 
   const sortedJobs = useMemo(() => {
     return [...scopedJobs].sort((a, b) => {
