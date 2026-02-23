@@ -72,11 +72,20 @@ type JobsDiagnostics = {
   raw?: number;
   normalized?: number;
   returned?: number;
+  requested?: number;
+  effective_limit?: number;
+  mixed?: number;
 };
 
 type FetchJobsResult = {
   jobs: Job[];
   diagnostics?: JobsDiagnostics;
+};
+
+type RunSearchOptions = {
+  force?: boolean;
+  append?: boolean;
+  offset?: number;
 };
 
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
@@ -256,6 +265,18 @@ function formatSourceLabel(source: string): string {
   if (bucket === "linkedin") return "LinkedIn";
   if (bucket === "career") return "Career Site";
   return source || "source";
+}
+
+function dedupeJobs(rows: Job[]): Job[] {
+  const seen = new Set<string>();
+  const out: Job[] = [];
+  for (const row of rows) {
+    const key = `${(row.apply_url || "").toLowerCase()}|${row.title.toLowerCase()}|${row.company.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
 }
 
 function toNumber(value: unknown): number | null {
@@ -495,6 +516,8 @@ export function FantasticJobsBoard() {
   const [apolloTargetJob, setApolloTargetJob] = useState<Job | null>(null);
   const [apolloModalOpen, setApolloModalOpen] = useState(false);
   const [warnedOutdatedBackend, setWarnedOutdatedBackend] = useState(false);
+  const [baseOffset, setBaseOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => {
     try {
       const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
@@ -554,7 +577,7 @@ export function FantasticJobsBoard() {
   );
 
   const fetchViaBackend = useCallback(
-    async (mode: SearchMode): Promise<FetchJobsResult> => {
+    async (mode: SearchMode, offset = 0): Promise<FetchJobsResult> => {
       const params: Record<string, string> = {};
       if (filters.title) params.keyword = filters.title;
       if (filters.industryKeywords) params.industry_keywords = filters.industryKeywords;
@@ -565,7 +588,7 @@ export function FantasticJobsBoard() {
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       params.source = mode;
       params.limit = String(requestedCount);
-      params.offset = "0";
+      params.offset = String(Math.max(0, offset));
 
       const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
       if (data?.rateLimited) {
@@ -582,17 +605,20 @@ export function FantasticJobsBoard() {
   );
 
   const runSearch = useCallback(
-    async (mode: SearchMode) => {
+    async (mode: SearchMode, options?: RunSearchOptions) => {
+      const force = Boolean(options?.force);
+      const append = Boolean(options?.append);
+      const offset = Math.max(0, options?.offset ?? 0);
       setSearchMode(mode);
       setSourceTab(mode === "all" ? "all" : mode);
 
-      const cached = searchHistory.find((item) => {
+      const cached = !force && !append ? searchHistory.find((item) => {
         if (item.mode !== mode) return false;
         if (item.strictPEOnly !== strictPEOnly) return false;
         if (JSON.stringify(item.filters) !== JSON.stringify(filters)) return false;
         const ts = new Date(item.createdAt).getTime();
         return Number.isFinite(ts) && Date.now() - ts <= SEARCH_CACHE_WINDOW_MS;
-      });
+      }) : undefined;
 
       if (cached) {
         loadHistoryItem(cached);
@@ -605,7 +631,7 @@ export function FantasticJobsBoard() {
 
       setLoading(true);
       try {
-        const backendResult = await fetchViaBackend(mode);
+        const backendResult = await fetchViaBackend(mode, offset);
         const incoming = backendResult.jobs;
         const diagnostics = backendResult.diagnostics;
         if (!warnedOutdatedBackend && (!diagnostics || typeof diagnostics.returned !== "number")) {
@@ -621,18 +647,25 @@ export function FantasticJobsBoard() {
           ...job,
           location: withLocationFallback(job.location, searchLocation),
         }));
-        const effectiveLimit = mode === "all" ? requestedCount * 2 : requestedCount;
+        const effectiveLimit = Number(diagnostics?.effective_limit) > 0
+          ? Number(diagnostics?.effective_limit)
+          : mode === "all"
+            ? requestedCount * 2
+            : requestedCount;
         const capped = normalizedIncoming.slice(0, effectiveLimit);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
-        const visibleRows = strictPEOnly
+        const pageVisibleRows = strictPEOnly
           ? withPEFlags.filter((job) => job.is_pe_match)
           : withPEFlags;
+        const visibleRows = append ? dedupeJobs([...jobs, ...pageVisibleRows]) : pageVisibleRows;
         const historyResults = visibleRows.map(toHistoryJob);
 
         setJobs(visibleRows);
         setTotal(visibleRows.length);
         setLastRefresh(new Date());
+        setBaseOffset(offset);
+        setHasMore(incoming.length >= effectiveLimit);
         setSearchHistory((prev) => {
           const cleaned = prev.filter(hasHistoryResults);
           const isSameQuery = (item: SearchHistoryItem) =>
@@ -640,7 +673,7 @@ export function FantasticJobsBoard() {
             item.strictPEOnly === strictPEOnly &&
             JSON.stringify(item.filters) === JSON.stringify(filters);
 
-          if (visibleRows.length === 0) {
+          if (!append && visibleRows.length === 0) {
             // If latest run has 0 results, remove matching recent entry from history.
             return cleaned.filter((item) => !isSameQuery(item));
           }
@@ -662,12 +695,12 @@ export function FantasticJobsBoard() {
 
           return [nextItem, ...cleaned.filter((item) => !isSameQuery(item))].slice(0, MAX_SEARCH_HISTORY_ITEMS);
         });
-        if (strictPEOnly && visibleRows.length === 0 && withPEFlags.length > 0) {
+        if (strictPEOnly && pageVisibleRows.length === 0 && withPEFlags.length > 0) {
           toast({
             title: "No PE matches in current result set",
             description: `Fetched ${incoming.length}, PE matches ${peMatches}. Disable PE-only to see all jobs.`,
           });
-        } else if (visibleRows.length === 0 && diagnostics) {
+        } else if (pageVisibleRows.length === 0 && diagnostics) {
           toast({
             title: "0 results from provider",
             description: `Apify rows: ${diagnostics.raw ?? incoming.length}, normalized: ${diagnostics.normalized ?? incoming.length}, returned: ${diagnostics.returned ?? incoming.length}.`,
@@ -675,8 +708,10 @@ export function FantasticJobsBoard() {
           });
         } else {
           toast({
-            title: "Jobs refreshed",
-            description: `Fetched ${incoming.length}, showing ${visibleRows.length} (${mode}).`,
+            title: append ? "Loaded more jobs" : "Jobs refreshed",
+            description: append
+              ? `Fetched ${incoming.length}, total visible ${visibleRows.length} (${mode}).`
+              : `Fetched ${incoming.length}, showing ${visibleRows.length} (${mode}).`,
           });
         }
       } catch (error) {
@@ -689,20 +724,20 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [fetchViaBackend, toast, filters, requestedCount, strictPEOnly, searchHistory, warnedOutdatedBackend],
+    [fetchViaBackend, toast, filters, requestedCount, strictPEOnly, searchHistory, warnedOutdatedBackend, jobs],
   );
 
   const runSelectedSearch = () => {
     if (selectedSources.linkedin && selectedSources.career) {
-      runSearch("all");
+      runSearch("all", { offset: 0 });
       return;
     }
     if (selectedSources.linkedin) {
-      runSearch("linkedin");
+      runSearch("linkedin", { offset: 0 });
       return;
     }
     if (selectedSources.career) {
-      runSearch("career");
+      runSearch("career", { offset: 0 });
       return;
     }
     toast({
@@ -821,6 +856,8 @@ export function FantasticJobsBoard() {
     setJobs(normalizedRestored);
     setTotal(item.resultCount || normalizedRestored.length);
     setLastRefresh(new Date(item.createdAt));
+    setBaseOffset(0);
+    setHasMore(false);
     setLoading(false);
     setStrictPEOnly(typeof item.strictPEOnly === "boolean" ? item.strictPEOnly : false);
     setSelectedSources({
@@ -833,6 +870,15 @@ export function FantasticJobsBoard() {
         ? `Restored ${restored.length} results from history.`
         : "No cached rows in this history item. Run search once to cache it.",
     });
+  };
+
+  const refreshCurrentResults = () => {
+    runSearch(searchMode, { force: true, offset: 0 });
+  };
+
+  const loadMoreResults = () => {
+    const nextOffset = baseOffset + requestedCount;
+    runSearch(searchMode, { force: true, append: true, offset: nextOffset });
   };
 
   const runApolloForJob = async (job: Job) => {
@@ -1088,6 +1134,18 @@ export function FantasticJobsBoard() {
             >
               {loading ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
               Search Selected Sources
+            </Button>
+            <Button variant="outline" size="sm" disabled={loading} onClick={refreshCurrentResults}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              Refresh Results
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading || jobs.length === 0 || !hasMore}
+              onClick={loadMoreResults}
+            >
+              Load More
             </Button>
             <Button variant="ghost" size="sm" onClick={clearFilters}>
               <X className="h-4 w-4 mr-1" />
