@@ -1028,6 +1028,7 @@ export function FantasticJobsBoard() {
           <p className="mono-label">Targeted PE / VC job intelligence</p>
         </CardHeader>
         <CardContent className="space-y-4">
+          <p className="mono-label">Search Targets</p>
           <div className="control-surface p-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
               placeholder="Title / Position (e.g. VP, Principal, CFO)"
@@ -1076,6 +1077,7 @@ export function FantasticJobsBoard() {
             ))}
           </datalist>
 
+          <p className="mono-label">Scope & Constraints</p>
           <div className="control-surface p-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
               placeholder="Exclude keywords"
@@ -1139,6 +1141,7 @@ export function FantasticJobsBoard() {
             </div>
           </div>
 
+          <p className="mono-label">Sources & Actions</p>
           <div className="control-surface p-3 flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <Checkbox
@@ -1189,7 +1192,7 @@ export function FantasticJobsBoard() {
 
           {searchHistory.length > 0 ? (
             <div className="control-surface p-3">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Recent Searches</p>
+              <p className="mono-label mb-2">Recent Searches</p>
               <div className="space-y-2 max-h-36 overflow-auto">
                 {searchHistory.slice(0, 8).map((h) => (
                   <div key={h.id} className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -1223,6 +1226,7 @@ export function FantasticJobsBoard() {
             <CardTitle className="text-lg">{sortedJobs.length > 0 ? `${sortedJobs.length} Jobs Found` : "Job Results"}</CardTitle>
             {total > 0 ? <p className="text-xs text-muted-foreground">{total} rows fetched</p> : null}
           </div>
+          <p className="mono-label">Result Stream</p>
           {showSourceTabs ? (
             <div className="flex items-center gap-2 pt-2">
               <Button

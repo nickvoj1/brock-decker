@@ -903,22 +903,48 @@ export default function SignalsDashboard() {
             </div>
           </div>
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div className="meta-chip justify-between">
-              <span className="mono-label text-[10px]">Visible</span>
-              <span className="text-foreground font-semibold tabular-nums">{filteredSignals.length}</span>
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="kpi-tile">
+              <div className="relative z-[1] flex items-start justify-between">
+                <div>
+                  <p className="kpi-label">Visible Signals</p>
+                  <p className="kpi-value">{filteredSignals.length}</p>
+                  <p className="kpi-meta">After filters</p>
+                </div>
+                <Filter className="h-4 w-4 text-muted-foreground" />
+              </div>
             </div>
-            <div className="meta-chip justify-between">
-              <span className="mono-label text-[10px]">Total</span>
-              <span className="text-foreground font-semibold tabular-nums">{signals.filter((s) => !s.is_dismissed).length}</span>
+            <div className="kpi-tile">
+              <div className="relative z-[1] flex items-start justify-between">
+                <div>
+                  <p className="kpi-label">Total Signals</p>
+                  <p className="kpi-value">{signals.filter((s) => !s.is_dismissed).length}</p>
+                  <p className="kpi-meta">All active rows</p>
+                </div>
+                <Briefcase className="h-4 w-4 text-muted-foreground" />
+              </div>
             </div>
-            <div className="meta-chip justify-between">
-              <span className="mono-label text-[10px]">Pending</span>
-              <span className="text-foreground font-semibold tabular-nums">{pendingCount}</span>
+            <div className="kpi-tile">
+              <div className="relative z-[1] flex items-start justify-between">
+                <div>
+                  <p className="kpi-label">Pending Review</p>
+                  <p className="kpi-value">{pendingCount}</p>
+                  <p className="kpi-meta">Needs validation</p>
+                </div>
+                <Target className="h-4 w-4 text-muted-foreground" />
+              </div>
             </div>
-            <div className="meta-chip justify-between">
-              <span className="mono-label text-[10px]">Region</span>
-              <span className="text-foreground font-semibold">{REGION_CONFIG[activeRegion].label}</span>
+            <div className="kpi-tile">
+              <div className="relative z-[1] flex items-start justify-between">
+                <div>
+                  <p className="kpi-label">Active Region</p>
+                  <p className="text-lg md:text-xl font-semibold tracking-tight text-foreground">
+                    {REGION_CONFIG[activeRegion].label}
+                  </p>
+                  <p className="kpi-meta">Current workspace</p>
+                </div>
+                <Check className="h-4 w-4 text-muted-foreground" />
+              </div>
             </div>
           </div>
         </div>
@@ -987,7 +1013,18 @@ export default function SignalsDashboard() {
           
           <TabsContent value="signals" className="mt-6 space-y-5">
             {/* Filters Row */}
-            <div className="panel-shell flex flex-wrap items-center gap-3 p-3">
+            <div className="panel-shell p-3 space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="mono-label">Filter Stack</p>
+                <span className="meta-chip">{REGION_CONFIG[activeRegion].label}</span>
+                {fitOnly ? <span className="meta-chip">Best-fit enabled</span> : null}
+                <span className="ml-auto text-sm text-muted-foreground flex items-center gap-1.5 font-medium">
+                  <Filter className="h-3.5 w-3.5" />
+                  {filteredSignals.length} results
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
               {/* View Mode Toggle */}
               <div className="flex items-center border border-border/60 rounded-lg overflow-hidden bg-muted/30">
                 <button
@@ -1127,11 +1164,7 @@ export default function SignalsDashboard() {
                   className="w-24"
                 />
               </div>
-
-              <span className="ml-auto text-sm text-muted-foreground flex items-center gap-1.5 font-medium">
-                <Filter className="h-3.5 w-3.5" />
-                {filteredSignals.length} results
-              </span>
+              </div>
             </div>
 
             {/* Signal List */}
