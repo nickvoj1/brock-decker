@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useProfileName } from "@/hooks/useProfileName";
+import { saveApiSetting } from "@/lib/dataApi";
 import {
   DEFAULT_CAREER_ACTOR_ID,
   DEFAULT_LINKEDIN_ACTOR_ID,
@@ -15,10 +17,11 @@ import {
 
 export function FantasticJobsSettingsCard() {
   const { toast } = useToast();
+  const profileName = useProfileName();
   const [apifyToken, setApifyToken] = useState("");
   const [linkedinActorId, setLinkedinActorId] = useState(DEFAULT_LINKEDIN_ACTOR_ID);
   const [careerActorId, setCareerActorId] = useState(DEFAULT_CAREER_ACTOR_ID);
-  const [useDirectApify, setUseDirectApify] = useState(true);
+  const [useDirectApify, setUseDirectApify] = useState(false);
   const [showApifyToken, setShowApifyToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<"idle" | "success" | "error">("idle");
@@ -35,17 +38,51 @@ export function FantasticJobsSettingsCard() {
     return apifyToken.trim().length > 0 && linkedinActorId.trim().length > 0 && careerActorId.trim().length > 0;
   }, [apifyToken, linkedinActorId, careerActorId]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const normalizedToken = apifyToken.trim();
+    const normalizedLinkedinActor = linkedinActorId.trim() || DEFAULT_LINKEDIN_ACTOR_ID;
+    const normalizedCareerActor = careerActorId.trim() || DEFAULT_CAREER_ACTOR_ID;
+
     saveJobBoardSettings({
       useDirectApify,
-      apifyToken: apifyToken.trim(),
-      linkedinActorId: linkedinActorId.trim() || DEFAULT_LINKEDIN_ACTOR_ID,
-      careerActorId: careerActorId.trim() || DEFAULT_CAREER_ACTOR_ID,
+      apifyToken: normalizedToken,
+      linkedinActorId: normalizedLinkedinActor,
+      careerActorId: normalizedCareerActor,
     });
+
+    const actorCsv = [normalizedLinkedinActor, normalizedCareerActor].join(",");
+
+    if (profileName) {
+      try {
+        const [tokenSave, actorSave] = await Promise.all([
+          saveApiSetting(profileName, "apify_token", normalizedToken),
+          saveApiSetting(profileName, "apify_actor_id", actorCsv),
+        ]);
+
+        if (!tokenSave.success) throw new Error(tokenSave.error || "Failed to save shared Apify token");
+        if (!actorSave.success) throw new Error(actorSave.error || "Failed to save shared actor IDs");
+
+        toast({
+          title: "Job board settings saved",
+          description: "Saved locally and globally. All users can now use the same Apify setup.",
+        });
+        return;
+      } catch (error) {
+        toast({
+          title: "Saved locally only",
+          description:
+            error instanceof Error
+              ? error.message
+              : "Could not save shared settings. Other users may still miss Apify credentials.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
 
     toast({
       title: "Job board settings saved",
-      description: "Signals -> Job Board will now use these credentials and actor IDs.",
+      description: "Saved in this browser. Shared save requires an authenticated admin profile.",
     });
   };
 

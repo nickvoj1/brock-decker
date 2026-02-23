@@ -525,11 +525,19 @@ export function FantasticJobsBoard() {
         if (!settings.useDirectApify) {
           try {
             incoming = await fetchViaBackend(mode);
-          } catch {
-            if (settings.apifyToken) incoming = await fetchDirect(mode);
+          } catch (backendError) {
+            if (settings.apifyToken.trim()) {
+              incoming = await fetchDirect(mode);
+            } else {
+              throw backendError;
+            }
           }
         } else {
-          incoming = await fetchDirect(mode);
+          if (settings.apifyToken.trim()) {
+            incoming = await fetchDirect(mode);
+          } else {
+            incoming = await fetchViaBackend(mode);
+          }
         }
 
         const deduped = Array.from(

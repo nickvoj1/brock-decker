@@ -18,7 +18,8 @@ const STORAGE_KEYS = {
 export function loadJobBoardSettings(): JobBoardSettings {
   if (typeof window === "undefined") {
     return {
-      useDirectApify: true,
+      // Default to backend/shared mode so all users can use centrally saved credentials.
+      useDirectApify: false,
       apifyToken: "",
       linkedinActorId: DEFAULT_LINKEDIN_ACTOR_ID,
       careerActorId: DEFAULT_CAREER_ACTOR_ID,
@@ -26,7 +27,8 @@ export function loadJobBoardSettings(): JobBoardSettings {
   }
 
   return {
-    useDirectApify: localStorage.getItem(STORAGE_KEYS.mode) !== "false",
+    // Use direct mode only when explicitly enabled for this browser.
+    useDirectApify: localStorage.getItem(STORAGE_KEYS.mode) === "true",
     apifyToken: localStorage.getItem(STORAGE_KEYS.token) || "",
     linkedinActorId: localStorage.getItem(STORAGE_KEYS.linkedinActor) || DEFAULT_LINKEDIN_ACTOR_ID,
     careerActorId: localStorage.getItem(STORAGE_KEYS.careerActor) || DEFAULT_CAREER_ACTOR_ID,
