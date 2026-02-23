@@ -796,22 +796,6 @@ export function FantasticJobsBoard() {
     URL.revokeObjectURL(url);
   };
 
-  const openApplyLink = (url: string | null) => {
-    if (!url) {
-      toast({
-        title: "No apply link",
-        description: "This job does not have a valid application URL.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const win = window.open(url, "_blank", "noopener,noreferrer");
-    if (!win) {
-      // Lovable preview can block popups; fall back to same-tab navigation.
-      window.location.assign(url);
-    }
-  };
-
   const loadHistoryItem = (item: SearchHistoryItem) => {
     setFilters({
       ...item.filters,
@@ -1269,14 +1253,10 @@ export function FantasticJobsBoard() {
                       <TableCell>
                         <div className="flex items-center gap-1">
                           {job.apply_url ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => openApplyLink(job.apply_url)}
-                              title="Open job post"
-                            >
-                              <ExternalLink className="h-4 w-4" />
+                            <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0" title="Open job post">
+                              <a href={job.apply_url} target="_blank" rel="noopener noreferrer">
+                                <ExternalLink className="h-4 w-4" />
+                              </a>
                             </Button>
                           ) : (
                             <span className="text-muted-foreground text-xs mr-1">—</span>
