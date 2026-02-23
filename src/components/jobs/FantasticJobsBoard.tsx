@@ -99,7 +99,7 @@ const DEFAULT_FILTERS: Filters = {
   company: "",
   exclude: "",
   industry: "all",
-  jobsPerSearch: "25",
+  jobsPerSearch: "10",
   location: "",
   salaryMin: "",
   remote: false,
@@ -788,7 +788,7 @@ export function FantasticJobsBoard() {
   }, [scopedJobs, sortBy, sortOrder]);
 
   const clearFilters = () =>
-    setFilters({ ...DEFAULT_FILTERS, title: "", industryKeywords: "", location: "", industry: "all", jobsPerSearch: "25" });
+    setFilters({ ...DEFAULT_FILTERS, title: "", industryKeywords: "", location: "", industry: "all", jobsPerSearch: "10" });
   const resetToDefaults = () => setFilters(DEFAULT_FILTERS);
 
   const formatDate = (dateStr: string) => {
