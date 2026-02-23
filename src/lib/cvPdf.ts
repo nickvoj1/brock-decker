@@ -307,21 +307,6 @@ function dedupeRects(rects: Rect[], tolerance = 2): Rect[] {
   return out;
 }
 
-function mergeRects(rects: Rect[]): Rect | null {
-  if (rects.length === 0) return null;
-  let x0 = rects[0].x0;
-  let y0 = rects[0].y0;
-  let x1 = rects[0].x1;
-  let y1 = rects[0].y1;
-  for (const r of rects.slice(1)) {
-    if (r.x0 < x0) x0 = r.x0;
-    if (r.y0 < y0) y0 = r.y0;
-    if (r.x1 > x1) x1 = r.x1;
-    if (r.y1 > y1) y1 = r.y1;
-  }
-  return { x0, y0, x1, y1 };
-}
-
 function intersects(a: Rect, b: Rect): boolean {
   return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
 }
@@ -1198,6 +1183,7 @@ async function redactPdfTextLocally(
   const nameRects = findNameProtectionRects(page, pageWidth, pageHeight, hints);
   const nameBottom = nameRects.length > 0 ? Math.max(...nameRects.map((r) => r.y1)) : 0;
   if (anonymizeName) {
+    const anonymizedNameRects: Rect[] = [];
     const manualNameSearchTerms = new Set<string>();
     const hintedName = safeText(hints?.name);
     if (hintedName) {
@@ -1218,7 +1204,7 @@ async function redactPdfTextLocally(
             const r = clampRect(hr, pageWidth, pageHeight);
             if (!r) continue;
             if (topDistanceForRect(r, pageHeight) > pageHeight * 0.42) continue;
-            rects.push(r);
+            anonymizedNameRects.push(r);
           }
         }
       } catch {
@@ -1226,35 +1212,25 @@ async function redactPdfTextLocally(
       }
     }
 
-    rects.push(...nameRects);
+    anonymizedNameRects.push(...nameRects);
 
-    // Enforce full name removal by adding a broader kill-band around the detected name zone.
-    const mergedName = mergeRects(
-      rects.filter((r) => topDistanceForRect(r, pageHeight) <= pageHeight * 0.42),
-    );
-    const defaultNameBand = clampRect(
-      {
-        x0: pageWidth * 0.2,
-        y0: pageHeight * 0.02,
-        x1: pageWidth * 0.8,
-        y1: pageHeight * 0.16,
-      },
-      pageWidth,
-      pageHeight,
-    );
-    const nameKillBand = mergedName
-      ? clampRect(
-          {
-            x0: mergedName.x0 - 8,
-            y0: mergedName.y0 - 6,
-            x1: mergedName.x1 + 8,
-            y1: mergedName.y1 + 6,
-          },
-          pageWidth,
-          pageHeight,
-        )
-      : defaultNameBand;
-    if (nameKillBand) rects.push(nameKillBand);
+    const nameRectsDedupe = dedupeRects(anonymizedNameRects, 2);
+    if (nameRectsDedupe.length === 0) {
+      // Fallback for non-searchable names rendered as image/vector glyphs.
+      const fallbackNameBand = clampRect(
+        {
+          x0: pageWidth * 0.3,
+          y0: pageHeight * 0.055,
+          x1: pageWidth * 0.7,
+          y1: pageHeight * 0.145,
+        },
+        pageWidth,
+        pageHeight,
+      );
+      if (fallbackNameBand) rects.push(fallbackNameBand);
+    } else {
+      rects.push(...nameRectsDedupe);
+    }
   }
 
   // Remove photo-like images from page 1.
@@ -1295,7 +1271,7 @@ async function redactPdfTextLocally(
     annot.update();
   }
 
-  page.applyRedactions();
+  page.applyRedactions(false);
 
   // Remove photo-like images from all remaining pages as well.
   const pageCount = Number(pdf.countPages() || 1);
@@ -1313,7 +1289,7 @@ async function redactPdfTextLocally(
         annot.setRect([r.x0, r.y0, r.x1, r.y1]);
         annot.update();
       }
-      p.applyRedactions();
+      p.applyRedactions(false);
     } catch {
       // Ignore per-page image redaction failures.
     }
@@ -1374,7 +1350,7 @@ function stripResidualNameFromPdf(pdfBytes: Uint8Array, originalName?: string | 
       annot.setRect([r.x0, r.y0, r.x1, r.y1]);
       annot.update();
     }
-    page.applyRedactions();
+    page.applyRedactions(false);
 
     const out = pdf.saveToBuffer("compress").asUint8Array();
     const stable = new Uint8Array(out.length);
@@ -1555,7 +1531,9 @@ export async function downloadBrandedSourcePdf(
   hints?: CVPersonalHints,
 ): Promise<void> {
   const originalBytes = new Uint8Array(await sourceFile.arrayBuffer());
-  const namePlacement = hints?.anonymizeName
+  const anonymizedReplacement = safeText(hints?.replacementName);
+  const shouldDrawReplacementName = Boolean(hints?.anonymizeName && anonymizedReplacement);
+  const namePlacement = shouldDrawReplacementName
     ? detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
     : null;
   const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
@@ -1644,8 +1622,8 @@ export async function downloadBrandedSourcePdf(
       }
     }
 
-    if (hints?.anonymizeName && pageIndex === 0) {
-      const replacement = safeText(hints?.replacementName) || "CANDIDATE";
+    if (shouldDrawReplacementName && pageIndex === 0) {
+      const replacement = anonymizedReplacement;
       const hasPlacement =
         Boolean(namePlacement) &&
         Number.isFinite(namePlacement?.yTop) &&

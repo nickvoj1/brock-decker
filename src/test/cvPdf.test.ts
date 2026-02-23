@@ -142,7 +142,9 @@ function extractPage0State(pdfBytes: Uint8Array): {
   text: string;
   height: number;
   candidateMinY: number | null;
-  meanRedPhotoArea: number;
+  photoMeanR: number;
+  photoMeanG: number;
+  photoMeanB: number;
 } {
   const mupdfMod: any = (mupdf as any)?.default || mupdf;
   const doc = mupdfMod.Document.openDocument(new Uint8Array(pdfBytes), "application/pdf");
@@ -188,11 +190,15 @@ function extractPage0State(pdfBytes: Uint8Array): {
   const y1 = Math.min(height - 1, Math.floor(height * 0.24));
 
   let totalR = 0;
+  let totalG = 0;
+  let totalB = 0;
   let count = 0;
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       const idx = y * stride + x * 3;
       totalR += pixels[idx];
+      totalG += pixels[idx + 1];
+      totalB += pixels[idx + 2];
       count += 1;
     }
   }
@@ -201,7 +207,9 @@ function extractPage0State(pdfBytes: Uint8Array): {
     text: textLines.join("\n"),
     height,
     candidateMinY,
-    meanRedPhotoArea: count > 0 ? totalR / count : 0,
+    photoMeanR: count > 0 ? totalR / count : 0,
+    photoMeanG: count > 0 ? totalG / count : 0,
+    photoMeanB: count > 0 ? totalB / count : 0,
   };
 }
 
@@ -258,8 +266,11 @@ describe("CV PDF export", () => {
     const outState = extractPage0State(out);
 
     // The source has a bright red patch in the top-right photo area.
-    expect(sourceState.meanRedPhotoArea).toBeGreaterThan(220);
-    // After redaction this area should no longer be strongly red.
-    expect(outState.meanRedPhotoArea).toBeLessThan(200);
+    expect(sourceState.photoMeanR).toBeGreaterThan(220);
+    expect(sourceState.photoMeanR - Math.max(sourceState.photoMeanG, sourceState.photoMeanB)).toBeGreaterThan(60);
+    // After redaction the area should be near white (red removed).
+    expect(outState.photoMeanR).toBeGreaterThan(240);
+    expect(outState.photoMeanG).toBeGreaterThan(240);
+    expect(outState.photoMeanB).toBeGreaterThan(240);
   });
 });
