@@ -69,6 +69,7 @@ type SearchHistoryItem = {
 
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
 const SEARCH_CACHE_WINDOW_MS = 10 * 60 * 1000;
+const MAX_SEARCH_HISTORY_ITEMS = 12;
 
 const DEFAULT_FILTERS: Filters = {
   title: "",
@@ -211,6 +212,12 @@ function toHistoryJob(job: Job): Job {
   };
 }
 
+function hasHistoryResults(item: SearchHistoryItem): boolean {
+  const resultCount = Number(item.resultCount || 0);
+  const rowCount = Array.isArray(item.results) ? item.results.length : 0;
+  return Math.max(resultCount, rowCount) > 0;
+}
+
 function matchesPESignal(job: Job): boolean {
   if (typeof job.is_pe_match === "boolean") return job.is_pe_match;
   const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
@@ -326,7 +333,8 @@ export function FantasticJobsBoard() {
     try {
       const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((item): item is SearchHistoryItem => Boolean(item && hasHistoryResults(item)));
     } catch {
       return [];
     }
@@ -334,7 +342,8 @@ export function FantasticJobsBoard() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 12)));
+      const cleaned = searchHistory.filter(hasHistoryResults).slice(0, MAX_SEARCH_HISTORY_ITEMS);
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(cleaned));
     } catch (error) {
       console.error("Failed to persist search history:", error);
     }
@@ -464,8 +473,19 @@ export function FantasticJobsBoard() {
         setJobs(visibleRows);
         setTotal(visibleRows.length);
         setLastRefresh(new Date());
-        setSearchHistory((prev) => [
-          {
+        setSearchHistory((prev) => {
+          const cleaned = prev.filter(hasHistoryResults);
+          const isSameQuery = (item: SearchHistoryItem) =>
+            item.mode === mode &&
+            item.strictPEOnly === strictPEOnly &&
+            JSON.stringify(item.filters) === JSON.stringify(filters);
+
+          if (visibleRows.length === 0) {
+            // If latest run has 0 results, remove matching recent entry from history.
+            return cleaned.filter((item) => !isSameQuery(item));
+          }
+
+          const nextItem: SearchHistoryItem = {
             id: `${Date.now()}-${mode}`,
             createdAt: new Date().toISOString(),
             mode,
@@ -474,9 +494,10 @@ export function FantasticJobsBoard() {
             resultCount: visibleRows.length,
             topResults: visibleRows.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
             results: historyResults,
-          },
-          ...prev,
-        ]);
+          };
+
+          return [nextItem, ...cleaned.filter((item) => !isSameQuery(item))].slice(0, MAX_SEARCH_HISTORY_ITEMS);
+        });
         if (strictPEOnly && visibleRows.length === 0 && effectiveFiltered.length > 0) {
           toast({
             title: "No PE matches in current result set",
@@ -611,6 +632,14 @@ export function FantasticJobsBoard() {
     setFilters(item.filters);
     setSearchMode(item.mode);
     const restored = Array.isArray(item.results) ? item.results : [];
+    if (restored.length === 0) {
+      setSearchHistory((prev) => prev.filter((x) => x.id !== item.id && hasHistoryResults(x)));
+      toast({
+        title: "Search removed",
+        description: "This history item had 0 results and was removed.",
+      });
+      return;
+    }
     setJobs(restored);
     setTotal(item.resultCount || restored.length);
     setLastRefresh(new Date(item.createdAt));
