@@ -70,9 +70,7 @@ type SearchHistoryItem = {
 type JobsDiagnostics = {
   raw?: number;
   normalized?: number;
-  postedFiltered?: number;
-  strictFiltered?: number;
-  deduped?: number;
+  returned?: number;
 };
 
 type FetchJobsResult = {
@@ -179,42 +177,6 @@ const PE_SIGNAL_TERMS = [
   "capital partners",
 ];
 
-const REMOTE_TERMS = [
-  "remote",
-  "work from home",
-  "wfh",
-  "home based",
-  "home-based",
-  "anywhere",
-  "virtual",
-];
-
-const RECRUITER_COMPANY_TERMS = [
-  "recruitment",
-  "recruiting",
-  "staffing",
-  "headhunt",
-  "executive search",
-  "talent solutions",
-];
-
-const LOCATION_FALLBACK_MAP: Record<string, string[]> = {
-  london: ["london", "united kingdom", "uk", "england", "great britain"],
-  "new york": ["new york", "nyc", "united states", "usa", "us"],
-  boston: ["boston", "united states", "usa", "us"],
-  chicago: ["chicago", "united states", "usa", "us"],
-  miami: ["miami", "united states", "usa", "us"],
-  "san francisco": ["san francisco", "united states", "usa", "us"],
-  "los angeles": ["los angeles", "united states", "usa", "us"],
-  paris: ["paris", "france"],
-  munich: ["munich", "germany"],
-  frankfurt: ["frankfurt", "germany"],
-  zurich: ["zurich", "switzerland"],
-  amsterdam: ["amsterdam", "netherlands"],
-  dubai: ["dubai", "uae", "united arab emirates"],
-  "abu dhabi": ["abu dhabi", "uae", "united arab emirates"],
-};
-
 const LOCATION_ALIAS_MAP: Record<string, string> = {
   loondon: "London",
   londonn: "London",
@@ -228,14 +190,6 @@ const LOCATION_ALIAS_MAP: Record<string, string> = {
   uae: "United Arab Emirates",
   uk: "United Kingdom",
 };
-
-function splitTerms(value: string): string[] {
-  if (!value) return [];
-  return value
-    .split(/\s+OR\s+|,|\|/i)
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
 
 function normalizeLocationToken(token: string): string {
   const trimmed = String(token || "").trim();
@@ -272,16 +226,6 @@ function normalizeLocationExpression(value: string): string {
     .join("")
     .replace(/\s{2,}/g, " ")
     .trim();
-}
-
-function postedAfterToMs(postedAfter: string): number | null {
-  const v = String(postedAfter || "").toLowerCase();
-  if (v === "1hour" || v === "1h") return 60 * 60 * 1000;
-  if (v === "24hours" || v === "24h") return 24 * 60 * 60 * 1000;
-  if (v === "14days" || v === "14d" || v === "2weeks") return 14 * 24 * 60 * 60 * 1000;
-  if (v === "30days" || v === "30d") return 30 * 24 * 60 * 60 * 1000;
-  if (v === "7days" || v === "7d") return 7 * 24 * 60 * 60 * 1000;
-  return null;
 }
 
 function toNumber(value: unknown): number | null {
@@ -412,29 +356,6 @@ function matchesPESignal(job: Job): boolean {
   if (typeof job.is_pe_match === "boolean") return job.is_pe_match;
   const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
   return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
-}
-
-function isRemoteLikeJob(job: Job): boolean {
-  if (job.remote) return true;
-  const text = `${job.location || ""} ${job.title || ""}`.toLowerCase();
-  return REMOTE_TERMS.some((term) => text.includes(term));
-}
-
-function isRecruiterLikeJob(job: Job): boolean {
-  const company = String(job.company || "").toLowerCase();
-  const companyMatch = RECRUITER_COMPANY_TERMS.some((term) => company.includes(term));
-  return companyMatch;
-}
-
-function matchesLocationTerm(jobLocation: string, rawTerm: string): boolean {
-  const location = String(jobLocation || "").toLowerCase();
-  const term = String(rawTerm || "").trim().toLowerCase();
-  if (!term) return true;
-
-  if (location.includes(term)) return true;
-  const fallbacks = LOCATION_FALLBACK_MAP[term];
-  if (!fallbacks) return false;
-  return fallbacks.some((candidate) => location.includes(candidate));
 }
 
 function inferDepartmentsFromJobTitle(title: string): string[] {
@@ -609,8 +530,6 @@ export function FantasticJobsBoard() {
       if (normalizedLocation) params.location = normalizedLocation;
       if (filters.salaryMin) params.salary_min = filters.salaryMin;
       if (filters.industry && filters.industry !== "all") params.industry = filters.industry;
-      params.remote = "false";
-      params.remove_recruiters = "true";
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       params.source = mode;
       params.limit = String(requestedCount);
@@ -628,54 +547,6 @@ export function FantasticJobsBoard() {
       };
     },
     [filters, requestedCount],
-  );
-
-  const applyClientFilters = useCallback(
-    (rows: Job[]) => {
-      const titleTerms = splitTerms(filters.title).map((t) => t.toLowerCase());
-      const industryKeywordTerms = splitTerms(filters.industryKeywords).map((t) => t.toLowerCase());
-      const excludeTerms = splitTerms(filters.exclude).map((t) => t.toLowerCase());
-      const companyTerms = splitTerms(filters.company).map((t) => t.toLowerCase());
-      const locationTerms = splitTerms(normalizeLocationExpression(filters.location)).map((t) => t.toLowerCase());
-      const industry = filters.industry.toLowerCase();
-      const postedAfterMs = postedAfterToMs(filters.postedAfter);
-      const cutoff = postedAfterMs ? Date.now() - postedAfterMs : null;
-
-      return rows.filter((job) => {
-        const haystack = `${job.title} ${job.company} ${job.description || ""} ${job.location}`.toLowerCase();
-
-        if (titleTerms.length > 0 && !titleTerms.some((t) => job.title.toLowerCase().includes(t))) return false;
-        if (industryKeywordTerms.length > 0 && !industryKeywordTerms.some((t) => haystack.includes(t))) return false;
-        if (excludeTerms.length > 0 && excludeTerms.some((t) => haystack.includes(t))) return false;
-        if (companyTerms.length > 0 && !companyTerms.some((t) => job.company.toLowerCase().includes(t))) return false;
-        if (locationTerms.length > 0 && !locationTerms.some((t) => matchesLocationTerm(job.location, t))) return false;
-        if (isRemoteLikeJob(job)) return false;
-        if (isRecruiterLikeJob(job)) return false;
-
-        if (industry !== "all") {
-          const taxonomies = (job.ai_taxonomies || []).map((t) => t.toLowerCase());
-          const industryMatch = taxonomies.includes(industry) || haystack.includes(industry);
-          if (!industryMatch) return false;
-        }
-
-        if (filters.salaryMin) {
-          const min = Number(filters.salaryMin);
-          if (Number.isFinite(min) && min > 0) {
-            if (!job.salary_min || job.salary_min < min) return false;
-          }
-        }
-
-        if (cutoff) {
-          const postedTs = new Date(job.posted_at).getTime();
-          // Keep rows when provider date format is non-standard; only exclude when a valid
-          // timestamp exists and is clearly older than the selected window.
-          if (Number.isFinite(postedTs) && postedTs < cutoff) return false;
-        }
-
-        return true;
-      });
-    },
-    [filters],
   );
 
   const runSearch = useCallback(
@@ -704,28 +575,7 @@ export function FantasticJobsBoard() {
         const backendResult = await fetchViaBackend(mode);
         const incoming = backendResult.jobs;
         const diagnostics = backendResult.diagnostics;
-
-        const deduped = Array.from(
-          new Map(
-            incoming.map((job) => [
-              `${(job.apply_url || "").toLowerCase()}|${job.title.toLowerCase()}|${job.company.toLowerCase()}`,
-              job,
-            ]),
-          ).values(),
-        );
-        const filtered = applyClientFilters(deduped);
-        const hasExplicitFilters = Boolean(
-          filters.title.trim() ||
-          filters.industryKeywords.trim() ||
-          filters.company.trim() ||
-          filters.exclude.trim() ||
-          normalizeLocationExpression(filters.location).trim() ||
-          filters.salaryMin.trim() ||
-          (filters.industry && filters.industry !== "all"),
-        );
-        const usedFilterFallback = !hasExplicitFilters && filtered.length === 0 && deduped.length > 0;
-        const effectiveFiltered = usedFilterFallback ? deduped : filtered;
-        const capped = effectiveFiltered.slice(0, requestedCount);
+        const capped = incoming.slice(0, requestedCount);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
         const visibleRows = strictPEOnly
@@ -765,23 +615,21 @@ export function FantasticJobsBoard() {
 
           return [nextItem, ...cleaned.filter((item) => !isSameQuery(item))].slice(0, MAX_SEARCH_HISTORY_ITEMS);
         });
-        if (strictPEOnly && visibleRows.length === 0 && effectiveFiltered.length > 0) {
+        if (strictPEOnly && visibleRows.length === 0 && withPEFlags.length > 0) {
           toast({
             title: "No PE matches in current result set",
-            description: `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, PE matches ${peMatches}. Disable PE only to see all filtered jobs.`,
+            description: `Fetched ${incoming.length}, PE matches ${peMatches}. Disable PE-only to see all jobs.`,
           });
         } else if (visibleRows.length === 0 && diagnostics) {
           toast({
-            title: "0 results after filtering",
-            description: `Provider rows: ${diagnostics.raw ?? incoming.length}, normalized: ${diagnostics.normalized ?? incoming.length}, posted-date: ${diagnostics.postedFiltered ?? incoming.length}, strict: ${diagnostics.strictFiltered ?? incoming.length}, deduped: ${diagnostics.deduped ?? incoming.length}.`,
+            title: "0 results from provider",
+            description: `Apify rows: ${diagnostics.raw ?? incoming.length}, normalized: ${diagnostics.normalized ?? incoming.length}, returned: ${diagnostics.returned ?? incoming.length}.`,
             variant: "destructive",
           });
         } else {
           toast({
             title: "Jobs refreshed",
-            description: usedFilterFallback
-              ? `Fetched ${incoming.length}. No explicit filters were set, so broad results were shown (${visibleRows.length}).`
-              : `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, showing ${visibleRows.length} (${mode}).`,
+            description: `Fetched ${incoming.length}, showing ${visibleRows.length} (${mode}).`,
           });
         }
       } catch (error) {
@@ -794,7 +642,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [fetchViaBackend, toast, filters, requestedCount, applyClientFilters, strictPEOnly, searchHistory],
+    [fetchViaBackend, toast, filters, requestedCount, strictPEOnly, searchHistory],
   );
 
   const runSelectedSearch = () => {
@@ -1158,12 +1006,6 @@ export function FantasticJobsBoard() {
               </SelectContent>
             </Select>
             <div className="flex items-center gap-4">
-              <Badge variant="secondary" className="h-8">
-                Recruiters filtered
-              </Badge>
-              <Badge variant="secondary" className="h-8">
-                Onsite only
-              </Badge>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <Checkbox checked={strictPEOnly} onCheckedChange={(v) => setStrictPEOnly(Boolean(v))} />
                 PE-only

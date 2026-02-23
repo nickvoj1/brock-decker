@@ -7,24 +7,6 @@ const corsHeaders = {
 };
 
 // RapidAPI removed — Apify only
-const REMOTE_TERMS = [
-  "remote",
-  "work from home",
-  "wfh",
-  "home based",
-  "home-based",
-  "anywhere",
-  "virtual",
-];
-
-const RECRUITER_COMPANY_TERMS = [
-  "recruitment",
-  "recruiting",
-  "staffing",
-  "headhunt",
-  "executive search",
-  "talent solutions",
-];
 
 const LOCATION_ALIAS_MAP: Record<string, string> = {
   loondon: "London",
@@ -108,16 +90,6 @@ function mapTimeRange(postedAfter: string): string {
   if (v === "30days" || v === "30d") return "30d";
   if (v === "6m") return "6m";
   return "7d";
-}
-
-function postedAfterToMs(postedAfter: string): number | null {
-  const v = String(postedAfter || "").toLowerCase();
-  if (v === "1hour" || v === "1h") return 60 * 60 * 1000;
-  if (v === "24hours" || v === "24h") return 24 * 60 * 60 * 1000;
-  if (v === "14days" || v === "14d" || v === "2weeks") return 14 * 24 * 60 * 60 * 1000;
-  if (v === "30days" || v === "30d") return 30 * 24 * 60 * 60 * 1000;
-  if (v === "7days" || v === "7d") return 7 * 24 * 60 * 60 * 1000;
-  return null;
 }
 
 function toNumber(value: unknown): number | null {
@@ -270,47 +242,6 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       ai_experience: (job.ai_experience_level as string) || null,
     };
   });
-}
-
-function isRemoteLikeJob(job: Record<string, unknown>): boolean {
-  if ((job.remote as boolean) === true) return true;
-  const text = `${String(job.location || "")} ${String(job.title || "")}`.toLowerCase();
-  return REMOTE_TERMS.some((term) => text.includes(term));
-}
-
-function isRecruiterLikeJob(job: Record<string, unknown>): boolean {
-  const company = String(job.company || "").toLowerCase();
-  const companyMatch = RECRUITER_COMPANY_TERMS.some((term) => company.includes(term));
-  return companyMatch;
-}
-
-function applyStrictResultFilters(jobs: Record<string, unknown>[]): Record<string, unknown>[] {
-  return jobs.filter((job) => !isRemoteLikeJob(job) && !isRecruiterLikeJob(job));
-}
-
-function filterByPostedAfter(
-  jobs: Record<string, unknown>[],
-  postedAfter: string,
-): Record<string, unknown>[] {
-  const windowMs = postedAfterToMs(postedAfter);
-  if (!windowMs) return jobs;
-
-  const cutoff = Date.now() - windowMs;
-  let validDates = 0;
-  const filtered = jobs.filter((job) => {
-    const postedAt = String(job.posted_at || "");
-    const ts = new Date(postedAt).getTime();
-    if (!Number.isFinite(ts)) return false;
-    validDates += 1;
-    return ts >= cutoff;
-  });
-
-  // Fail open if provider date formats are inconsistent and filtering would hide all jobs.
-  if (jobs.length > 0 && (validDates === 0 || filtered.length === 0)) {
-    console.warn("[fantastic-jobs] posted_after filter produced zero rows; returning unfiltered jobs");
-    return jobs;
-  }
-  return filtered;
 }
 
 async function fetchWithRetry(
@@ -485,7 +416,6 @@ Deno.serve(async (req) => {
     let provider = "";
     let providerError = "";
     const requestedLimit = Math.min(Math.max(Number(getParam(body, url, "limit", "50")) || 50, 1), 5000);
-    const postedAfter = getParam(body, url, "posted_after", "7days");
 
     if (apifyToken && apifyActorIds.length > 0) {
       const providerParts: string[] = [];
@@ -517,27 +447,13 @@ Deno.serve(async (req) => {
     }
 
     const normalizedJobs = normalizeJobs(rawJobs);
-    const postedFilteredJobs = filterByPostedAfter(normalizedJobs, postedAfter);
-    const strictFilteredJobs = applyStrictResultFilters(postedFilteredJobs);
-    const dedupedJobs = Array.from(
-      new Map(
-        strictFilteredJobs.map((job) => {
-          const applyUrl = String(job.apply_url || "").toLowerCase();
-          const title = String(job.title || "").toLowerCase();
-          const company = String(job.company || "").toLowerCase();
-          return [`${applyUrl}|${title}|${company}`, job] as const;
-        }),
-      ).values(),
-    );
-    const jobs = dedupedJobs.slice(0, requestedLimit);
+    const jobs = normalizedJobs.slice(0, requestedLimit);
     const offset = Number(getParam(body, url, "offset", "0"));
     const limit = requestedLimit;
     const diagnostics = {
       raw: rawJobs.length,
       normalized: normalizedJobs.length,
-      postedFiltered: postedFilteredJobs.length,
-      strictFiltered: strictFilteredJobs.length,
-      deduped: dedupedJobs.length,
+      returned: jobs.length,
     };
 
     return new Response(
