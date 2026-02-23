@@ -70,6 +70,7 @@ type SearchHistoryItem = {
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
 const SEARCH_CACHE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_SEARCH_HISTORY_ITEMS = 12;
+const MAX_SUGGESTIONS_PER_FIELD = 24;
 
 const DEFAULT_FILTERS: Filters = {
   title: "",
@@ -96,6 +97,63 @@ const INDUSTRY_OPTIONS = [
   "Legal",
   "Sales",
   "Marketing",
+];
+
+const DEFAULT_POSITION_SUGGESTIONS = [
+  "Analyst",
+  "Associate",
+  "Senior Associate",
+  "Vice President",
+  "Principal",
+  "Director",
+  "Managing Director",
+  "Partner",
+  "Investment Associate",
+  "Investment Analyst",
+  "Operating Partner",
+  "Portfolio Operations",
+  "Finance Director",
+  "CFO",
+  "Head of Talent",
+  "Talent Acquisition",
+];
+
+const DEFAULT_INDUSTRY_KEYWORD_SUGGESTIONS = [
+  "private equity",
+  "buyout",
+  "growth equity",
+  "venture capital",
+  "family office",
+  "secondaries",
+  "infrastructure",
+  "credit",
+  "real assets",
+  "portfolio company",
+  "fundraising",
+  "capital markets",
+  "M&A",
+  "deal team",
+  "investment banking",
+  "asset management",
+];
+
+const DEFAULT_LOCATION_SUGGESTIONS = [
+  "London",
+  "United Kingdom",
+  "New York",
+  "San Francisco",
+  "Los Angeles",
+  "Chicago",
+  "Boston",
+  "Miami",
+  "Paris",
+  "Munich",
+  "Frankfurt",
+  "Zurich",
+  "Amsterdam",
+  "Dubai",
+  "Abu Dhabi",
+  "Remote",
 ];
 
 const PE_SIGNAL_TERMS = [
@@ -216,6 +274,38 @@ function hasHistoryResults(item: SearchHistoryItem): boolean {
   const resultCount = Number(item.resultCount || 0);
   const rowCount = Array.isArray(item.results) ? item.results.length : 0;
   return Math.max(resultCount, rowCount) > 0;
+}
+
+function uniqueCaseInsensitive(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function buildSuggestions(
+  defaults: string[],
+  historyValues: string[],
+  mode: "position" | "industry" | "location",
+): string[] {
+  const splitHistoryValues = historyValues.flatMap((raw) => {
+    const v = String(raw || "").trim();
+    if (!v) return [];
+    const base = [v];
+    if (mode === "location") {
+      return base.concat(v.split(/\s+OR\s+|\|/i).map((x) => x.trim()));
+    }
+    return base.concat(v.split(/\s+OR\s+|,|\|/i).map((x) => x.trim()));
+  });
+
+  return uniqueCaseInsensitive([...splitHistoryValues, ...defaults]).slice(0, MAX_SUGGESTIONS_PER_FIELD);
 }
 
 function matchesPESignal(job: Job): boolean {
@@ -352,6 +442,26 @@ export function FantasticJobsBoard() {
   const requestedCount = useMemo(
     () => Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100)),
     [filters.jobsPerSearch],
+  );
+
+  const positionSuggestions = useMemo(
+    () => buildSuggestions(DEFAULT_POSITION_SUGGESTIONS, searchHistory.map((h) => h.filters.title || ""), "position"),
+    [searchHistory],
+  );
+
+  const industryKeywordSuggestions = useMemo(
+    () =>
+      buildSuggestions(
+        DEFAULT_INDUSTRY_KEYWORD_SUGGESTIONS,
+        searchHistory.map((h) => h.filters.industryKeywords || ""),
+        "industry",
+      ),
+    [searchHistory],
+  );
+
+  const locationSuggestions = useMemo(
+    () => buildSuggestions(DEFAULT_LOCATION_SUGGESTIONS, searchHistory.map((h) => h.filters.location || ""), "location"),
+    [searchHistory],
   );
 
   const fetchViaBackend = useCallback(
@@ -781,11 +891,13 @@ export function FantasticJobsBoard() {
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
               placeholder="Title / Position (e.g. VP, Principal, CFO)"
+              list="job-position-suggestions"
               value={filters.title}
               onChange={(e) => setFilters((f) => ({ ...f, title: e.target.value }))}
             />
             <Input
               placeholder="Industry keywords (e.g. buyout, infra, secondaries)"
+              list="job-industry-keyword-suggestions"
               value={filters.industryKeywords}
               onChange={(e) => setFilters((f) => ({ ...f, industryKeywords: e.target.value }))}
             />
@@ -796,10 +908,27 @@ export function FantasticJobsBoard() {
             />
             <Input
               placeholder="Location (London, New York)"
+              list="job-location-suggestions"
               value={filters.location}
               onChange={(e) => setFilters((f) => ({ ...f, location: e.target.value }))}
             />
           </div>
+
+          <datalist id="job-position-suggestions">
+            {positionSuggestions.map((value) => (
+              <option key={`pos-${value}`} value={value} />
+            ))}
+          </datalist>
+          <datalist id="job-industry-keyword-suggestions">
+            {industryKeywordSuggestions.map((value) => (
+              <option key={`ind-${value}`} value={value} />
+            ))}
+          </datalist>
+          <datalist id="job-location-suggestions">
+            {locationSuggestions.map((value) => (
+              <option key={`loc-${value}`} value={value} />
+            ))}
+          </datalist>
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
