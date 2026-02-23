@@ -927,6 +927,10 @@ Deno.serve(async (req) => {
     const preferences = run.preferences_data as Preference[]
     const maxContacts = run.search_counter || 100 // Use search_counter as max contacts
     const maxPerCompany = 4 // Allow up to 4 contacts per company for better coverage
+    const searchType = String((preferences[0] as any)?.type || '').toLowerCase()
+    const isJobBoardSearch = searchType === 'jobboard_contact_search'
+    const isSpecialRequestSearch = searchType === 'special_request'
+    const skipUsedContactsExclusion = isJobBoardSearch || isSpecialRequestSearch
 
     if (!candidateData) {
       throw new Error('No candidate data found')
@@ -951,13 +955,19 @@ Deno.serve(async (req) => {
     const exclusionCutoff = new Date()
     exclusionCutoff.setDate(exclusionCutoff.getDate() - CONTACT_EXCLUSION_DAYS)
     
-    const { data: recentlyUsedContacts } = await supabase
-      .from('used_contacts')
-      .select('email')
-      .gte('added_at', exclusionCutoff.toISOString())
-    
-    const usedEmails = new Set((recentlyUsedContacts || []).map(c => c.email.toLowerCase()))
-    console.log(`Excluding ${usedEmails.size} contacts used in the last ${CONTACT_EXCLUSION_DAYS} days`)
+    const usedEmails = new Set<string>()
+    if (!skipUsedContactsExclusion) {
+      const { data: recentlyUsedContacts } = await supabase
+        .from('used_contacts')
+        .select('email')
+        .gte('added_at', exclusionCutoff.toISOString())
+      ;(recentlyUsedContacts || []).forEach((c) => {
+        if (c?.email) usedEmails.add(String(c.email).toLowerCase())
+      })
+      console.log(`Excluding ${usedEmails.size} contacts used in the last ${CONTACT_EXCLUSION_DAYS} days`)
+    } else {
+      console.log('Used-contacts exclusion disabled for this run (jobboard/special request)')
+    }
 
     // Bullhorn email tracking - allows up to 50% of contacts to be from Bullhorn
     // This ensures we find NEW contacts while still allowing some existing ones
@@ -998,9 +1008,6 @@ Deno.serve(async (req) => {
     const targetCompany = preferences[0]?.targetCompany || null
     const signalTitle = (preferences[0] as any)?.signalTitle || ''
     const signalRegion = (preferences[0] as any)?.signalRegion || ''
-    const searchType = String((preferences[0] as any)?.type || '').toLowerCase()
-    const isJobBoardSearch = searchType === 'jobboard_contact_search'
-    const isSpecialRequestSearch = searchType === 'special_request'
     const targetCompanyGoalContacts = targetCompany
       ? (
           (isJobBoardSearch || isSpecialRequestSearch)
@@ -1012,6 +1019,9 @@ Deno.serve(async (req) => {
     if (targetCompany) {
       console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
       console.log(`Location fallback goal: ${targetCompanyGoalContacts} contacts`)
+      if (skipUsedContactsExclusion) {
+        console.log('Used-contacts exclusion disabled for this run (jobboard/special request)')
+      }
     }
     
     // Expand target roles with native language translations based on selected locations
@@ -1437,7 +1447,7 @@ Deno.serve(async (req) => {
                 const emailLower = person.email.toLowerCase()
                 
                 // Check for duplicates and recently used
-                if (usedEmails.has(emailLower)) {
+                if (!skipUsedContactsExclusion && usedEmails.has(emailLower)) {
                   console.log(`Skipping recently used contact: ${personName} (${person.email})`)
                   continue
                 }
@@ -1595,7 +1605,7 @@ Deno.serve(async (req) => {
 
                   if (!(email && fullName && fullName !== 'Unknown')) continue
                   const emailLower = email.toLowerCase()
-                  if (usedEmails.has(emailLower) || seenEmails.has(emailLower)) continue
+                  if ((!skipUsedContactsExclusion && usedEmails.has(emailLower)) || seenEmails.has(emailLower)) continue
 
                   const dedupeKey = `${fullName.toLowerCase().trim()}|${companyName.toLowerCase().trim()}`
                   if (seenNameCompany.has(dedupeKey)) continue
@@ -1792,7 +1802,7 @@ Deno.serve(async (req) => {
                 // Check if email is already available from search results (SAVES 1 CREDIT!)
                 if (person.email) {
                   const emailLower = person.email.toLowerCase()
-                  if (!usedEmails.has(emailLower) && !seenEmails.has(emailLower)) {
+                  if ((skipUsedContactsExclusion || !usedEmails.has(emailLower)) && !seenEmails.has(emailLower)) {
                     contactsWithEmail.push({
                       name: personName,
                       title: personTitle,
@@ -1889,7 +1899,7 @@ Deno.serve(async (req) => {
 
                     if (!(email && fullName && fullName !== 'Unknown')) continue
                     const emailLower = email.toLowerCase()
-                    if (usedEmails.has(emailLower) || seenEmails.has(emailLower)) continue
+                    if ((!skipUsedContactsExclusion && usedEmails.has(emailLower)) || seenEmails.has(emailLower)) continue
 
                     const dedupeKey = `${fullName.toLowerCase().trim()}|${companyName.toLowerCase().trim()}`
                     if (seenNameCompany.has(dedupeKey)) continue
