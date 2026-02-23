@@ -1085,6 +1085,7 @@ export function FantasticJobsBoard() {
                 <SelectValue placeholder="Jobs per search" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="10">10 jobs</SelectItem>
                 <SelectItem value="25">25 jobs</SelectItem>
                 <SelectItem value="50">50 jobs</SelectItem>
                 <SelectItem value="100">100 jobs</SelectItem>
