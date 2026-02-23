@@ -14,12 +14,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { createEnrichmentRun } from "@/lib/dataApi";
 import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
-import {
-  DEFAULT_CAREER_ACTOR_ID,
-  DEFAULT_LINKEDIN_ACTOR_ID,
-  loadJobBoardSettings,
-  type JobBoardSettings,
-} from "@/lib/jobBoardSettings";
 
 interface Job {
   id: string;
@@ -119,15 +113,6 @@ function splitTerms(value: string): string[] {
     .split(/\s+OR\s+|,|\|/i)
     .map((v) => v.trim())
     .filter(Boolean);
-}
-
-function mapTimeRange(postedAfter: string): string {
-  const v = postedAfter.toLowerCase();
-  if (v === "24hours" || v === "24h") return "24h";
-  if (v === "1hour" || v === "1h") return "1h";
-  if (v === "14days" || v === "14d" || v === "2weeks") return "14d";
-  if (v === "30days" || v === "30d") return "30d";
-  return "7d";
 }
 
 function postedAfterToMs(postedAfter: string): number | null {
@@ -330,7 +315,6 @@ export function FantasticJobsBoard() {
   const [sortBy, setSortBy] = useState<"posted" | "salary">("posted");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [strictPEOnly, setStrictPEOnly] = useState(true);
-  const [settings, setSettings] = useState<JobBoardSettings>(() => loadJobBoardSettings());
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [total, setTotal] = useState(0);
   const [apolloLoadingByJob, setApolloLoadingByJob] = useState<Record<string, boolean>>({});
@@ -348,13 +332,6 @@ export function FantasticJobsBoard() {
   });
 
   useEffect(() => {
-    setSettings(loadJobBoardSettings());
-    const onFocus = () => setSettings(loadJobBoardSettings());
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
-
-  useEffect(() => {
     try {
       localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(searchHistory.slice(0, 12)));
     } catch (error) {
@@ -367,81 +344,6 @@ export function FantasticJobsBoard() {
     [filters.jobsPerSearch],
   );
 
-  const fetchDirect = useCallback(
-    async (mode: SearchMode): Promise<Job[]> => {
-      if (!settings.apifyToken.trim()) throw new Error("Apify token missing. Add it in Settings -> Fantastic.jobs.");
-
-      const actorIds =
-        mode === "linkedin"
-          ? [settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID]
-          : mode === "career"
-            ? [settings.careerActorId || DEFAULT_CAREER_ACTOR_ID]
-            : [
-                settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID,
-                settings.careerActorId || DEFAULT_CAREER_ACTOR_ID,
-              ];
-
-      const titleSearch = splitTerms(filters.title);
-      const industryKeywordSearch = splitTerms(filters.industryKeywords);
-      const titleExclusionSearch = splitTerms(filters.exclude);
-      const locationSearch = splitTerms(filters.location);
-      const organizationSearch = splitTerms(filters.company);
-      const timeRange = mapTimeRange(filters.postedAfter);
-      const perActorLimit = mode === "all" ? Math.max(10, Math.ceil(requestedCount / 2)) : requestedCount;
-
-      let merged: Job[] = [];
-      for (const actorId of actorIds) {
-        const isLinkedinActor = actorId === (settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID);
-        const input: Record<string, unknown> = {
-          timeRange,
-          limit: perActorLimit,
-          includeAi: true,
-          descriptionType: "text",
-          removeAgency: true,
-          populateAiRemoteLocation: true,
-          populateAiRemoteLocationDerived: true,
-        };
-
-        if (titleSearch.length > 0) input.titleSearch = titleSearch;
-        if (industryKeywordSearch.length > 0) input.descriptionSearch = industryKeywordSearch;
-        if (titleExclusionSearch.length > 0) input.titleExclusionSearch = titleExclusionSearch;
-        if (locationSearch.length > 0) input.locationSearch = locationSearch;
-        if (organizationSearch.length > 0) input.organizationSearch = organizationSearch;
-        if (filters.salaryMin) input.aiHasSalary = true;
-        if (filters.industry !== "all") input.aiTaxonomiesFilter = [filters.industry];
-
-        if (isLinkedinActor) {
-          if (filters.remote) input.remote = true;
-          if (filters.industry !== "all") input.industryFilter = [filters.industry];
-          if (industryKeywordSearch.length > 0) {
-            input.organizationDescriptionSearch = industryKeywordSearch;
-          }
-        } else {
-          input.includeLinkedIn = true;
-          if (filters.remote) input["remote only (legacy)"] = true;
-          if (filters.industry !== "all") input.liIndustryFilter = [filters.industry];
-        }
-
-        const endpoint =
-          `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
-          `/run-sync-get-dataset-items?token=${encodeURIComponent(settings.apifyToken)}&format=json&clean=true&maxItems=${perActorLimit}`;
-
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        });
-        if (!res.ok) continue;
-
-        const data = await res.json();
-        const items: Record<string, unknown>[] = Array.isArray(data) ? data : [];
-        merged = merged.concat(normalizeJobs(items, actorId));
-      }
-      return merged;
-    },
-    [settings, filters, requestedCount],
-  );
-
   const fetchViaBackend = useCallback(
     async (mode: SearchMode): Promise<Job[]> => {
       const params: Record<string, string> = {};
@@ -452,14 +354,7 @@ export function FantasticJobsBoard() {
       if (filters.industry && filters.industry !== "all") params.industry = filters.industry;
       if (filters.remote) params.remote = "true";
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
-      if (mode === "linkedin") params.actor_id = settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID;
-      if (mode === "career") params.actor_id = settings.careerActorId || DEFAULT_CAREER_ACTOR_ID;
-      if (mode === "all") {
-        params.actor_id = [
-          settings.linkedinActorId || DEFAULT_LINKEDIN_ACTOR_ID,
-          settings.careerActorId || DEFAULT_CAREER_ACTOR_ID,
-        ].join(",");
-      }
+      params.source = mode;
       params.limit = String(requestedCount);
       params.offset = "0";
 
@@ -468,7 +363,7 @@ export function FantasticJobsBoard() {
       if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
       return data.jobs as Job[];
     },
-    [settings, filters, requestedCount],
+    [filters, requestedCount],
   );
 
   const applyClientFilters = useCallback(
@@ -521,24 +416,7 @@ export function FantasticJobsBoard() {
       setSearchMode(mode);
       setLoading(true);
       try {
-        let incoming: Job[] = [];
-        if (!settings.useDirectApify) {
-          try {
-            incoming = await fetchViaBackend(mode);
-          } catch (backendError) {
-            if (settings.apifyToken.trim()) {
-              incoming = await fetchDirect(mode);
-            } else {
-              throw backendError;
-            }
-          }
-        } else {
-          if (settings.apifyToken.trim()) {
-            incoming = await fetchDirect(mode);
-          } else {
-            incoming = await fetchViaBackend(mode);
-          }
-        }
+        const incoming = await fetchViaBackend(mode);
 
         const deduped = Array.from(
           new Map(
@@ -586,7 +464,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [settings, fetchDirect, fetchViaBackend, toast, filters, requestedCount, applyClientFilters, strictPEOnly],
+    [fetchViaBackend, toast, filters, requestedCount, applyClientFilters, strictPEOnly],
   );
 
   const runSelectedSearch = () => {
@@ -829,7 +707,7 @@ export function FantasticJobsBoard() {
               Job Board
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Badge variant="secondary">{settings.useDirectApify ? "Direct Apify" : "Supabase API"}</Badge>
+              <Badge variant="secondary">Shared API</Badge>
               {lastRefresh ? <span className="text-xs text-muted-foreground">Last: {format(lastRefresh, "HH:mm")}</span> : null}
             </div>
           </div>

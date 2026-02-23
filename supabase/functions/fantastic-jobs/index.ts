@@ -20,6 +20,14 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
 }
 
+function selectActorsForSource(actorIds: string[], source: string): string[] {
+  if (actorIds.length === 0) return [];
+  const normalizedSource = String(source || "all").toLowerCase();
+  if (normalizedSource === "linkedin") return [actorIds[0]];
+  if (normalizedSource === "career") return [actorIds[1] || actorIds[0]];
+  return actorIds;
+}
+
 function splitTerms(value: string): string[] {
   if (!value) return [];
   return value
@@ -480,13 +488,23 @@ serve(async (req) => {
       Deno.env.get("APIFY_TOKEN") ||
       Deno.env.get("APIFY_API_TOKEN") ||
       "";
-    const apifyActorIds = uniqueStrings([
-      ...splitCsv(body.actor_id as string),
-      ...splitCsv(savedSettings.apify_actor_id),
+    const sourceMode = getParam(body, url, "source", "all").toLowerCase();
+    const bodyActorIds = splitCsv(body.actor_id as string);
+    const savedActorIds = splitCsv(savedSettings.apify_actor_id);
+    const envActorIds = uniqueStrings([
       ...splitCsv(Deno.env.get("APIFY_FANTASTIC_JOBS_ACTOR_IDS") || ""),
       ...splitCsv(Deno.env.get("APIFY_FANTASTIC_JOBS_ACTOR_ID") || ""),
       ...splitCsv(Deno.env.get("APIFY_ACTOR_ID") || ""),
     ]);
+
+    let apifyActorIds: string[] = [];
+    if (bodyActorIds.length > 0) {
+      apifyActorIds = uniqueStrings(bodyActorIds);
+    } else if (savedActorIds.length > 0) {
+      apifyActorIds = uniqueStrings(selectActorsForSource(savedActorIds, sourceMode));
+    } else {
+      apifyActorIds = uniqueStrings(selectActorsForSource(envActorIds, sourceMode));
+    }
     const rapidApiKey =
       (body.rapidapi_key as string) ||
       (body.rapidApiKey as string) ||

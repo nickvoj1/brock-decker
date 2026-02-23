@@ -3,7 +3,6 @@ import { Briefcase, CheckCircle2, XCircle, Loader2, Eye, EyeOff } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -21,7 +20,6 @@ export function FantasticJobsSettingsCard() {
   const [apifyToken, setApifyToken] = useState("");
   const [linkedinActorId, setLinkedinActorId] = useState(DEFAULT_LINKEDIN_ACTOR_ID);
   const [careerActorId, setCareerActorId] = useState(DEFAULT_CAREER_ACTOR_ID);
-  const [useDirectApify, setUseDirectApify] = useState(false);
   const [showApifyToken, setShowApifyToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<"idle" | "success" | "error">("idle");
@@ -31,7 +29,6 @@ export function FantasticJobsSettingsCard() {
     setApifyToken(settings.apifyToken);
     setLinkedinActorId(settings.linkedinActorId);
     setCareerActorId(settings.careerActorId);
-    setUseDirectApify(settings.useDirectApify);
   }, []);
 
   const isConfigured = useMemo(() => {
@@ -39,51 +36,53 @@ export function FantasticJobsSettingsCard() {
   }, [apifyToken, linkedinActorId, careerActorId]);
 
   const handleSave = async () => {
+    if (!profileName) {
+      toast({
+        title: "Cannot save settings",
+        description: "Admin profile is required to save shared API settings.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const normalizedToken = apifyToken.trim();
     const normalizedLinkedinActor = linkedinActorId.trim() || DEFAULT_LINKEDIN_ACTOR_ID;
     const normalizedCareerActor = careerActorId.trim() || DEFAULT_CAREER_ACTOR_ID;
 
     saveJobBoardSettings({
-      useDirectApify,
-      apifyToken: normalizedToken,
+      useDirectApify: false,
+      apifyToken: "",
       linkedinActorId: normalizedLinkedinActor,
       careerActorId: normalizedCareerActor,
     });
 
     const actorCsv = [normalizedLinkedinActor, normalizedCareerActor].join(",");
 
-    if (profileName) {
-      try {
-        const [tokenSave, actorSave] = await Promise.all([
-          saveApiSetting(profileName, "apify_token", normalizedToken),
-          saveApiSetting(profileName, "apify_actor_id", actorCsv),
-        ]);
+    try {
+      const [tokenSave, actorSave] = await Promise.all([
+        saveApiSetting(profileName, "apify_token", normalizedToken),
+        saveApiSetting(profileName, "apify_actor_id", actorCsv),
+      ]);
 
-        if (!tokenSave.success) throw new Error(tokenSave.error || "Failed to save shared Apify token");
-        if (!actorSave.success) throw new Error(actorSave.error || "Failed to save shared actor IDs");
+      if (!tokenSave.success) throw new Error(tokenSave.error || "Failed to save shared Apify token");
+      if (!actorSave.success) throw new Error(actorSave.error || "Failed to save shared actor IDs");
 
-        toast({
-          title: "Job board settings saved",
-          description: "Saved locally and globally. All users can now use the same Apify setup.",
-        });
-        return;
-      } catch (error) {
-        toast({
-          title: "Saved locally only",
-          description:
-            error instanceof Error
-              ? error.message
-              : "Could not save shared settings. Other users may still miss Apify credentials.",
-          variant: "destructive",
-        });
-        return;
-      }
+      toast({
+        title: "Job board settings saved",
+        description: "Saved globally. All users now use the same shared configuration.",
+      });
+      return;
+    } catch (error) {
+      toast({
+        title: "Failed to save shared settings",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Global save failed. No local fallback is used.",
+        variant: "destructive",
+      });
+      return;
     }
-
-    toast({
-      title: "Job board settings saved",
-      description: "Saved in this browser. Shared save requires an authenticated admin profile.",
-    });
   };
 
   const testConnection = async () => {
@@ -156,17 +155,6 @@ export function FantasticJobsSettingsCard() {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="direct-apify-mode"
-            checked={useDirectApify}
-            onCheckedChange={(checked) => setUseDirectApify(Boolean(checked))}
-          />
-          <label htmlFor="direct-apify-mode" className="text-sm cursor-pointer">
-            Use Direct Apify mode (works without Supabase function deployment)
-          </label>
-        </div>
-
         <div className="space-y-2">
           <Label htmlFor="apifyToken">Apify Token</Label>
           <div className="relative">

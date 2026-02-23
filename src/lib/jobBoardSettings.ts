@@ -9,8 +9,6 @@ export const DEFAULT_LINKEDIN_ACTOR_ID = "vIGxjRrHqDTPuE6M4";
 export const DEFAULT_CAREER_ACTOR_ID = "s3dtSTZSZWFtAVLn5";
 
 const STORAGE_KEYS = {
-  mode: "jobs.use_direct_apify",
-  token: "jobs.apify_token",
   linkedinActor: "jobs.apify_actor_linkedin",
   careerActor: "jobs.apify_actor_career",
 };
@@ -18,7 +16,6 @@ const STORAGE_KEYS = {
 export function loadJobBoardSettings(): JobBoardSettings {
   if (typeof window === "undefined") {
     return {
-      // Default to backend/shared mode so all users can use centrally saved credentials.
       useDirectApify: false,
       apifyToken: "",
       linkedinActorId: DEFAULT_LINKEDIN_ACTOR_ID,
@@ -27,9 +24,9 @@ export function loadJobBoardSettings(): JobBoardSettings {
   }
 
   return {
-    // Use direct mode only when explicitly enabled for this browser.
-    useDirectApify: localStorage.getItem(STORAGE_KEYS.mode) === "true",
-    apifyToken: localStorage.getItem(STORAGE_KEYS.token) || "",
+    // Always use shared backend mode for all users.
+    useDirectApify: false,
+    apifyToken: "",
     linkedinActorId: localStorage.getItem(STORAGE_KEYS.linkedinActor) || DEFAULT_LINKEDIN_ACTOR_ID,
     careerActorId: localStorage.getItem(STORAGE_KEYS.careerActor) || DEFAULT_CAREER_ACTOR_ID,
   };
@@ -37,8 +34,7 @@ export function loadJobBoardSettings(): JobBoardSettings {
 
 export function saveJobBoardSettings(settings: JobBoardSettings) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEYS.mode, String(settings.useDirectApify));
-  localStorage.setItem(STORAGE_KEYS.token, settings.apifyToken);
+  // Persist only actor IDs for admin convenience in Settings UI.
   localStorage.setItem(STORAGE_KEYS.linkedinActor, settings.linkedinActorId);
   localStorage.setItem(STORAGE_KEYS.careerActor, settings.careerActorId);
 }
