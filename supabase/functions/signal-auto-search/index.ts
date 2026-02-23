@@ -330,7 +330,7 @@ function getSignalLocationOverrides(signal: any): { exactLocations: string[]; co
   const locationRaw = typeof signal?.details?.location === 'string' ? signal.details.location.trim() : ''
   if (!locationRaw) return { exactLocations: [], countryHints: [] }
 
-  const exactLocations = Array.from(
+  const exactLocations: string[] = Array.from(
     new Set(
       locationRaw
         .split('|')
@@ -338,15 +338,15 @@ function getSignalLocationOverrides(signal: any): { exactLocations: string[]; co
         .filter((part: string) => part.length > 1)
         .filter((part: string) => !isGenericRegionLabel(part))
     )
-  )
+  ) as string[]
 
-  const countryHints = Array.from(
+  const countryHints: string[] = Array.from(
     new Set(
       exactLocations
-        .map((loc) => extractCountryFromLocationLabel(loc) || '')
-        .filter((v) => v.length > 1)
+        .map((loc: string) => extractCountryFromLocationLabel(loc) || '')
+        .filter((v: string) => v.length > 1)
     )
-  )
+  ) as string[]
 
   return { exactLocations, countryHints }
 }
