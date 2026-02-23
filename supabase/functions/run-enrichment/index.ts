@@ -289,6 +289,17 @@ interface ApolloSearchPayload {
   per_page?: number
 }
 
+interface PersonToEnrich {
+  id: string
+  name: string
+  title: string
+  company: string
+  location: string
+  city?: string
+  state?: string
+  country?: string
+}
+
 // ============ Company Name Normalization & Matching ============
 const COMPANY_SUFFIXES = [
   'ltd', 'limited', 'llc', 'inc', 'incorporated', 'corp', 'corporation',
@@ -983,15 +994,24 @@ Deno.serve(async (req) => {
     // Get locations from preferences (all prefs share the same locations)
     const searchLocations = preferences[0]?.locations || []
     
-    // Get target company if specified (for signal-based searches)
+    // Get target company if specified (signal/job-board/special targeted searches)
     const targetCompany = preferences[0]?.targetCompany || null
     const signalTitle = (preferences[0] as any)?.signalTitle || ''
     const signalRegion = (preferences[0] as any)?.signalRegion || ''
-    const TARGET_COMPANY_MIN_CONTACTS = 10 // Stop when we find this many contacts at target company
+    const searchType = String((preferences[0] as any)?.type || '').toLowerCase()
+    const isJobBoardSearch = searchType === 'jobboard_contact_search'
+    const isSpecialRequestSearch = searchType === 'special_request'
+    const targetCompanyGoalContacts = targetCompany
+      ? (
+          (isJobBoardSearch || isSpecialRequestSearch)
+            ? maxContacts
+            : Math.min(maxContacts, 10)
+        )
+      : 0
     
     if (targetCompany) {
-      console.log(`Signal-based search: targeting company "${targetCompany}"`)
-      console.log(`Will retry with fallback strategies until ${TARGET_COMPANY_MIN_CONTACTS} contacts found`)
+      console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
+      console.log(`Location fallback goal: ${targetCompanyGoalContacts} contacts`)
     }
     
     // Expand target roles with native language translations based on selected locations
@@ -1251,7 +1271,9 @@ Deno.serve(async (req) => {
         }
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
-        const maxPages = targetCompany ? 3 : 2
+        const maxPages = targetCompany
+          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 4 : 3)
+          : 2
         let currentPage = 1
         let hasMoreResults = true
         
@@ -1325,7 +1347,8 @@ Deno.serve(async (req) => {
             
             // Process contacts - use email from search if available, otherwise mark for enrichment
             const contactsWithEmail: ApolloContact[] = []
-            const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
+            const peopleToEnrich: PersonToEnrich[] = []
+            const pendingByCompany: Record<string, number> = {}
             
             // Determine quota limit for this combination's industry
             const comboIndustryQuota = (useEqualDistribution && comboIndustry) 
@@ -1392,7 +1415,9 @@ Deno.serve(async (req) => {
               
               // Check max per company limit (relax for target company searches)
               const effectiveMaxPerCompany = targetCompany ? 50 : maxPerCompany // Allow more for target company
-              if ((companyContactCount[companyName] || 0) >= effectiveMaxPerCompany) {
+              const existingCompanyCount = companyContactCount[companyName] || 0
+              const pendingCompanyCount = pendingByCompany[companyName] || 0
+              if (existingCompanyCount + pendingCompanyCount >= effectiveMaxPerCompany) {
                 continue
               }
               
@@ -1456,8 +1481,11 @@ Deno.serve(async (req) => {
                   title: personTitle,
                   company: companyName,
                   location: fullLocation,
+                  city: person.city || undefined,
+                  state: person.state || undefined,
+                  country: person.country || undefined,
                 })
-                companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
+                pendingByCompany[companyName] = (pendingByCompany[companyName] || 0) + 1
               }
             }
             
@@ -1539,20 +1567,31 @@ Deno.serve(async (req) => {
                   const fullName = person.name || (person.first_name && person.last_name
                     ? `${person.first_name} ${person.last_name}`.trim()
                     : personData.name)
-                  const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                  const locationParts = [
+                    person.city || personData.city,
+                    person.state || personData.state,
+                    person.country || personData.country,
+                  ].filter(Boolean)
                   const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
                   const companyName = person.organization?.name || personData.company
                   const jobTitle = person.title || personData.title || 'Unknown'
 
                   if (strictLocationEnabled) {
                     const isLocationMatch = matchesStrictLocation(
-                      { city: person.city, state: person.state, country: person.country },
+                      {
+                        city: person.city || personData.city,
+                        state: person.state || personData.state,
+                        country: person.country || personData.country,
+                      },
                       initialLocationMode,
                       allowedCityTokens,
                       allowedCountryTokens
                     )
                     if (!isLocationMatch) continue
                   }
+
+                  const effectiveMaxPerCompany = targetCompany ? 50 : maxPerCompany
+                  if ((companyContactCount[companyName] || 0) >= effectiveMaxPerCompany) continue
 
                   if (!(email && fullName && fullName !== 'Unknown')) continue
                   const emailLower = email.toLowerCase()
@@ -1585,6 +1624,7 @@ Deno.serve(async (req) => {
 
                   seenEmails.add(emailLower)
                   seenNameCompany.add(dedupeKey)
+                  companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
                   if (isFromBullhorn) bullhornContactCount++
                   allContacts.push(newContact)
                 }
@@ -1618,11 +1658,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ============ SIGNAL-BASED RETRY LOOP ============
-    // If this is a signal-based search and we haven't found enough contacts, try retry strategies
-    if (targetCompany && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
-      console.log(`\n=== SIGNAL RETRY LOOP ===`)
-      console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${TARGET_COMPANY_MIN_CONTACTS}`)
+    // ============ TARGET-COMPANY RETRY LOOP ============
+    // If this is a target-company search and we haven't found enough contacts, try retry strategies
+    if (targetCompany && allContacts.length < targetCompanyGoalContacts) {
+      console.log(`\n=== TARGET-COMPANY RETRY LOOP ===`)
+      console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${targetCompanyGoalContacts}`)
       
       const retryStrategies = buildRetryStrategies(
         targetCompany,
@@ -1635,7 +1675,7 @@ Deno.serve(async (req) => {
       console.log(`Trying ${retryStrategies.length} retry strategies...`)
       
       for (const strategy of retryStrategies) {
-        if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) {
+        if (allContacts.length >= targetCompanyGoalContacts) {
           console.log(`Target reached (${allContacts.length} contacts), stopping retries`)
           break
         }
@@ -1668,11 +1708,11 @@ Deno.serve(async (req) => {
           retryParams.append('q_organization_name', strategy.companyName)
           
           // Search more pages for retries
-          const maxRetryPages = 4
+          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4
           let currentPage = 1
           let hasMoreResults = true
           
-          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
+          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < targetCompanyGoalContacts) {
             const pageParams = new URLSearchParams(retryParams)
             pageParams.set('per_page', '100')
             pageParams.set('page', String(currentPage))
@@ -1702,7 +1742,7 @@ Deno.serve(async (req) => {
               
               // Process people with strict company matching - use email from search if available
               const contactsWithEmail: ApolloContact[] = []
-              const peopleToEnrich: Array<{id: string, name: string, title: string, company: string, location: string}> = []
+              const peopleToEnrich: PersonToEnrich[] = []
               
               for (const person of people) {
                 if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= maxContacts) break
@@ -1772,21 +1812,24 @@ Deno.serve(async (req) => {
                     title: personTitle,
                     company: personCompanyName,
                     location: fullLocation,
+                    city: person.city || undefined,
+                    state: person.state || undefined,
+                    country: person.country || undefined,
                   })
                 }
               }
               
               // Add contacts that had emails directly from search
               for (const contact of contactsWithEmail) {
-                if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
+                if (allContacts.length >= targetCompanyGoalContacts) break
                 allContacts.push(contact)
               }
               
               console.log(`[Retry] Found ${contactsWithEmail.length} with email from search, ${peopleToEnrich.length} need enrichment`)
               
               // CREDIT OPTIMIZATION: Only enrich people we actually need
-              if (peopleToEnrich.length > 0 && allContacts.length < TARGET_COMPANY_MIN_CONTACTS) {
-                const contactsStillNeeded = TARGET_COMPANY_MIN_CONTACTS - allContacts.length
+              if (peopleToEnrich.length > 0 && allContacts.length < targetCompanyGoalContacts) {
+                const contactsStillNeeded = targetCompanyGoalContacts - allContacts.length
                 const limitedPeopleToEnrich = peopleToEnrich.slice(0, contactsStillNeeded)
                 
                 if (limitedPeopleToEnrich.length < peopleToEnrich.length) {
@@ -1794,7 +1837,7 @@ Deno.serve(async (req) => {
                 }
                 
                 for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
-                  if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
+                  if (allContacts.length >= targetCompanyGoalContacts) break
                   
                   const batch = limitedPeopleToEnrich.slice(i, i + 10)
                   const retryEnrichResults = await Promise.allSettled(
@@ -1815,7 +1858,7 @@ Deno.serve(async (req) => {
                   )
 
                   for (const result of retryEnrichResults) {
-                    if (allContacts.length >= TARGET_COMPANY_MIN_CONTACTS) break
+                    if (allContacts.length >= targetCompanyGoalContacts) break
                     if (result.status !== 'fulfilled' || !result.value) continue
                     const { personData, person } = result.value
 
@@ -1823,12 +1866,20 @@ Deno.serve(async (req) => {
                     const fullName = person.name || personData.name
                     const companyName = person.organization?.name || personData.company
                     const jobTitle = person.title || personData.title || 'Unknown'
-                    const locationParts = [person.city, person.state, person.country].filter(Boolean)
+                    const locationParts = [
+                      person.city || personData.city,
+                      person.state || personData.state,
+                      person.country || personData.country,
+                    ].filter(Boolean)
                     const fullLocation = locationParts.length > 0 ? locationParts.join(', ') : personData.location
 
                     if (strictLocationEnabled) {
                       const locationMatch = matchesStrictLocation(
-                        { city: person.city, state: person.state, country: person.country },
+                        {
+                          city: person.city || personData.city,
+                          state: person.state || personData.state,
+                          country: person.country || personData.country,
+                        },
                         strategy.locationMode,
                         retryAllowedCityTokens,
                         retryAllowedCountryTokens
@@ -1871,7 +1922,7 @@ Deno.serve(async (req) => {
       
       console.log(`\n=== RETRY COMPLETE: Found ${allContacts.length} total contacts ===\n`)
     }
-    // ============ END SIGNAL RETRY LOOP ============
+    // ============ END TARGET-COMPANY RETRY LOOP ============
 
     // Log Bullhorn ratio summary
     const newContactCount = allContacts.length - bullhornContactCount

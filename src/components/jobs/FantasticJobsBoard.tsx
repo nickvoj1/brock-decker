@@ -482,18 +482,41 @@ function inferTargetRolesForJob(jobTitle: string): string[] {
     "People Operations",
     "HR Director",
     "Hiring Manager",
+    "People Partner",
+    "Talent Partner",
   ];
   const t = (jobTitle || "").toLowerCase();
-  if (/(partner|principal|director|vp|vice president|managing director)/i.test(t)) {
-    base.push("Partner", "Principal", "Managing Director");
+
+  if (/(partner|principal|director|vp|vice president|managing director|head of|lead)/i.test(t)) {
+    base.push("Partner", "Principal", "Managing Director", "Director", "Vice President");
   }
-  if (/(cfo|finance|controller|fund finance)/i.test(t)) {
-    base.push("CFO", "Finance Director", "Head of Finance");
+  if (/(invest|private equity|buyout|deal|portfolio|capital|fund|m&a|acquisition)/i.test(t)) {
+    base.push(
+      "Investment Director",
+      "Investment Manager",
+      "Head of Investments",
+      "Operating Partner",
+      "Portfolio Manager",
+      "Deal Team",
+    );
   }
-  if (/(legal|counsel|compliance)/i.test(t)) {
-    base.push("General Counsel", "Head of Legal");
+  if (/(cfo|finance|controller|fund finance|fp&a|treasury|accounting)/i.test(t)) {
+    base.push("CFO", "Finance Director", "Head of Finance", "Fund Finance Director");
   }
-  return Array.from(new Set(base));
+  if (/(legal|counsel|compliance|regulatory)/i.test(t)) {
+    base.push("General Counsel", "Head of Legal", "Chief Compliance Officer");
+  }
+  if (/(cto|engineer|software|data|it|platform|security)/i.test(t)) {
+    base.push("CTO", "VP Engineering", "Engineering Director", "Head of Data");
+  }
+  if (/(operations|coo|operational|portfolio operations)/i.test(t)) {
+    base.push("COO", "Operations Director", "Head of Operations");
+  }
+  if (/(sales|commercial|business development|growth)/i.test(t)) {
+    base.push("Chief Commercial Officer", "VP Sales", "Head of Business Development");
+  }
+
+  return Array.from(new Set(base)).slice(0, 30);
 }
 
 export function FantasticJobsBoard() {
@@ -905,7 +928,9 @@ export function FantasticJobsBoard() {
     const locations = inferLocationsForEnrichment(job.location);
     const signalRegion = inferSignalRegionFromLocation(job.location);
     const targetRoles = inferTargetRolesForJob(job.title);
-    const industry = filters.industry !== "all" ? filters.industry : "Private Equity";
+    const industry = filters.industry !== "all"
+      ? filters.industry
+      : (filters.industryKeywords.trim() || "Private Equity");
     const maxContacts = 30;
     const effectiveProfile = profileName || "Unknown";
 
