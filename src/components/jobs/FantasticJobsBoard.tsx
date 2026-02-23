@@ -168,7 +168,6 @@ const PE_SIGNAL_TERMS = [
 
 const REMOTE_TERMS = [
   "remote",
-  "hybrid",
   "work from home",
   "wfh",
   "home based",

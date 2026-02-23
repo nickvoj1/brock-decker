@@ -9,7 +9,6 @@ const corsHeaders = {
 // RapidAPI removed — Apify only
 const REMOTE_TERMS = [
   "remote",
-  "hybrid",
   "work from home",
   "wfh",
   "home based",
