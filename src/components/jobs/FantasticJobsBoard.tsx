@@ -315,7 +315,7 @@ export function FantasticJobsBoard() {
   const [selectedSources, setSelectedSources] = useState({ linkedin: false, career: false });
   const [sortBy, setSortBy] = useState<"posted" | "salary">("posted");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const [strictPEOnly, setStrictPEOnly] = useState(true);
+  const [strictPEOnly, setStrictPEOnly] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [total, setTotal] = useState(0);
   const [apolloLoadingByJob, setApolloLoadingByJob] = useState<Record<string, boolean>>({});
