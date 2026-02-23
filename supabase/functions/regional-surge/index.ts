@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { evaluateSignalQuality } from "../_shared/signal-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -504,6 +505,7 @@ Deno.serve(async (req) => {
     const seenUrlKeys = new Set<string>();
     const seenTitleKeys = new Set<string>();
     const seenCompanyTypeKeys = new Set<string>();
+    const seenDedupeKeys = new Set<string>();
 
     for (const existing of recentSignals || []) {
       const urlKey = normalizeUrlForDedup(existing.url);
@@ -518,6 +520,9 @@ Deno.serve(async (req) => {
         titleKey,
       ].join("|");
       if (companyTypeKey.replace(/\|/g, "").length > 0) seenCompanyTypeKeys.add(companyTypeKey);
+
+      const existingDedupeKey = String((existing as any)?.details?.dedupe_key || "").trim().toLowerCase();
+      if (existingDedupeKey) seenDedupeKeys.add(existingDedupeKey);
     }
     
     const results = {
@@ -590,21 +595,48 @@ Deno.serve(async (req) => {
           const title = contentTitle.slice(0, 255);
           const signalType = classifySignalTypeFromContent(articleContent);
           const keyPeople = extractKeyPeople(articleContent);
-          const dealSignature = extractDealSignature(articleContent);
+          const quality = evaluateSignalQuality({
+            title,
+            description: articleContent.slice(0, 650),
+            rawContent: articleContent,
+            company,
+            source: source.source,
+            url: source.url,
+            expectedRegion: region,
+            signalType,
+            keyPeople,
+          });
+          if (!quality.accepted) {
+            console.log(`Rejected by quality pipeline: ${quality.reason || "unknown"} :: ${title.slice(0, 80)}`);
+            results.rejected++;
+            results.byRegion[region].rejected++;
+            continue;
+          }
+
+          const normalizedCompany = quality.company;
+          const normalizedSignalType = quality.signalType;
+          const normalizedKeyPeople = quality.keyPeople;
+          const dealSignature = quality.dealSignature;
+          const dedupeKey = quality.dedupeKey.toLowerCase();
           const sourceKey = normalizeTextForDedup(source.source);
           const urlKey = normalizeUrlForDedup(source.url);
           const titleKey = titleFingerprint(title);
           const companyTypeKey = [
-            normalizeTextForDedup(company),
+            normalizeTextForDedup(normalizedCompany),
             normalizeTextForDedup(region),
-            normalizeTextForDedup(signalType),
+            normalizeTextForDedup(normalizedSignalType),
             sourceKey,
-            normalizeTextForDedup(keyPeople.join("|")),
+            normalizeTextForDedup(normalizedKeyPeople.join("|")),
             normalizeTextForDedup(dealSignature),
             titleKey,
           ].join("|");
 
-          if ((urlKey && seenUrlKeys.has(urlKey)) || seenTitleKeys.has(titleKey) || seenCompanyTypeKeys.has(companyTypeKey)) {
+          if (
+            (urlKey && seenUrlKeys.has(urlKey)) ||
+            seenTitleKeys.has(titleKey) ||
+            seenCompanyTypeKeys.has(companyTypeKey) ||
+            seenDedupeKeys.has(dedupeKey)
+          ) {
             console.log(`Skipping duplicate: ${company} (${source.source})`);
             continue;
           }
@@ -614,8 +646,10 @@ Deno.serve(async (req) => {
             .from("signals")
             .insert({
               title,
-              company,
+              company: normalizedCompany,
               region,
+              amount: quality.amount,
+              currency: quality.currency || "USD",
               detected_region: detectedRegion,
               validated_region: validatedRegion,
               score: surgeScore,
@@ -626,14 +660,17 @@ Deno.serve(async (req) => {
               ai_confidence: geoConfidence,
               ai_insight: insight,
               source: source.source,
-              signal_type: signalType,
-              tier: surgeScore >= 90 ? "tier_1" : surgeScore >= 70 ? "tier_2" : "tier_3",
+              signal_type: normalizedSignalType,
+              tier: quality.mustHave ? "tier_1" : surgeScore >= 90 ? "tier_1" : surgeScore >= 70 ? "tier_2" : "tier_3",
               published_at: new Date().toISOString(),
               user_feedback: isPending ? null : "AUTO_VALIDATED",
               details: {
-                key_people: keyPeople,
+                key_people: normalizedKeyPeople,
                 deal_signature: dealSignature,
                 source_key: sourceKey,
+                dedupe_key: dedupeKey,
+                strict_deal_region: quality.detectedRegion || quality.expectedRegion,
+                must_have: quality.mustHave,
               },
             });
           
@@ -643,6 +680,7 @@ Deno.serve(async (req) => {
             if (urlKey) seenUrlKeys.add(urlKey);
             seenTitleKeys.add(titleKey);
             seenCompanyTypeKeys.add(companyTypeKey);
+            seenDedupeKeys.add(dedupeKey);
             if (isPending) {
               results.pending++;
               results.byRegion[region].pending++;

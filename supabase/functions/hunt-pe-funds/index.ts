@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.91.1'
+import { evaluateSignalQuality } from '../_shared/signal-quality.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -182,6 +183,50 @@ function detectCurrency(size: string): string {
   return 'USD'
 }
 
+function normalizeUrlForDedup(url?: string | null): string {
+  if (!url) return ''
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '')
+    const path = parsed.pathname.replace(/\/+$/, '')
+    return `${host}${path}`.toLowerCase()
+  } catch {
+    return String(url).trim().toLowerCase()
+  }
+}
+
+function normalizeTextForDedup(text?: string | null): string {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function titleFingerprint(text?: string | null): string {
+  return normalizeTextForDedup(text).split(' ').slice(0, 14).join(' ')
+}
+
+function parseKeyPeople(raw?: string | null): string[] {
+  if (!raw) return []
+  if (raw.trim().toLowerCase() === 'n/a') return []
+  return raw
+    .split(/[,;]| and /i)
+    .map((v) => v.replace(/\([^)]*\)/g, '').trim())
+    .filter(Boolean)
+    .slice(0, 5)
+}
+
+function resolveSourceHost(url?: string | null): string {
+  if (!url) return 'Google Search'
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return 'Google Search'
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -214,6 +259,40 @@ Deno.serve(async (req) => {
     const allParsed: ParsedSignal[] = []
     const regionResults: Record<string, { searched: number; parsed: number; inserted: number }> = {}
 
+    const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString()
+    const { data: recentSignals } = await supabase
+      .from('signals')
+      .select('url, title, company, region, signal_type, source, details, published_at')
+      .gte('published_at', dedupeCutoffIso)
+      .limit(5000)
+
+    const seenUrlKeys = new Set<string>()
+    const seenTitleKeys = new Set<string>()
+    const seenCompanyTypeKeys = new Set<string>()
+    const seenDedupeKeys = new Set<string>()
+
+    for (const existing of recentSignals || []) {
+      const urlKey = normalizeUrlForDedup(existing.url)
+      if (urlKey) seenUrlKeys.add(urlKey)
+
+      const titleKey = titleFingerprint(existing.title)
+      if (titleKey) seenTitleKeys.add(titleKey)
+
+      const companyTypeKey = [
+        normalizeTextForDedup(existing.company),
+        normalizeTextForDedup(existing.region),
+        normalizeTextForDedup(existing.signal_type),
+        normalizeTextForDedup((existing as any).source),
+        normalizeTextForDedup(Array.isArray((existing as any)?.details?.key_people) ? (existing as any).details.key_people.join('|') : ''),
+        normalizeTextForDedup((existing as any)?.details?.deal_signature || ''),
+        titleKey,
+      ].join('|')
+      if (companyTypeKey.replace(/\|/g, '').length > 0) seenCompanyTypeKeys.add(companyTypeKey)
+
+      const existingDedupeKey = String((existing as any)?.details?.dedupe_key || '').trim().toLowerCase()
+      if (existingDedupeKey) seenDedupeKeys.add(existingDedupeKey)
+    }
+
     for (const region of targetRegions) {
       const query = REGION_QUERIES[region]
       if (!query) {
@@ -233,47 +312,94 @@ Deno.serve(async (req) => {
         // Filter: fits=true, size > 50M or strategic, < 10 days old
         const filtered = parsed.filter(p => p.fits)
 
-        // Deduplicate against existing signals by title+company
-        const existingTitles = new Set<string>()
-        const { data: existing } = await supabase
-          .from('signals')
-          .select('title, company')
-          .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-
-        if (existing) {
-          for (const e of existing) {
-            existingTitles.add(`${e.company?.toLowerCase()}::${e.title?.toLowerCase()?.slice(0, 50)}`)
-          }
-        }
-
-        const newSignals = filtered.filter(p => {
-          const key = `${p.firm.toLowerCase()}::${p.summary.toLowerCase().slice(0, 50)}`
-          return !existingTitles.has(key)
-        })
-
         // Insert into signals table
         let inserted = 0
-        for (const signal of newSignals) {
-          const amountM = parseAmountToMillions(signal.size)
-          const currency = detectCurrency(signal.size)
+        let qualityAccepted = 0
+        const acceptedForOutput: ParsedSignal[] = []
+        for (const signal of filtered) {
+          const source = resolveSourceHost(signal.url)
+          const description = `${signal.fund_name}${signal.key_people && signal.key_people !== 'N/A' ? ` • Key People: ${signal.key_people}` : ''}`
+          const fallbackAmount = parseAmountToMillions(signal.size)
+          const fallbackCurrency = detectCurrency(signal.size)
+          const normalizedSignalType = mapSignalType(signal.signal_type)
+          const quality = evaluateSignalQuality({
+            title: signal.summary,
+            description,
+            rawContent: `${signal.summary} ${signal.fund_name} ${signal.size} ${signal.key_people || ''}`,
+            company: signal.firm,
+            source,
+            url: signal.url,
+            expectedRegion: region,
+            signalType: normalizedSignalType,
+            keyPeople: parseKeyPeople(signal.key_people),
+          })
+          if (!quality.accepted) {
+            console.log(`Skipping by quality pipeline (${quality.reason || 'unknown'}): ${signal.summary.slice(0, 60)}...`)
+            continue
+          }
+          qualityAccepted++
+          acceptedForOutput.push(signal)
+
+          const resolvedAmount = quality.amount ?? fallbackAmount
+          const resolvedCurrency = quality.currency ?? fallbackCurrency ?? null
+          const dealSignature = quality.dealSignature
+          const dedupeKey = quality.dedupeKey.toLowerCase()
+          const sourceKey = normalizeTextForDedup(source)
+          const urlKey = normalizeUrlForDedup(signal.url)
+          const title = signal.summary.slice(0, 255)
+          const titleKey = titleFingerprint(title)
+          const companyTypeKey = [
+            normalizeTextForDedup(quality.company),
+            normalizeTextForDedup(region),
+            normalizeTextForDedup(quality.signalType),
+            sourceKey,
+            normalizeTextForDedup(quality.keyPeople.join('|')),
+            normalizeTextForDedup(dealSignature),
+            titleKey,
+          ].join('|')
+
+          if (
+            (urlKey && seenUrlKeys.has(urlKey)) ||
+            seenTitleKeys.has(titleKey) ||
+            seenCompanyTypeKeys.has(companyTypeKey) ||
+            seenDedupeKeys.has(dedupeKey)
+          ) {
+            continue
+          }
+
+          let publishedAt = new Date().toISOString()
+          if (signal.date) {
+            const parsedDate = new Date(signal.date)
+            if (!Number.isNaN(parsedDate.getTime())) {
+              publishedAt = parsedDate.toISOString()
+            }
+          }
 
           const row = {
-            title: signal.summary,
-            company: signal.firm,
+            title,
+            company: quality.company,
             region: region,
-            tier: signal.priority === 'HIGH' ? 'tier_1' : signal.priority === 'MEDIUM' ? 'tier_2' : 'tier_3',
+            tier: quality.mustHave ? 'tier_1' : signal.priority === 'HIGH' ? 'tier_1' : signal.priority === 'MEDIUM' ? 'tier_2' : 'tier_3',
             score: signal.priority === 'HIGH' ? 90 : signal.priority === 'MEDIUM' ? 70 : 50,
-            amount: amountM,
-            currency,
-            signal_type: mapSignalType(signal.signal_type),
-            description: `${signal.fund_name}${signal.key_people && signal.key_people !== 'N/A' ? ` • Key People: ${signal.key_people}` : ''}`,
+            amount: resolvedAmount,
+            currency: resolvedCurrency,
+            signal_type: quality.signalType,
+            description,
             url: signal.url,
-            source: signal.url ? new URL(signal.url).hostname.replace('www.', '') : 'Google Search',
-            published_at: signal.date ? new Date(signal.date).toISOString() : new Date().toISOString(),
-            is_high_intent: signal.priority === 'HIGH',
-            detected_region: region,
+            source,
+            published_at: publishedAt,
+            is_high_intent: quality.mustHave || signal.priority === 'HIGH',
+            detected_region: quality.detectedRegion || region,
             validated_region: region.toUpperCase(),
             raw_content: JSON.stringify(signal),
+            details: {
+              key_people: quality.keyPeople,
+              deal_signature: dealSignature,
+              source_key: sourceKey,
+              dedupe_key: dedupeKey,
+              strict_deal_region: quality.detectedRegion || quality.expectedRegion,
+              must_have: quality.mustHave,
+            },
           }
 
           const { error: insertErr } = await supabase.from('signals').insert(row)
@@ -281,16 +407,20 @@ Deno.serve(async (req) => {
             console.error(`Failed to insert signal for ${signal.firm}:`, insertErr.message)
           } else {
             inserted++
+            if (urlKey) seenUrlKeys.add(urlKey)
+            seenTitleKeys.add(titleKey)
+            seenCompanyTypeKeys.add(companyTypeKey)
+            seenDedupeKeys.add(dedupeKey)
           }
         }
 
         regionResults[region] = {
           searched: searchResults.length,
-          parsed: filtered.length,
+          parsed: qualityAccepted,
           inserted,
         }
 
-        allParsed.push(...newSignals)
+        allParsed.push(...acceptedForOutput)
       } catch (regionErr) {
         console.error(`Error hunting ${region}:`, regionErr)
         regionResults[region] = { searched: 0, parsed: 0, inserted: 0 }

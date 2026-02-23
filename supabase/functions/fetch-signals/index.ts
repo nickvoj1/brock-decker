@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { evaluateSignalQuality } from "../_shared/signal-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -769,70 +770,79 @@ Deno.serve(async (req) => {
         
         for (const item of items) {
           if (item.published_at && new Date(item.published_at) < cutoffDate) continue;
-          
+
           const fullText = `${item.title} ${item.description || ""}`;
           const tierResult = detectTierAndType(fullText);
-          
           if (!tierResult) continue;
-          
-          const amountData = extractAmount(fullText);
-          const mappedSignalType = mapToValidSignalType(tierResult.signalType);
 
-          // Fund close signals must have amount.
-          if (mappedSignalType === "funding" && isFundCloseNews(fullText) && !amountData) {
-            console.log(`Skipping fund-close signal without amount: ${item.title.slice(0, 60)}...`);
-            continue;
-          }
-
-          const company = extractCompany(item.title, item.description);
-          
-          // STRICT: Detect region and reject if content belongs to different region
-          const validatedRegion = detectRegionFromContent(fullText, reg);
-          if (!validatedRegion) {
-            console.log(`Skipping signal due to region mismatch: ${item.title.slice(0, 50)}...`);
-            continue; // Skip - wrong region content
-          }
-          
-          // Boost score for fund closes with large amounts
-          let score = tierResult.score;
-          if (amountData) {
-            if (amountData.amount >= 1000) score = Math.min(score + 15, 100);
-            else if (amountData.amount >= 500) score = Math.min(score + 10, 100);
-            else if (amountData.amount >= 100) score = Math.min(score + 5, 100);
-          }
-          
-          // STRICT: Skip signals without a company name (not actionable)
-          if (!company) {
-            console.log(`Skipping signal without company: ${item.title.slice(0, 40)}...`);
-            continue;
-          }
-          
-          // STRICT: Skip signals without a URL (must be linkable)
           if (!item.url || !item.url.startsWith("http")) {
             console.log(`Skipping signal without valid URL: ${item.title.slice(0, 40)}...`);
             continue;
           }
-          
+
+          const mappedSignalType = mapToValidSignalType(tierResult.signalType);
+          const initialCompany = extractCompany(item.title, item.description);
+          const initialKeyPeople = extractKeyPeople(fullText);
+
+          const quality = evaluateSignalQuality({
+            title: item.title,
+            description: item.description,
+            rawContent: fullText,
+            company: initialCompany,
+            source: feed.source,
+            url: item.url,
+            expectedRegion: reg,
+            signalType: mappedSignalType,
+            keyPeople: initialKeyPeople,
+          });
+
+          if (!quality.accepted) {
+            console.log(`Skipping by quality pipeline (${quality.reason || "unknown"}): ${item.title.slice(0, 60)}...`);
+            continue;
+          }
+
+          const validatedRegion = quality.detectedRegion || quality.expectedRegion;
+          const amountData = extractAmount(fullText);
+
+          let score = tierResult.score;
+          const resolvedAmount = quality.amount ?? amountData?.amount ?? null;
+          if (resolvedAmount) {
+            if (resolvedAmount >= 1000) score = Math.min(score + 15, 100);
+            else if (resolvedAmount >= 500) score = Math.min(score + 10, 100);
+            else if (resolvedAmount >= 100) score = Math.min(score + 5, 100);
+          }
+
+          const tier = quality.mustHave
+            ? "tier_1"
+            : tierResult.tier;
+          const sourceKey = normalizeTextForDedup(feed.source);
+          const dealSignature = quality.dealSignature || extractDealSignature(fullText);
+          const dedupeKey = quality.dedupeKey.toLowerCase();
+
           allSignals.push({
             title: item.title.slice(0, 255),
-            company: company,
+            company: quality.company,
             region: validatedRegion,
-            tier: tierResult.tier,
-            score: score,
-            amount: amountData?.amount || null,
-            currency: amountData?.currency || "EUR",
-            signal_type: mappedSignalType,
+            tier,
+            score,
+            amount: resolvedAmount,
+            currency: quality.currency || amountData?.currency || "USD",
+            signal_type: quality.signalType,
             description: item.description?.slice(0, 500) || null,
             url: item.url,
             source: feed.source,
             published_at: item.published_at || now.toISOString(),
-            is_high_intent: tierResult.tier === "tier_1",
+            is_high_intent: tier === "tier_1",
             details: {
-              location: validatedRegion === "london" ? "London" : 
-                        validatedRegion === "uae" ? "Dubai" :
-                        validatedRegion === "usa" ? "New York" : "Europe",
-              key_people: extractKeyPeople(fullText),
-              deal_signature: extractDealSignature(fullText),
+              location: validatedRegion === "london" ? "London" :
+                validatedRegion === "uae" ? "Dubai" :
+                validatedRegion === "usa" ? "New York" : "Europe",
+              key_people: quality.keyPeople,
+              deal_signature: dealSignature,
+              source_key: sourceKey,
+              dedupe_key: dedupeKey,
+              strict_deal_region: quality.detectedRegion || quality.expectedRegion,
+              must_have: quality.mustHave,
             },
           });
         }
@@ -844,57 +854,70 @@ Deno.serve(async (req) => {
       for (const item of deepSearchResults) {
         const fullText = `${item.title} ${item.description || ""}`;
         const tierResult = detectTierAndType(fullText);
-        
         if (!tierResult) continue;
-        
-        const amountData = extractAmount(fullText);
-        const mappedSignalType = mapToValidSignalType(tierResult.signalType);
 
-        // Fund close signals must have amount.
-        if (mappedSignalType === "funding" && isFundCloseNews(fullText) && !amountData) {
-          console.log(`Skipping deep-search fund-close without amount: ${item.title.slice(0, 60)}...`);
-          continue;
-        }
-
-        const company = extractCompany(item.title, item.description);
-        
-        // STRICT: Detect region and reject if content belongs to different region
-        const validatedRegion = detectRegionFromContent(fullText, reg);
-        if (!validatedRegion) continue;
-        
-        // STRICT: Skip signals without a company name
-        if (!company) continue;
-        
-        // STRICT: Skip signals without a valid URL (must be linkable)
         if (!item.url || !item.url.startsWith("http")) continue;
-        
+
+        const mappedSignalType = mapToValidSignalType(tierResult.signalType);
+        const initialCompany = extractCompany(item.title, item.description);
+        const initialKeyPeople = extractKeyPeople(fullText);
+        const signalSource = item.source || "Firecrawl Search";
+
+        const quality = evaluateSignalQuality({
+          title: item.title,
+          description: item.description,
+          rawContent: fullText,
+          company: initialCompany,
+          source: signalSource,
+          url: item.url,
+          expectedRegion: reg,
+          signalType: mappedSignalType,
+          keyPeople: initialKeyPeople,
+        });
+        if (!quality.accepted) continue;
+
+        const validatedRegion = quality.detectedRegion || quality.expectedRegion;
+        const amountData = extractAmount(fullText);
+
         let score = tierResult.score;
-        if (amountData) {
-          if (amountData.amount >= 1000) score = Math.min(score + 15, 100);
-          else if (amountData.amount >= 500) score = Math.min(score + 10, 100);
-          else if (amountData.amount >= 100) score = Math.min(score + 5, 100);
+        const resolvedAmount = quality.amount ?? amountData?.amount ?? null;
+        if (resolvedAmount) {
+          if (resolvedAmount >= 1000) score = Math.min(score + 15, 100);
+          else if (resolvedAmount >= 500) score = Math.min(score + 10, 100);
+          else if (resolvedAmount >= 100) score = Math.min(score + 5, 100);
         }
-        
+
+        const tier = quality.mustHave
+          ? "tier_1"
+          : tierResult.tier;
+        const sourceKey = normalizeTextForDedup(signalSource);
+        const dealSignature = quality.dealSignature || extractDealSignature(fullText);
+        const dedupeKey = quality.dedupeKey.toLowerCase();
+
         allSignals.push({
           title: item.title.slice(0, 255),
-          company: company,
+          company: quality.company,
           region: validatedRegion,
-          tier: tierResult.tier,
-          score: score,
-          amount: amountData?.amount || null,
-          currency: amountData?.currency || "EUR",
-          signal_type: mappedSignalType,
+          tier,
+          score,
+          amount: resolvedAmount,
+          currency: quality.currency || amountData?.currency || "USD",
+          signal_type: quality.signalType,
           description: item.description?.slice(0, 500) || null,
           url: item.url,
-          source: item.source || "Firecrawl Search",
+          source: signalSource,
           published_at: item.published_at || now.toISOString(),
-          is_high_intent: tierResult.tier === "tier_1",
+          is_high_intent: tier === "tier_1",
           details: {
-            location: validatedRegion === "london" ? "London" : 
-                      validatedRegion === "uae" ? "Dubai" :
-                      validatedRegion === "usa" ? "New York" : "Europe",
-            key_people: extractKeyPeople(fullText),
-            deal_signature: extractDealSignature(fullText),
+            location: validatedRegion === "london" ? "London" :
+              validatedRegion === "uae" ? "Dubai" :
+              validatedRegion === "usa" ? "New York" : "Europe",
+            key_people: quality.keyPeople,
+            deal_signature: dealSignature,
+            source_key: sourceKey,
+            dedupe_key: dedupeKey,
+            strict_deal_region: quality.detectedRegion || quality.expectedRegion,
+            must_have: quality.mustHave,
           },
         });
       }
@@ -906,6 +929,7 @@ Deno.serve(async (req) => {
     const seenUrls = new Set<string>();
     const seenTitles = new Set<string>();
     const seenCompanySignals = new Set<string>();
+    const seenDedupeSignals = new Set<string>();
     
     const uniqueSignals = allSignals.filter((signal) => {
       // Skip if URL already seen
@@ -927,6 +951,14 @@ Deno.serve(async (req) => {
         }
         seenCompanySignals.add(companyKey);
       }
+
+      const dedupeKey = String(signal?.details?.dedupe_key || "").trim().toLowerCase();
+      if (dedupeKey) {
+        if (seenDedupeSignals.has(dedupeKey)) {
+          return false;
+        }
+        seenDedupeSignals.add(dedupeKey);
+      }
       
       if (signal.url) seenUrls.add(signal.url);
       seenTitles.add(normalizedTitle);
@@ -945,6 +977,7 @@ Deno.serve(async (req) => {
     const seenUrlKeys = new Set<string>();
     const seenTitleKeys = new Set<string>();
     const seenCompanyTypeKeys = new Set<string>();
+    const seenDedupeKeys = new Set<string>();
 
     for (const existing of recentSignals || []) {
       const urlKey = normalizeUrlForDedup(existing.url);
@@ -961,6 +994,9 @@ Deno.serve(async (req) => {
         titleKey,
       ].join("|");
       if (companyTypeKey.replace(/\|/g, "").length > 0) seenCompanyTypeKeys.add(companyTypeKey);
+
+      const existingDedupeKey = String((existing as any)?.details?.dedupe_key || "").trim().toLowerCase();
+      if (existingDedupeKey) seenDedupeKeys.add(existingDedupeKey);
     }
 
     let insertedCount = 0;
@@ -976,8 +1012,14 @@ Deno.serve(async (req) => {
         normalizeTextForDedup(signal?.details?.deal_signature || ""),
         titleKey,
       ].join("|");
+      const dedupeKey = String(signal?.details?.dedupe_key || "").trim().toLowerCase();
 
-      if ((urlKey && seenUrlKeys.has(urlKey)) || seenTitleKeys.has(titleKey) || seenCompanyTypeKeys.has(companyTypeKey)) {
+      if (
+        (urlKey && seenUrlKeys.has(urlKey)) ||
+        seenTitleKeys.has(titleKey) ||
+        seenCompanyTypeKeys.has(companyTypeKey) ||
+        (dedupeKey && seenDedupeKeys.has(dedupeKey))
+      ) {
         continue;
       }
 
@@ -987,6 +1029,7 @@ Deno.serve(async (req) => {
         if (urlKey) seenUrlKeys.add(urlKey);
         seenTitleKeys.add(titleKey);
         seenCompanyTypeKeys.add(companyTypeKey);
+        if (dedupeKey) seenDedupeKeys.add(dedupeKey);
       } else {
         console.error("Insert error:", error);
       }

@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { evaluateSignalQuality } from "../_shared/signal-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1165,6 +1166,7 @@ Deno.serve(async (req) => {
     const seenUrlKeys = new Set<string>();
     const seenTitleKeys = new Set<string>();
     const seenCompanyTypeKeys = new Set<string>();
+    const seenDedupeKeys = new Set<string>();
 
     for (const existing of recentSignals || []) {
       const urlKey = normalizeUrlForDedup(existing.url);
@@ -1183,6 +1185,9 @@ Deno.serve(async (req) => {
       if (companyTypeKey.replace(/\|/g, "").length > 0) {
         seenCompanyTypeKeys.add(companyTypeKey);
       }
+
+      const existingDedupeKey = String((existing as any)?.details?.dedupe_key || "").trim().toLowerCase();
+      if (existingDedupeKey) seenDedupeKeys.add(existingDedupeKey);
     }
 
     // Classify and insert signals
@@ -1224,27 +1229,39 @@ Deno.serve(async (req) => {
       }
 
       const company = extractCompany(signal.title || signal.description || "").trim();
-      if (!company || company.length < 2) {
+      const mappedSignalType = mustHave.signalType || mapToValidSignalType(classification.signalType);
+      const amountData = extractAmount(`${signal.title || ""} ${signal.description || ""}`);
+      const keyPeople = extractKeyPeople(`${signal.title || ""} ${signal.description || ""}`);
+      const quality = evaluateSignalQuality({
+        title: signal.title,
+        description: signal.description,
+        rawContent: signal.description || signal.title,
+        company,
+        source: signal.source,
+        url: signal.url,
+        expectedRegion: signal.region,
+        signalType: mappedSignalType,
+        keyPeople,
+      });
+      if (!quality.accepted) {
+        console.log(`Skipping by quality pipeline (${quality.reason || "unknown"}): ${signal.title?.substring(0, 60)}`);
         stats.skipped++;
         continue;
       }
 
-      const mappedSignalType = mustHave.signalType || mapToValidSignalType(classification.signalType);
-      const amountData = extractAmount(`${signal.title || ""} ${signal.description || ""}`);
-      const isFundCloseSignal = mappedSignalType === "funding" && isFundCloseNews(fullText);
-      if (isFundCloseSignal && !amountData) {
-        console.log(`Skipping fund-close signal without amount: ${signal.title?.substring(0, 60)}`);
-        stats.skipped++;
-        continue;
-      }
+      const normalizedCompany = quality.company;
+      const normalizedSignalType = quality.signalType;
+      const resolvedAmount = quality.amount ?? amountData?.amount ?? null;
+      const resolvedCurrency = quality.currency ?? amountData?.currency ?? null;
       const scoreBase = classification.relevanceScore * 10;
       const boostedScore = Math.min(100, Math.max(scoreBase, scoreBase + mustHave.boost));
-      const keyPeople = extractKeyPeople(`${signal.title || ""} ${signal.description || ""}`);
-      const dealSignature = extractDealSignature(`${signal.title || ""} ${signal.description || ""}`);
+      const normalizedKeyPeople = quality.keyPeople;
+      const dealSignature = quality.dealSignature || extractDealSignature(`${signal.title || ""} ${signal.description || ""}`);
       const sourceKey = normalizeTextForDedup(signal.source);
-      const fullSignalText = `${signal.title || ""} ${signal.description || ""} ${company}`.toLowerCase();
-      if (!isSignalTypeFit(fullSignalText, mappedSignalType)) {
-        console.log(`Skipping type mismatch (${mappedSignalType}): ${signal.title?.substring(0, 60)}`);
+      const dedupeKey = quality.dedupeKey.toLowerCase();
+      const fullSignalText = `${signal.title || ""} ${signal.description || ""} ${normalizedCompany}`.toLowerCase();
+      if (!isSignalTypeFit(fullSignalText, normalizedSignalType)) {
+        console.log(`Skipping type mismatch (${normalizedSignalType}): ${signal.title?.substring(0, 60)}`);
         stats.skipped++;
         continue;
       }
@@ -1252,41 +1269,48 @@ Deno.serve(async (req) => {
       const urlKey = normalizeUrlForDedup(signal.url);
       const titleKey = titleFingerprint(signal.title);
       const companyTypeKey = [
-        normalizeTextForDedup(company),
+        normalizeTextForDedup(normalizedCompany),
         normalizeTextForDedup(signal.region),
-        normalizeTextForDedup(mappedSignalType),
+        normalizeTextForDedup(normalizedSignalType),
         sourceKey,
-        normalizeTextForDedup(keyPeople.join("|")),
+        normalizeTextForDedup(normalizedKeyPeople.join("|")),
         normalizeTextForDedup(dealSignature),
         titleKey,
       ].join("|");
 
-      if ((urlKey && seenUrlKeys.has(urlKey)) || seenTitleKeys.has(titleKey) || seenCompanyTypeKeys.has(companyTypeKey)) {
+      if (
+        (urlKey && seenUrlKeys.has(urlKey)) ||
+        seenTitleKeys.has(titleKey) ||
+        seenCompanyTypeKeys.has(companyTypeKey) ||
+        seenDedupeKeys.has(dedupeKey)
+      ) {
         stats.skipped++;
         continue;
       }
 
       const signalRecord = {
         title: signal.title,
-        company: company,
+        company: normalizedCompany,
         description: signal.description || null,
         url: signal.url,
         source: signal.source,
         region: signal.region,
-        tier: mustHave.tier || classification.tier,
-        signal_type: mappedSignalType,
+        tier: quality.mustHave ? "tier_1" : mustHave.tier || classification.tier,
+        signal_type: normalizedSignalType,
         ai_confidence: classification.confidence,
         ai_insight: classification.insight,
         ai_pitch: classification.pitch,
         score: boostedScore,
-        amount: amountData?.amount || null,
-        currency: amountData?.currency || null,
+        amount: resolvedAmount,
+        currency: resolvedCurrency,
         published_at: signal.published_at || new Date().toISOString(),
         details: {
-          key_people: keyPeople,
+          key_people: normalizedKeyPeople,
           deal_signature: dealSignature,
-          strict_deal_region: strictDealRegion,
+          strict_deal_region: quality.detectedRegion || strictDealRegion,
           source_key: sourceKey,
+          dedupe_key: dedupeKey,
+          must_have: quality.mustHave,
         },
       };
 
@@ -1296,6 +1320,7 @@ Deno.serve(async (req) => {
         if (urlKey) seenUrlKeys.add(urlKey);
         if (titleKey) seenTitleKeys.add(titleKey);
         seenCompanyTypeKeys.add(companyTypeKey);
+        seenDedupeKeys.add(dedupeKey);
         stats.inserted++;
         stats.classified++;
         console.log(`✓ Inserted: ${signal.title?.substring(0, 60)}`);
