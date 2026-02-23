@@ -231,6 +231,40 @@ function filterByPostedAfter(
   });
 }
 
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(
+  fetchFn: () => Promise<Response>,
+  maxRetries = 3,
+  baseDelayMs = 2000,
+): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetchFn();
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("Retry-After");
+      let delayMs = baseDelayMs * Math.pow(2, attempt);
+      if (retryAfter) {
+        const parsed = parseInt(retryAfter, 10);
+        if (!isNaN(parsed)) delayMs = Math.max(delayMs, parsed * 1000);
+      }
+      // Consume body to avoid leak
+      await res.text();
+      console.warn(`[fantastic-jobs] 429 rate limited, retry ${attempt + 1}/${maxRetries} after ${delayMs}ms`);
+      if (attempt < maxRetries) {
+        await sleep(delayMs);
+        continue;
+      }
+      lastError = new Error("Rate limit exceeded after retries");
+    } else {
+      return res;
+    }
+  }
+  throw lastError || new Error("Rate limit exceeded");
+}
+
 async function fetchViaRapidAPI(
   rapidApiKey: string,
   body: Record<string, unknown>,
@@ -268,13 +302,15 @@ async function fetchViaRapidAPI(
   const apiUrl = `https://${RAPID_HOST}${endpoint}${queryParams.toString() ? `?${queryParams.toString()}` : ""}`;
   console.log("[fantastic-jobs] RapidAPI URL:", apiUrl);
 
-  const res = await fetch(apiUrl, {
-    method: "GET",
-    headers: {
-      "X-RapidAPI-Key": rapidApiKey,
-      "X-RapidAPI-Host": RAPID_HOST,
-    },
-  });
+  const res = await fetchWithRetry(() =>
+    fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        "X-RapidAPI-Key": rapidApiKey,
+        "X-RapidAPI-Host": RAPID_HOST,
+      },
+    }),
+  );
 
   if (!res.ok) {
     const errText = await res.text();
@@ -389,13 +425,15 @@ async function fetchViaApify(
     );
 
     const syncUrl = buildRunSyncUrl(input);
-    const syncRes = await fetch(syncUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(input),
-    });
+    const syncRes = await fetchWithRetry(() =>
+      fetch(syncUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(input),
+      }),
+    );
 
     if (syncRes.ok) {
       const data = await syncRes.json();
@@ -412,13 +450,15 @@ async function fetchViaApify(
     `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}` +
     `/runs?token=${encodeURIComponent(apifyToken)}&waitForFinish=120`;
 
-  const asyncRunRes = await fetch(asyncRunUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(actorInput),
-  });
+  const asyncRunRes = await fetchWithRetry(() =>
+    fetch(asyncRunUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(actorInput),
+    }),
+  );
 
   if (!asyncRunRes.ok) {
     const errText = await asyncRunRes.text();
@@ -588,15 +628,18 @@ serve(async (req) => {
       },
     );
   } catch (error) {
-    console.error("[fantastic-jobs] Error:", error);
+    const errMsg = error instanceof Error ? error.message : "Unknown error";
+    const isRateLimit = errMsg.toLowerCase().includes("rate limit");
+    console.error("[fantastic-jobs] Error:", errMsg);
     return new Response(
       JSON.stringify({
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: isRateLimit ? "Rate limit exceeded. Please wait a moment and try again." : errMsg,
         jobs: [],
+        rateLimited: isRateLimit,
       }),
       {
-        status: 500,
+        status: isRateLimit ? 429 : 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
     );
