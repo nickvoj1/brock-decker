@@ -207,7 +207,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   return (
     <>
       <tr 
-        className="border-b border-border/20 hover:bg-muted/40 transition-colors cursor-pointer group"
+        className="border-b border-border/20 hover:bg-primary/5 transition-colors cursor-pointer group"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Tier Dot */}
@@ -215,7 +215,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
           <div className={`h-2.5 w-2.5 rounded-full ${tierDot}`} title={signal.tier || "Unknown"} />
         </td>
         {/* Date */}
-        <td className="py-3 px-3 text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+        <td className="py-3 px-3 text-xs text-muted-foreground whitespace-nowrap tabular-nums font-mono-ui">
           {formatDate(signal.published_at)}
         </td>
         {/* Firm */}
@@ -239,7 +239,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
           {extractFundName(signal)}
         </td>
         {/* Region */}
-        <td className="py-3 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap">
+        <td className="py-3 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap font-mono-ui">
           {signal.region?.toUpperCase() || "—"}
         </td>
         {/* Source */}
@@ -255,7 +255,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
         </td>
         {/* Actions */}
         <td className="py-3 px-3">
-          <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
             <Button size="sm" variant="default" className="h-7 text-xs gap-1" onClick={() => onTAContacts(signal)} disabled={taSearchLoading}>
               {taSearchLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <><UserSearch className="h-3 w-3" />TA</>}
             </Button>
@@ -341,18 +341,18 @@ export const SignalTableView = memo(function SignalTableView({
   onSignalUpdated,
 }: SignalTableViewProps) {
   return (
-    <div className="rounded-xl border border-border/40 overflow-auto bg-card shadow-sm">
+    <div className="panel-shell overflow-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border/40 bg-muted/30">
+          <tr className="border-b border-border/40 bg-muted/40">
             <th className="py-3 px-3 w-8" />
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Firm</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Amount</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fund / Detail</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Region</th>
-            <th className="py-3 px-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Source</th>
+            <th className="py-3 px-3 text-left mono-label">Date</th>
+            <th className="py-3 px-3 text-left mono-label">Firm</th>
+            <th className="py-3 px-3 text-left mono-label">Type</th>
+            <th className="py-3 px-3 text-left mono-label">Amount</th>
+            <th className="py-3 px-3 text-left mono-label">Fund / Detail</th>
+            <th className="py-3 px-3 text-left mono-label">Region</th>
+            <th className="py-3 px-3 text-left mono-label">Source</th>
             <th className="py-3 px-3 w-32" />
           </tr>
         </thead>
