@@ -358,12 +358,31 @@ export function FantasticJobsBoard() {
       params.limit = String(requestedCount);
       params.offset = "0";
 
-      const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
-      if (error) throw error;
-      if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
-      return data.jobs as Job[];
+      const MAX_RETRIES = 2;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const { data, error } = await supabase.functions.invoke("fantastic-jobs", { body: params });
+
+        // Handle rate limiting with retry
+        if (data?.rateLimited || (error && String(error).includes("429"))) {
+          if (attempt < MAX_RETRIES) {
+            const delay = 3000 * Math.pow(2, attempt);
+            toast({
+              title: "Rate limited",
+              description: `Waiting ${Math.round(delay / 1000)}s before retrying... (attempt ${attempt + 1}/${MAX_RETRIES})`,
+            });
+            await new Promise((r) => setTimeout(r, delay));
+            continue;
+          }
+          throw new Error("Rate limit exceeded. Please wait a minute and try again.");
+        }
+
+        if (error) throw error;
+        if (!data?.success || !Array.isArray(data.jobs)) throw new Error(data?.error || "Backend search failed");
+        return data.jobs as Job[];
+      }
+      throw new Error("Search failed after retries");
     },
-    [filters, requestedCount],
+    [filters, requestedCount, toast],
   );
 
   const applyClientFilters = useCallback(
