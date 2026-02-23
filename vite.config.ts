@@ -13,6 +13,12 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  optimizeDeps: {
+    exclude: ["mupdf"],
+    esbuildOptions: {
+      target: "esnext",
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -1,5 +1,4 @@
 import { jsPDF } from "jspdf";
-import mupdf from "mupdf";
 import { PDFDocument, StandardFonts, rgb, type PDFImage } from "pdf-lib";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfJsWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
@@ -55,6 +54,17 @@ export type CVPersonalHints = {
 };
 
 GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
+
+let mupdfModulePromise: Promise<any | null> | null = null;
+
+async function loadMupdfModule(): Promise<any | null> {
+  if (!mupdfModulePromise) {
+    mupdfModulePromise = import("mupdf")
+      .then((mod: any) => mod?.default || mod)
+      .catch(() => null);
+  }
+  return mupdfModulePromise;
+}
 
 async function toDataUrl(urlOrData?: string | null): Promise<string | null> {
   const raw = String(urlOrData || "").trim();
@@ -453,9 +463,12 @@ function pickPrimaryNameRect(nameRects: Rect[], pageWidth: number, pageHeight: n
   return sorted[0] || null;
 }
 
-function detectNamePlacementFromPdf(sourcePdfBytes: Uint8Array, hints?: CVPersonalHints): NamePlacement | null {
+async function detectNamePlacementFromPdf(
+  sourcePdfBytes: Uint8Array,
+  hints?: CVPersonalHints,
+): Promise<NamePlacement | null> {
   try {
-    const mupdfMod: any = (mupdf as any)?.default || mupdf;
+    const mupdfMod = await loadMupdfModule();
     if (!mupdfMod?.Document?.openDocument) return null;
 
     const inputBytes = new Uint8Array(sourcePdfBytes);
@@ -827,10 +840,11 @@ function detectPhotoImageRectsFromImageRects(imageRects: Rect[], pageWidth: numb
   return dedupeRects(rects, 3);
 }
 
-function detectPhotoRectFromPixels(page: any, pageWidth: number, pageHeight: number): Rect | null {
+async function detectPhotoRectFromPixels(page: any, pageWidth: number, pageHeight: number): Promise<Rect | null> {
   try {
-    const mupdfMod: any = (mupdf as any)?.default || mupdf;
+    const mupdfMod = await loadMupdfModule();
     const colorspace = mupdfMod?.ColorSpace?.DeviceRGB;
+    if (!colorspace) return null;
     const pix = page.toPixmap([1, 0, 0, 1, 0, 0], colorspace, false);
     const w = Number(pix?.getWidth?.() || 0);
     const h = Number(pix?.getHeight?.() || 0);
@@ -991,11 +1005,16 @@ function findPhotoFallbackRect(page: any, pageWidth: number, pageHeight: number)
   return best.rect;
 }
 
-function detectPhotoImageRects(page: any, pageWidth: number, pageHeight: number, includeFallback = false): Rect[] {
+async function detectPhotoImageRects(
+  page: any,
+  pageWidth: number,
+  pageHeight: number,
+  includeFallback = false,
+): Promise<Rect[]> {
   const imageRects = collectImageRects(page, pageWidth, pageHeight);
   if (imageRects.length === 0) {
     if (!includeFallback) return [];
-    const pixelFallbackOnly = detectPhotoRectFromPixels(page, pageWidth, pageHeight);
+    const pixelFallbackOnly = await detectPhotoRectFromPixels(page, pageWidth, pageHeight);
     if (pixelFallbackOnly) return [pixelFallbackOnly];
     const geoFallbackOnly = findPhotoFallbackRect(page, pageWidth, pageHeight);
     return geoFallbackOnly ? [geoFallbackOnly] : [];
@@ -1003,7 +1022,7 @@ function detectPhotoImageRects(page: any, pageWidth: number, pageHeight: number,
   const photoRects = detectPhotoImageRectsFromImageRects(imageRects, pageWidth, pageHeight);
   if (photoRects.length > 0) return photoRects;
   if (!includeFallback) return [];
-  const pixelFallback = detectPhotoRectFromPixels(page, pageWidth, pageHeight);
+  const pixelFallback = await detectPhotoRectFromPixels(page, pageWidth, pageHeight);
   if (pixelFallback) return [pixelFallback];
   const fallback = findPhotoFallbackRect(page, pageWidth, pageHeight);
   return fallback ? [fallback] : [];
@@ -1123,7 +1142,7 @@ async function redactPdfTextLocally(
   detectedZones: RedactionZone[],
   hints?: CVPersonalHints,
 ): Promise<Uint8Array> {
-  const mupdfMod: any = (mupdf as any)?.default || mupdf;
+  const mupdfMod = await loadMupdfModule();
   if (!mupdfMod?.Document?.openDocument) {
     throw new Error("CV redaction engine failed to load. Refresh and try again.");
   }
@@ -1234,7 +1253,7 @@ async function redactPdfTextLocally(
   }
 
   // Remove photo-like images from page 1.
-  rects.push(...detectPhotoImageRects(page, pageWidth, pageHeight, true));
+  rects.push(...(await detectPhotoImageRects(page, pageWidth, pageHeight, true)));
 
   let uniqueRects = dedupeRects(rects).filter((r) => r.y0 < pageHeight * 0.42);
   if (!anonymizeName) {
@@ -1282,7 +1301,7 @@ async function redactPdfTextLocally(
       const w = Number(b?.[2] || 0);
       const h = Number(b?.[3] || 0);
       if (!w || !h) continue;
-      const photoRects = detectPhotoImageRects(p, w, h, false);
+      const photoRects = await detectPhotoImageRects(p, w, h, false);
       if (photoRects.length === 0) continue;
       for (const r of photoRects) {
         const annot = p.createAnnotation("Redact");
@@ -1302,12 +1321,13 @@ async function redactPdfTextLocally(
   return stable;
 }
 
-function stripResidualNameFromPdf(pdfBytes: Uint8Array, originalName?: string | null): Uint8Array {
+async function stripResidualNameFromPdf(pdfBytes: Uint8Array, originalName?: string | null): Promise<Uint8Array> {
   const name = safeText(originalName);
   if (!name) return pdfBytes;
 
   try {
-    const mupdfMod: any = (mupdf as any)?.default || mupdf;
+    const mupdfMod = await loadMupdfModule();
+    if (!mupdfMod?.Document?.openDocument) return pdfBytes;
     const doc = mupdfMod.Document.openDocument(new Uint8Array(pdfBytes), "application/pdf");
     const pdf = doc?.asPDF?.();
     if (!pdf) return pdfBytes;
@@ -1534,12 +1554,12 @@ export async function downloadBrandedSourcePdf(
   const anonymizedReplacement = safeText(hints?.replacementName);
   const shouldDrawReplacementName = Boolean(hints?.anonymizeName && anonymizedReplacement);
   const namePlacement = shouldDrawReplacementName
-    ? detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
+    ? await detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
     : null;
   const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
   let hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
   if (hints?.anonymizeName) {
-    hardDeletedBytes = stripResidualNameFromPdf(hardDeletedBytes, hints?.name);
+    hardDeletedBytes = await stripResidualNameFromPdf(hardDeletedBytes, hints?.name);
   }
 
   const pdfDoc = await PDFDocument.load(hardDeletedBytes);
