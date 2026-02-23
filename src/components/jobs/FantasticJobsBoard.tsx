@@ -448,6 +448,7 @@ export function FantasticJobsBoard() {
         const filtered = applyClientFilters(deduped);
         const capped = filtered.slice(0, requestedCount);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
+        const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
         const visibleRows = strictPEOnly
           ? withPEFlags.filter((job) => job.is_pe_match)
           : withPEFlags;
@@ -469,10 +470,17 @@ export function FantasticJobsBoard() {
           },
           ...prev,
         ]);
-        toast({
-          title: "Jobs refreshed",
-          description: `Found ${visibleRows.length} jobs (${mode})`,
-        });
+        if (strictPEOnly && visibleRows.length === 0 && filtered.length > 0) {
+          toast({
+            title: "No PE matches in current result set",
+            description: `Fetched ${incoming.length}, after filters ${filtered.length}, PE matches ${peMatches}. Disable PE only to see all filtered jobs.`,
+          });
+        } else {
+          toast({
+            title: "Jobs refreshed",
+            description: `Fetched ${incoming.length}, after filters ${filtered.length}, showing ${visibleRows.length} (${mode}).`,
+          });
+        }
       } catch (error) {
         toast({
           title: "Search failed",
