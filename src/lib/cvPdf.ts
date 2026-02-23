@@ -266,6 +266,18 @@ function rectArea(r: Rect): number {
   return Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
 }
 
+function topDistanceForRect(rect: Rect, pageHeight: number): number {
+  const topByTopOrigin = rect.y0;
+  const topByBottomOrigin = Math.max(0, pageHeight - rect.y1);
+  return Math.min(topByTopOrigin, topByBottomOrigin);
+}
+
+function topDistanceForLine(y: number, h: number, pageHeight: number): number {
+  const topByTopOrigin = y;
+  const topByBottomOrigin = Math.max(0, pageHeight - (y + h));
+  return Math.min(topByTopOrigin, topByBottomOrigin);
+}
+
 function quadsToRects(quads: number[][], padX = 6, padY = 3): Rect[] {
   const rects: Rect[] = [];
   for (const q of quads) {
@@ -293,6 +305,21 @@ function dedupeRects(rects: Rect[], tolerance = 2): Rect[] {
     if (!exists) out.push(r);
   }
   return out;
+}
+
+function mergeRects(rects: Rect[]): Rect | null {
+  if (rects.length === 0) return null;
+  let x0 = rects[0].x0;
+  let y0 = rects[0].y0;
+  let x1 = rects[0].x1;
+  let y1 = rects[0].y1;
+  for (const r of rects.slice(1)) {
+    if (r.x0 < x0) x0 = r.x0;
+    if (r.y0 < y0) y0 = r.y0;
+    if (r.x1 > x1) x1 = r.x1;
+    if (r.y1 > y1) y1 = r.y1;
+  }
+  return { x0, y0, x1, y1 };
 }
 
 function intersects(a: Rect, b: Rect): boolean {
@@ -337,7 +364,7 @@ function findNameProtectionRects(
         for (const hr of hitRects) {
           const r = clampRect(hr, pageWidth, pageHeight);
           if (!r) continue;
-          if (r.y1 > pageHeight * 0.33) continue;
+          if (topDistanceForRect(r, pageHeight) > pageHeight * 0.33) continue;
           out.push(r);
         }
       }
@@ -367,7 +394,12 @@ function findNameProtectionRects(
     }
 
     const nameLike = lines
-      .filter((l) => l.y < pageHeight * 0.24 && l.h >= 12 && looksLikeNameLine(l.text, l.x, l.w, pageWidth))
+      .filter(
+        (l) =>
+          topDistanceForLine(l.y, l.h, pageHeight) < pageHeight * 0.24 &&
+          l.h >= 12 &&
+          looksLikeNameLine(l.text, l.x, l.w, pageWidth),
+      )
       .sort((a, b) => b.h - a.h || a.y - b.y)[0];
 
     if (nameLike) {
@@ -417,12 +449,14 @@ function protectRectsFromName(
 
 function pickPrimaryNameRect(nameRects: Rect[], pageWidth: number, pageHeight: number): Rect | null {
   const candidates = nameRects.filter((r) => {
-    if (r.y1 > pageHeight * 0.35) return false;
+    if (topDistanceForRect(r, pageHeight) > pageHeight * 0.35) return false;
     return rectArea(r) >= 40;
   });
   if (candidates.length === 0) return null;
 
   const sorted = candidates.sort((a, b) => {
+    const topDiff = topDistanceForRect(a, pageHeight) - topDistanceForRect(b, pageHeight);
+    if (Math.abs(topDiff) > 0.5) return topDiff;
     const areaDiff = rectArea(b) - rectArea(a);
     if (Math.abs(areaDiff) > 0.5) return areaDiff;
     const centerA = Math.abs((a.x0 + a.x1) / 2 - pageWidth / 2);
@@ -455,7 +489,7 @@ function detectNamePlacementFromPdf(sourcePdfBytes: Uint8Array, hints?: CVPerson
     if (!bestRect) return null;
     const topY = Math.min(bestRect.y0, bestRect.y1);
     const bottomY = Math.max(bestRect.y0, bestRect.y1);
-    if (bottomY > pageHeight * 0.52) return null;
+    if (topDistanceForRect(bestRect, pageHeight) > pageHeight * 0.52) return null;
 
     return {
       xCenter: (bestRect.x0 + bestRect.x1) / 2,
@@ -808,6 +842,120 @@ function detectPhotoImageRectsFromImageRects(imageRects: Rect[], pageWidth: numb
   return dedupeRects(rects, 3);
 }
 
+function detectPhotoRectFromPixels(page: any, pageWidth: number, pageHeight: number): Rect | null {
+  try {
+    const mupdfMod: any = (mupdf as any)?.default || mupdf;
+    const colorspace = mupdfMod?.ColorSpace?.DeviceRGB;
+    const pix = page.toPixmap([1, 0, 0, 1, 0, 0], colorspace, false);
+    const w = Number(pix?.getWidth?.() || 0);
+    const h = Number(pix?.getHeight?.() || 0);
+    const stride = Number(pix?.getStride?.() || 0);
+    const pixels: Uint8Array = pix?.getPixels?.();
+    if (!w || !h || !stride || !pixels || pixels.length < stride * h) return null;
+
+    const scanX0 = Math.max(0, Math.floor(w * 0.62));
+    const scanX1 = Math.min(w - 1, Math.floor(w * 0.99));
+    const scanY0 = Math.max(0, Math.floor(h * 0.02));
+    const scanY1 = Math.min(h - 1, Math.floor(h * 0.46));
+    if (scanX1 <= scanX0 || scanY1 <= scanY0) return null;
+
+    const regionW = scanX1 - scanX0 + 1;
+    const regionH = scanY1 - scanY0 + 1;
+    const visited = new Uint8Array(regionW * regionH);
+    const idx = (x: number, y: number) => (y - scanY0) * regionW + (x - scanX0);
+
+    const isPhotoPixel = (x: number, y: number): boolean => {
+      const p = y * stride + x * 3;
+      const r = pixels[p];
+      const g = pixels[p + 1];
+      const b = pixels[p + 2];
+      // Focus on non-white, non-nearly-transparent-looking rendered pixels.
+      return r < 242 || g < 242 || b < 242;
+    };
+
+    let best: Rect | null = null;
+    let bestScore = -1;
+    const stackX: number[] = [];
+    const stackY: number[] = [];
+
+    for (let y = scanY0; y <= scanY1; y++) {
+      for (let x = scanX0; x <= scanX1; x++) {
+        const vIndex = idx(x, y);
+        if (visited[vIndex]) continue;
+        visited[vIndex] = 1;
+        if (!isPhotoPixel(x, y)) continue;
+
+        stackX.length = 0;
+        stackY.length = 0;
+        stackX.push(x);
+        stackY.push(y);
+
+        let area = 0;
+        let minX = x;
+        let maxX = x;
+        let minY = y;
+        let maxY = y;
+
+        while (stackX.length > 0) {
+          const cx = stackX.pop() as number;
+          const cy = stackY.pop() as number;
+          area += 1;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = cx + dx;
+              const ny = cy + dy;
+              if (nx < scanX0 || nx > scanX1 || ny < scanY0 || ny > scanY1) continue;
+              const nIndex = idx(nx, ny);
+              if (visited[nIndex]) continue;
+              visited[nIndex] = 1;
+              if (!isPhotoPixel(nx, ny)) continue;
+              stackX.push(nx);
+              stackY.push(ny);
+            }
+          }
+        }
+
+        const compW = maxX - minX + 1;
+        const compH = maxY - minY + 1;
+        const aspect = compW / Math.max(1, compH);
+        const compArea = compW * compH;
+
+        if (area < 1100) continue;
+        if (compArea < 1600) continue;
+        if (compW < 36 || compH < 48) continue;
+        if (aspect < 0.38 || aspect > 2.35) continue;
+
+        const nearRightScore = maxX / Math.max(1, w);
+        const nearTopScore = 1 - minY / Math.max(1, h);
+        const score = area + nearRightScore * 600 + nearTopScore * 350;
+        if (score <= bestScore) continue;
+
+        bestScore = score;
+        best = clampRect(
+          {
+            x0: minX - 3,
+            y0: minY - 3,
+            x1: maxX + 3,
+            y1: maxY + 3,
+          },
+          pageWidth,
+          pageHeight,
+        );
+      }
+    }
+
+    return best;
+  } catch {
+    return null;
+  }
+}
+
 function findPhotoFallbackRect(page: any, pageWidth: number, pageHeight: number): Rect | null {
   const candidates: Rect[] = [];
 
@@ -860,12 +1008,39 @@ function findPhotoFallbackRect(page: any, pageWidth: number, pageHeight: number)
 
 function detectPhotoImageRects(page: any, pageWidth: number, pageHeight: number, includeFallback = false): Rect[] {
   const imageRects = collectImageRects(page, pageWidth, pageHeight);
-  if (imageRects.length === 0) return [];
+  if (imageRects.length === 0) {
+    if (!includeFallback) return [];
+    const pixelFallbackOnly = detectPhotoRectFromPixels(page, pageWidth, pageHeight);
+    if (pixelFallbackOnly) return [pixelFallbackOnly];
+    const geoFallbackOnly = findPhotoFallbackRect(page, pageWidth, pageHeight);
+    return geoFallbackOnly ? [geoFallbackOnly] : [];
+  }
   const photoRects = detectPhotoImageRectsFromImageRects(imageRects, pageWidth, pageHeight);
   if (photoRects.length > 0) return photoRects;
   if (!includeFallback) return [];
+  const pixelFallback = detectPhotoRectFromPixels(page, pageWidth, pageHeight);
+  if (pixelFallback) return [pixelFallback];
   const fallback = findPhotoFallbackRect(page, pageWidth, pageHeight);
   return fallback ? [fallback] : [];
+}
+
+function resolveAnonymizedNameBaselineY(
+  placement: NamePlacement | null,
+  pageHeight: number,
+  fontSize: number,
+): number {
+  const fallbackTop = pageHeight - 88;
+  if (!placement) return fallbackTop;
+
+  const boxOffset = Math.max(0, (placement.boxHeight - fontSize) / 2);
+  const assumeTopOrigin = pageHeight - (placement.yTop + placement.boxHeight) + boxOffset;
+  const assumeBottomOrigin = placement.yTop + boxOffset;
+  const candidates = [assumeTopOrigin, assumeBottomOrigin].filter(
+    (y) => Number.isFinite(y) && y > pageHeight * 0.52 && y < pageHeight - 20,
+  );
+
+  if (candidates.length === 0) return fallbackTop;
+  return candidates.sort((a, b) => Math.abs(a - fallbackTop) - Math.abs(b - fallbackTop))[0];
 }
 
 async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZone[]> {
@@ -1023,7 +1198,63 @@ async function redactPdfTextLocally(
   const nameRects = findNameProtectionRects(page, pageWidth, pageHeight, hints);
   const nameBottom = nameRects.length > 0 ? Math.max(...nameRects.map((r) => r.y1)) : 0;
   if (anonymizeName) {
+    const manualNameSearchTerms = new Set<string>();
+    const hintedName = safeText(hints?.name);
+    if (hintedName) {
+      manualNameSearchTerms.add(hintedName);
+      manualNameSearchTerms.add(hintedName.toLowerCase());
+      manualNameSearchTerms.add(hintedName.toUpperCase());
+      for (const token of hintedName.split(/\s+/).filter((t) => t.length >= 3)) {
+        manualNameSearchTerms.add(token);
+      }
+    }
+    for (const term of manualNameSearchTerms) {
+      try {
+        const hits = page.search(term, 28) as number[][][];
+        if (!Array.isArray(hits)) continue;
+        for (const quadSet of hits) {
+          const hitRects = quadsToRects(Array.isArray(quadSet) ? quadSet : [], 6, 4);
+          for (const hr of hitRects) {
+            const r = clampRect(hr, pageWidth, pageHeight);
+            if (!r) continue;
+            if (topDistanceForRect(r, pageHeight) > pageHeight * 0.42) continue;
+            rects.push(r);
+          }
+        }
+      } catch {
+        // Ignore manual name search errors.
+      }
+    }
+
     rects.push(...nameRects);
+
+    // Enforce full name removal by adding a broader kill-band around the detected name zone.
+    const mergedName = mergeRects(
+      rects.filter((r) => topDistanceForRect(r, pageHeight) <= pageHeight * 0.42),
+    );
+    const defaultNameBand = clampRect(
+      {
+        x0: pageWidth * 0.2,
+        y0: pageHeight * 0.02,
+        x1: pageWidth * 0.8,
+        y1: pageHeight * 0.16,
+      },
+      pageWidth,
+      pageHeight,
+    );
+    const nameKillBand = mergedName
+      ? clampRect(
+          {
+            x0: mergedName.x0 - 8,
+            y0: mergedName.y0 - 6,
+            x1: mergedName.x1 + 8,
+            y1: mergedName.y1 + 6,
+          },
+          pageWidth,
+          pageHeight,
+        )
+      : defaultNameBand;
+    if (nameKillBand) rects.push(nameKillBand);
   }
 
   // Remove photo-like images from page 1.
@@ -1064,12 +1295,7 @@ async function redactPdfTextLocally(
     annot.update();
   }
 
-  page.applyRedactions(
-    false,
-    page.REDACT_IMAGE_PIXELS,
-    page.REDACT_LINE_ART_NONE,
-    page.REDACT_TEXT_REMOVE,
-  );
+  page.applyRedactions();
 
   // Remove photo-like images from all remaining pages as well.
   const pageCount = Number(pdf.countPages() || 1);
@@ -1087,12 +1313,7 @@ async function redactPdfTextLocally(
         annot.setRect([r.x0, r.y0, r.x1, r.y1]);
         annot.update();
       }
-      p.applyRedactions(
-        false,
-        p.REDACT_IMAGE_PIXELS,
-        p.REDACT_LINE_ART_NONE,
-        p.REDACT_TEXT_NONE,
-      );
+      p.applyRedactions();
     } catch {
       // Ignore per-page image redaction failures.
     }
@@ -1103,6 +1324,65 @@ async function redactPdfTextLocally(
   const stable = new Uint8Array(raw.length);
   stable.set(raw);
   return stable;
+}
+
+function stripResidualNameFromPdf(pdfBytes: Uint8Array, originalName?: string | null): Uint8Array {
+  const name = safeText(originalName);
+  if (!name) return pdfBytes;
+
+  try {
+    const mupdfMod: any = (mupdf as any)?.default || mupdf;
+    const doc = mupdfMod.Document.openDocument(new Uint8Array(pdfBytes), "application/pdf");
+    const pdf = doc?.asPDF?.();
+    if (!pdf) return pdfBytes;
+
+    const page = pdf.loadPage(0);
+    const bounds = page.getBounds();
+    const pageWidth = Number(bounds?.[2] || 0);
+    const pageHeight = Number(bounds?.[3] || 0);
+    if (!pageWidth || !pageHeight) return pdfBytes;
+
+    const searchTerms = new Set<string>([name]);
+    for (const token of name.split(/\s+/).map((t) => t.trim()).filter((t) => t.length >= 3)) {
+      searchTerms.add(token);
+    }
+
+    const rects: Rect[] = [];
+    for (const term of searchTerms) {
+      try {
+        const hits = page.search(term, 24) as number[][][];
+        if (!Array.isArray(hits)) continue;
+        for (const quadSet of hits) {
+          const hitRects = quadsToRects(Array.isArray(quadSet) ? quadSet : [], 5, 4);
+          for (const hr of hitRects) {
+            const r = clampRect(hr, pageWidth, pageHeight);
+            if (!r) continue;
+            if (topDistanceForRect(r, pageHeight) > pageHeight * 0.42) continue;
+            rects.push(r);
+          }
+        }
+      } catch {
+        // Ignore per-term search failure.
+      }
+    }
+
+    const unique = dedupeRects(rects, 2);
+    if (unique.length === 0) return pdfBytes;
+
+    for (const r of unique) {
+      const annot = page.createAnnotation("Redact");
+      annot.setRect([r.x0, r.y0, r.x1, r.y1]);
+      annot.update();
+    }
+    page.applyRedactions();
+
+    const out = pdf.saveToBuffer("compress").asUint8Array();
+    const stable = new Uint8Array(out.length);
+    stable.set(out);
+    return stable;
+  } catch {
+    return pdfBytes;
+  }
 }
 
 function downloadPdfBytes(bytes: Uint8Array, fileNameBase: string): void {
@@ -1279,7 +1559,10 @@ export async function downloadBrandedSourcePdf(
     ? detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
     : null;
   const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
-  const hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
+  let hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
+  if (hints?.anonymizeName) {
+    hardDeletedBytes = stripResidualNameFromPdf(hardDeletedBytes, hints?.name);
+  }
 
   const pdfDoc = await PDFDocument.load(hardDeletedBytes);
   const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
@@ -1368,7 +1651,7 @@ export async function downloadBrandedSourcePdf(
         Number.isFinite(namePlacement?.yTop) &&
         Number.isFinite(namePlacement?.boxHeight);
       let size = namePlacement
-        ? Math.min(20, Math.max(11, namePlacement.boxHeight * 0.6))
+        ? Math.min(24, Math.max(11, namePlacement.boxHeight * 0.78))
         : 16;
       let textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
       if (hasPlacement) {
@@ -1379,13 +1662,7 @@ export async function downloadBrandedSourcePdf(
         }
       }
       const desiredX = hasPlacement ? namePlacement!.xCenter - textWidth / 2 : (width - textWidth) / 2;
-      const desiredYRaw = hasPlacement
-        ? Math.max(
-            namePlacement!.yTop + Math.max(0, (namePlacement!.boxHeight - size) / 2),
-            height - (namePlacement!.yTop + Math.max(0, (namePlacement!.boxHeight - size) / 2) + size),
-          )
-        : height - 82;
-      const desiredY = desiredYRaw < height * 0.65 ? height - 88 : desiredYRaw;
+      const desiredY = resolveAnonymizedNameBaselineY(hasPlacement ? namePlacement! : null, height, size);
       page.drawText(replacement, {
         x: Math.max(26, Math.min(width - 26 - textWidth, desiredX)),
         y: Math.max(26, Math.min(height - 42, desiredY)),
