@@ -605,14 +605,14 @@ interface RetryStrategy {
 
 const COUNTRY_ALIASES: Record<string, string> = {
   uk: 'united kingdom',
-  u k: 'united kingdom',
+  'u k': 'united kingdom',
   england: 'united kingdom',
   britain: 'united kingdom',
   great britain: 'united kingdom',
   united states of america: 'united states',
   usa: 'united states',
   us: 'united states',
-  u s: 'united states',
+  'u s': 'united states',
   ny: 'united states',
   ma: 'united states',
   ca: 'united states',

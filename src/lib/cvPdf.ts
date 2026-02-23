@@ -678,8 +678,8 @@ function bboxLikeToRect(raw: any, pageWidth: number, pageHeight: number): Rect |
   if (typeof raw === "object") {
     const x = Number(raw.x ?? raw.x0 ?? 0);
     const y = Number(raw.y ?? raw.y0 ?? 0);
-    const w = Number(raw.w ?? (raw.x1 != null && raw.x0 != null ? raw.x1 - raw.x0 : 0) ?? 0);
-    const h = Number(raw.h ?? (raw.y1 != null && raw.y0 != null ? raw.y1 - raw.y0 : 0) ?? 0);
+    const w = Number(raw.w ?? (raw.x1 != null && raw.x0 != null ? raw.x1 - raw.x0 : 0));
+    const h = Number(raw.h ?? (raw.y1 != null && raw.y0 != null ? raw.y1 - raw.y0 : 0));
 
     if (w > 0 && h > 0) {
       return clampRect({ x0: x, y0: y, x1: x + w, y1: y + h }, pageWidth, pageHeight);
@@ -1032,7 +1032,7 @@ async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZ
   try {
     // Use an isolated copy so PDF.js processing cannot detach buffers needed later.
     const analysisBytes = new Uint8Array(pdfBytes);
-    const loadingTask = getDocument({ data: analysisBytes, disableWorker: true });
+    const loadingTask = getDocument({ data: analysisBytes, disableWorker: true } as any);
     const pdf = await loadingTask.promise;
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 1 });
@@ -1363,7 +1363,7 @@ function stripResidualNameFromPdf(pdfBytes: Uint8Array, originalName?: string | 
 
 function downloadPdfBytes(bytes: Uint8Array, fileNameBase: string): void {
   const safeName = (fileNameBase || "candidate-cv").replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").toLowerCase();
-  const blob = new Blob([bytes], { type: "application/pdf" });
+  const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
