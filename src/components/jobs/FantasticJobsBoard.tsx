@@ -153,7 +153,6 @@ const DEFAULT_LOCATION_SUGGESTIONS = [
   "Amsterdam",
   "Dubai",
   "Abu Dhabi",
-  "Remote",
 ];
 
 const PE_SIGNAL_TERMS = [
@@ -167,12 +166,90 @@ const PE_SIGNAL_TERMS = [
   "capital partners",
 ];
 
+const REMOTE_TERMS = [
+  "remote",
+  "work from home",
+  "wfh",
+  "home based",
+  "home-based",
+  "anywhere",
+  "virtual",
+];
+
+const RECRUITER_COMPANY_TERMS = [
+  "recruitment",
+  "recruiting",
+  "staffing",
+  "headhunt",
+  "executive search",
+  "talent solutions",
+  "search partners",
+];
+
+const RECRUITER_LISTING_TERMS = [
+  "for one of our clients",
+  "on behalf of our client",
+  "for our client",
+  "our client is seeking",
+];
+
+const LOCATION_ALIAS_MAP: Record<string, string> = {
+  loondon: "London",
+  londonn: "London",
+  londn: "London",
+  nyc: "New York",
+  "new-york": "New York",
+  newyork: "New York",
+  "san-francisco": "San Francisco",
+  losangeles: "Los Angeles",
+  "abu-dhabi": "Abu Dhabi",
+  uae: "United Arab Emirates",
+  uk: "United Kingdom",
+};
+
 function splitTerms(value: string): string[] {
   if (!value) return [];
   return value
     .split(/\s+OR\s+|,|\|/i)
     .map((v) => v.trim())
     .filter(Boolean);
+}
+
+function normalizeLocationToken(token: string): string {
+  const trimmed = String(token || "").trim();
+  if (!trimmed) return "";
+
+  const compact = trimmed.toLowerCase().replace(/\./g, "").replace(/\s+/g, "");
+  if (LOCATION_ALIAS_MAP[compact]) return LOCATION_ALIAS_MAP[compact];
+
+  const normalizedCase = trimmed.replace(/\s+/g, " ");
+  const lower = normalizedCase.toLowerCase();
+
+  if (/^lo+ndon$/.test(lower) || /^london+$/.test(lower) || lower === "lndon") {
+    return "London";
+  }
+
+  return normalizedCase;
+}
+
+function normalizeLocationExpression(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  return raw
+    .split(/(\s+OR\s+|\|)/i)
+    .map((chunk) => {
+      if (/^\s*\|\s*$/.test(chunk)) return " | ";
+      if (/^\s*or\s*$/i.test(chunk)) return " OR ";
+      return chunk
+        .split(",")
+        .map((part) => normalizeLocationToken(part))
+        .filter(Boolean)
+        .join(", ");
+    })
+    .join("")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function postedAfterToMs(postedAfter: string): number | null {
@@ -296,7 +373,8 @@ function buildSuggestions(
   mode: "position" | "industry" | "location",
 ): string[] {
   const splitHistoryValues = historyValues.flatMap((raw) => {
-    const v = String(raw || "").trim();
+    const source = mode === "location" ? normalizeLocationExpression(String(raw || "")) : String(raw || "");
+    const v = source.trim();
     if (!v) return [];
     const base = [v];
     if (mode === "location") {
@@ -312,6 +390,20 @@ function matchesPESignal(job: Job): boolean {
   if (typeof job.is_pe_match === "boolean") return job.is_pe_match;
   const fullText = `${job.title} ${job.company} ${job.description || ""}`.toLowerCase();
   return PE_SIGNAL_TERMS.some((term) => fullText.includes(term));
+}
+
+function isRemoteLikeJob(job: Job): boolean {
+  if (job.remote) return true;
+  const text = `${job.location || ""} ${job.title || ""} ${job.description || ""}`.toLowerCase();
+  return REMOTE_TERMS.some((term) => text.includes(term));
+}
+
+function isRecruiterLikeJob(job: Job): boolean {
+  const company = String(job.company || "").toLowerCase();
+  const titleDesc = `${job.title || ""} ${job.description || ""}`.toLowerCase();
+  const companyMatch = RECRUITER_COMPANY_TERMS.some((term) => company.includes(term));
+  const listingMatch = RECRUITER_LISTING_TERMS.some((term) => titleDesc.includes(term));
+  return companyMatch || listingMatch;
 }
 
 function inferDepartmentsFromJobTitle(title: string): string[] {
@@ -424,7 +516,20 @@ export function FantasticJobsBoard() {
       const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((item): item is SearchHistoryItem => Boolean(item && hasHistoryResults(item)));
+      return parsed
+        .map((item) => {
+          if (!item || typeof item !== "object") return item;
+          const row = item as SearchHistoryItem;
+          return {
+            ...row,
+            filters: {
+              ...row.filters,
+              location: normalizeLocationExpression(row.filters?.location || ""),
+              remote: false,
+            },
+          };
+        })
+        .filter((item): item is SearchHistoryItem => Boolean(item && hasHistoryResults(item)));
     } catch {
       return [];
     }
@@ -469,10 +574,12 @@ export function FantasticJobsBoard() {
       const params: Record<string, string> = {};
       if (filters.title) params.keyword = filters.title;
       if (filters.industryKeywords) params.industry_keywords = filters.industryKeywords;
-      if (filters.location) params.location = filters.location;
+      const normalizedLocation = normalizeLocationExpression(filters.location);
+      if (normalizedLocation) params.location = normalizedLocation;
       if (filters.salaryMin) params.salary_min = filters.salaryMin;
       if (filters.industry && filters.industry !== "all") params.industry = filters.industry;
-      if (filters.remote) params.remote = "true";
+      params.remote = "false";
+      params.remove_recruiters = "true";
       if (filters.postedAfter) params.posted_after = filters.postedAfter;
       params.source = mode;
       params.limit = String(requestedCount);
@@ -495,7 +602,7 @@ export function FantasticJobsBoard() {
       const industryKeywordTerms = splitTerms(filters.industryKeywords).map((t) => t.toLowerCase());
       const excludeTerms = splitTerms(filters.exclude).map((t) => t.toLowerCase());
       const companyTerms = splitTerms(filters.company).map((t) => t.toLowerCase());
-      const locationTerms = splitTerms(filters.location).map((t) => t.toLowerCase());
+      const locationTerms = splitTerms(normalizeLocationExpression(filters.location)).map((t) => t.toLowerCase());
       const industry = filters.industry.toLowerCase();
       const postedAfterMs = postedAfterToMs(filters.postedAfter);
       const cutoff = postedAfterMs ? Date.now() - postedAfterMs : null;
@@ -508,6 +615,8 @@ export function FantasticJobsBoard() {
         if (excludeTerms.length > 0 && excludeTerms.some((t) => haystack.includes(t))) return false;
         if (companyTerms.length > 0 && !companyTerms.some((t) => job.company.toLowerCase().includes(t))) return false;
         if (locationTerms.length > 0 && !locationTerms.some((t) => job.location.toLowerCase().includes(t))) return false;
+        if (isRemoteLikeJob(job)) return false;
+        if (isRecruiterLikeJob(job)) return false;
 
         if (industry !== "all") {
           const taxonomies = (job.ai_taxonomies || []).map((t) => t.toLowerCase());
@@ -529,7 +638,6 @@ export function FantasticJobsBoard() {
           if (Number.isFinite(postedTs) && postedTs < cutoff) return false;
         }
 
-        if (filters.remote && !job.remote) return false;
         return true;
       });
     },
@@ -570,7 +678,16 @@ export function FantasticJobsBoard() {
           ).values(),
         );
         const filtered = applyClientFilters(deduped);
-        const usedFilterFallback = filtered.length === 0 && deduped.length > 0;
+        const hasExplicitFilters = Boolean(
+          filters.title.trim() ||
+          filters.industryKeywords.trim() ||
+          filters.company.trim() ||
+          filters.exclude.trim() ||
+          normalizeLocationExpression(filters.location).trim() ||
+          filters.salaryMin.trim() ||
+          (filters.industry && filters.industry !== "all"),
+        );
+        const usedFilterFallback = !hasExplicitFilters && filtered.length === 0 && deduped.length > 0;
         const effectiveFiltered = usedFilterFallback ? deduped : filtered;
         const capped = effectiveFiltered.slice(0, requestedCount);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
@@ -599,7 +716,11 @@ export function FantasticJobsBoard() {
             id: `${Date.now()}-${mode}`,
             createdAt: new Date().toISOString(),
             mode,
-            filters: { ...filters },
+            filters: {
+              ...filters,
+              location: normalizeLocationExpression(filters.location),
+              remote: false,
+            },
             strictPEOnly,
             resultCount: visibleRows.length,
             topResults: visibleRows.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
@@ -616,8 +737,8 @@ export function FantasticJobsBoard() {
         } else {
           toast({
             title: "Jobs refreshed",
-            description: usedFilterFallback
-              ? `Fetched ${incoming.length}. Current filters returned 0, so broad results were shown (${visibleRows.length}).`
+      description: usedFilterFallback
+              ? `Fetched ${incoming.length}. No explicit filters were set, so broad results were shown (${visibleRows.length}).`
               : `Fetched ${incoming.length}, after filters ${effectiveFiltered.length}, showing ${visibleRows.length} (${mode}).`,
           });
         }
@@ -739,7 +860,11 @@ export function FantasticJobsBoard() {
   };
 
   const loadHistoryItem = (item: SearchHistoryItem) => {
-    setFilters(item.filters);
+    setFilters({
+      ...item.filters,
+      location: normalizeLocationExpression(item.filters.location || ""),
+      remote: false,
+    });
     setSearchMode(item.mode);
     const restored = Array.isArray(item.results) ? item.results : [];
     if (restored.length === 0) {
@@ -911,6 +1036,12 @@ export function FantasticJobsBoard() {
               list="job-location-suggestions"
               value={filters.location}
               onChange={(e) => setFilters((f) => ({ ...f, location: e.target.value }))}
+              onBlur={(e) =>
+                setFilters((f) => ({
+                  ...f,
+                  location: normalizeLocationExpression(e.target.value),
+                }))
+              }
             />
           </div>
 
@@ -985,10 +1116,12 @@ export function FantasticJobsBoard() {
               </SelectContent>
             </Select>
             <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <Checkbox checked={filters.remote} onCheckedChange={(v) => setFilters((f) => ({ ...f, remote: Boolean(v) }))} />
-                Remote
-              </label>
+              <Badge variant="secondary" className="h-8">
+                Recruiters filtered
+              </Badge>
+              <Badge variant="secondary" className="h-8">
+                Onsite only
+              </Badge>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <Checkbox checked={strictPEOnly} onCheckedChange={(v) => setStrictPEOnly(Boolean(v))} />
                 PE-only

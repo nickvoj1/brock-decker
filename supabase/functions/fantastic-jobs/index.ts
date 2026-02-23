@@ -7,6 +7,46 @@ const corsHeaders = {
 };
 
 const RAPID_HOST = "active-jobs-db.p.rapidapi.com";
+const REMOTE_TERMS = [
+  "remote",
+  "work from home",
+  "wfh",
+  "home based",
+  "home-based",
+  "anywhere",
+  "virtual",
+];
+
+const RECRUITER_COMPANY_TERMS = [
+  "recruitment",
+  "recruiting",
+  "staffing",
+  "headhunt",
+  "executive search",
+  "talent solutions",
+  "search partners",
+];
+
+const RECRUITER_LISTING_TERMS = [
+  "for one of our clients",
+  "on behalf of our client",
+  "for our client",
+  "our client is seeking",
+];
+
+const LOCATION_ALIAS_MAP: Record<string, string> = {
+  loondon: "London",
+  londonn: "London",
+  londn: "London",
+  nyc: "New York",
+  "new-york": "New York",
+  newyork: "New York",
+  "san-francisco": "San Francisco",
+  losangeles: "Los Angeles",
+  "abu-dhabi": "Abu Dhabi",
+  uae: "United Arab Emirates",
+  uk: "United Kingdom",
+};
 
 function splitCsv(value?: string): string[] {
   if (!value) return [];
@@ -34,6 +74,38 @@ function splitTerms(value: string): string[] {
     .split(/\s+OR\s+|,|\|/i)
     .map((v) => v.trim())
     .filter((v) => v.length > 0);
+}
+
+function normalizeLocationToken(token: string): string {
+  const trimmed = String(token || "").trim();
+  if (!trimmed) return "";
+
+  const compact = trimmed.toLowerCase().replace(/\./g, "").replace(/\s+/g, "");
+  if (LOCATION_ALIAS_MAP[compact]) return LOCATION_ALIAS_MAP[compact];
+
+  const normalizedCase = trimmed.replace(/\s+/g, " ");
+  const lower = normalizedCase.toLowerCase();
+  if (/^lo+ndon$/.test(lower) || /^london+$/.test(lower) || lower === "lndon") return "London";
+  return normalizedCase;
+}
+
+function normalizeLocationExpression(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw
+    .split(/(\s+OR\s+|\|)/i)
+    .map((chunk) => {
+      if (/^\s*\|\s*$/.test(chunk)) return " | ";
+      if (/^\s*or\s*$/i.test(chunk)) return " OR ";
+      return chunk
+        .split(",")
+        .map((part) => normalizeLocationToken(part))
+        .filter(Boolean)
+        .join(", ");
+    })
+    .join("")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function mapTimeRange(postedAfter: string): string {
@@ -68,14 +140,6 @@ function getParam(body: Record<string, unknown>, url: URL, key: string, fallback
   const fromQuery = url.searchParams.get(key);
   if (fromQuery && fromQuery.trim().length > 0) return fromQuery.trim();
   return fallback;
-}
-
-function getFlag(body: Record<string, unknown>, url: URL, key: string): boolean {
-  const fromBody = body[key];
-  if (typeof fromBody === "boolean") return fromBody;
-  if (typeof fromBody === "string") return fromBody.trim().toLowerCase() === "true";
-  const fromQuery = url.searchParams.get(key);
-  return fromQuery?.trim().toLowerCase() === "true";
 }
 
 function normalizeUrl(url: unknown): string | null {
@@ -216,6 +280,24 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
   });
 }
 
+function isRemoteLikeJob(job: Record<string, unknown>): boolean {
+  if ((job.remote as boolean) === true) return true;
+  const text = `${String(job.location || "")} ${String(job.title || "")} ${String(job.description || "")}`.toLowerCase();
+  return REMOTE_TERMS.some((term) => text.includes(term));
+}
+
+function isRecruiterLikeJob(job: Record<string, unknown>): boolean {
+  const company = String(job.company || "").toLowerCase();
+  const titleDesc = `${String(job.title || "")} ${String(job.description || "")}`.toLowerCase();
+  const companyMatch = RECRUITER_COMPANY_TERMS.some((term) => company.includes(term));
+  const listingMatch = RECRUITER_LISTING_TERMS.some((term) => titleDesc.includes(term));
+  return companyMatch || listingMatch;
+}
+
+function applyStrictResultFilters(jobs: Record<string, unknown>[]): Record<string, unknown>[] {
+  return jobs.filter((job) => !isRemoteLikeJob(job) && !isRecruiterLikeJob(job));
+}
+
 function filterByPostedAfter(
   jobs: Record<string, unknown>[],
   postedAfter: string,
@@ -273,9 +355,8 @@ async function fetchViaRapidAPI(
 
   const queryParams = new URLSearchParams();
   const keyword = getParam(body, url, "keyword");
-  const location = getParam(body, url, "location");
+  const location = normalizeLocationExpression(getParam(body, url, "location"));
   const salaryMin = getParam(body, url, "salary_min");
-  const remote = getParam(body, url, "remote");
   const limit = getParam(body, url, "limit", "50");
   const offset = getParam(body, url, "offset", "0");
 
@@ -288,7 +369,6 @@ async function fetchViaRapidAPI(
     queryParams.set("location", location);
   }
   if (salaryMin) queryParams.set("salary_min", salaryMin);
-  if (remote === "true") queryParams.set("remote", "true");
   queryParams.set("limit", limit);
   queryParams.set("offset", offset);
 
@@ -321,10 +401,9 @@ async function fetchViaApify(
   url: URL,
 ): Promise<Record<string, unknown>[]> {
   const keyword = getParam(body, url, "keyword");
-  const location = getParam(body, url, "location");
+  const location = normalizeLocationExpression(getParam(body, url, "location"));
   const postedAfter = getParam(body, url, "posted_after", "7days");
   const salaryMin = getParam(body, url, "salary_min");
-  const remote = getFlag(body, url, "remote");
   const limit = getParam(body, url, "limit", "50");
   const offset = getParam(body, url, "offset", "0");
 
@@ -333,7 +412,6 @@ async function fetchViaApify(
   const titleSearch = splitTerms(keyword);
   const locationSearch = splitTerms(location);
   const actorLower = actorId.toLowerCase();
-  const isLinkedInActor = actorLower.includes("vigxjrrhqdtpue6m4") || actorLower.includes("advanced-linkedin-job-search-api");
   const isCareerActor = actorLower.includes("s3dtstzszwftavln5") || actorLower.includes("career-site-job-listing-api");
 
   const actorInput: Record<string, unknown> = {
@@ -350,8 +428,6 @@ async function fetchViaApify(
   if (locationSearch.length > 0) actorInput.locationSearch = locationSearch;
   if (salaryMin) actorInput.aiHasSalary = true;
   if (isCareerActor) actorInput.includeLinkedIn = true;
-  if (remote && isLinkedInActor) actorInput.remote = true;
-  if (remote && isCareerActor) actorInput["remote only (legacy)"] = true;
   if (offset && Number(offset) > 0) actorInput.offset = Number(offset);
 
   const buildRunSyncUrl = (input: Record<string, unknown>) => {
@@ -509,9 +585,10 @@ serve(async (req) => {
 
     const normalizedJobs = normalizeJobs(rawJobs);
     const postedFilteredJobs = filterByPostedAfter(normalizedJobs, postedAfter);
+    const strictFilteredJobs = applyStrictResultFilters(postedFilteredJobs);
     const dedupedJobs = Array.from(
       new Map(
-        postedFilteredJobs.map((job) => {
+        strictFilteredJobs.map((job) => {
           const applyUrl = String(job.apply_url || "").toLowerCase();
           const title = String(job.title || "").toLowerCase();
           const company = String(job.company || "").toLowerCase();
