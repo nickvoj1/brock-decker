@@ -118,17 +118,31 @@ function normalizeUrl(url: unknown): string | null {
   }
 }
 
-function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>[] {
+function normalizeLocationText(value: unknown): string {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (/^[|,\s-]+$/.test(normalized)) return "";
+  return normalized;
+}
+
+function normalizeJobs(jobs: Record<string, unknown>[], fallbackLocation = ""): Record<string, unknown>[] {
+  const normalizedFallbackLocation = normalizeLocationText(fallbackLocation);
   return jobs.map((job, index) => {
     const locations = (job.locations_derived as Array<{ city?: string; admin?: string; country?: string }>) || [];
     const locationsRawStrings = Array.isArray(job.locations_derived)
       ? (job.locations_derived as unknown[]).filter((v) => typeof v === "string") as string[]
       : [];
+    const derivedObjectLocations = locations
+      .map((l) => normalizeLocationText([l.city, l.admin, l.country].filter(Boolean).join(", ")))
+      .filter(Boolean);
+    const derivedStringLocations = locationsRawStrings
+      .map((l) => normalizeLocationText(l))
+      .filter(Boolean);
     const locationFromDerived =
-      locations.length > 0
-        ? locations.map((l) => [l.city, l.admin, l.country].filter(Boolean).join(", ")).join(" | ")
-        : locationsRawStrings.length > 0
-          ? locationsRawStrings.join(" | ")
+      derivedObjectLocations.length > 0
+        ? derivedObjectLocations.join(" | ")
+        : derivedStringLocations.length > 0
+          ? derivedStringLocations.join(" | ")
           : "";
 
     const title =
@@ -172,14 +186,20 @@ function normalizeJobs(jobs: Record<string, unknown>[]): Record<string, unknown>
       (job.link as string) ||
       null;
 
-    const location =
-      locationFromDerived ||
-      (job.location as string) ||
-      (job.jobLocation as string) ||
-      (job.locationName as string) ||
-      (job.city as string) ||
-      (job.country as string) ||
-      "Remote";
+    const locationCandidates = [
+      locationFromDerived,
+      normalizeLocationText(job.location as string),
+      normalizeLocationText(job.jobLocation as string),
+      normalizeLocationText(job.locationName as string),
+      normalizeLocationText(job.city as string),
+      normalizeLocationText(job.country as string),
+    ].filter(Boolean);
+
+    let location = locationCandidates.length > 0 ? locationCandidates[0] : "";
+    if ((!location || location.toLowerCase() === "remote") && normalizedFallbackLocation) {
+      location = normalizedFallbackLocation;
+    }
+    if (!location) location = "Remote";
 
     const salaryMin =
       toNumber(job.ai_salary_minvalue) ??
@@ -353,7 +373,12 @@ async function fetchViaApify(
   }
 
   const data = await syncRes.json();
-  return parseApifyItems(data);
+  const sourceTag = isLinkedInActor ? "linkedin" : isCareerActor ? "career" : "apify";
+  return parseApifyItems(data).map((item) => ({
+    ...item,
+    source: sourceTag,
+    source_actor_id: actorId,
+  }));
 }
 
 async function readApiSettings(): Promise<Record<string, string>> {
@@ -446,7 +471,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const normalizedJobs = normalizeJobs(rawJobs);
+    const normalizedJobs = normalizeJobs(rawJobs, normalizeLocationExpression(getParam(body, url, "location")));
     const jobs = normalizedJobs.slice(0, requestedLimit);
     const offset = Number(getParam(body, url, "offset", "0"));
     const limit = requestedLimit;

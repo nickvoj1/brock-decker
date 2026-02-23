@@ -56,6 +56,7 @@ interface ApolloJobContact {
 }
 
 type SearchMode = "all" | "linkedin" | "career";
+type SourceTab = "all" | "linkedin" | "career";
 type SearchHistoryItem = {
   id: string;
   createdAt: string;
@@ -226,6 +227,35 @@ function normalizeLocationExpression(value: string): string {
     .join("")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function isInvalidLocation(value: string): boolean {
+  const normalized = String(value || "").trim();
+  if (!normalized) return true;
+  if (/^[|,\s-]+$/.test(normalized)) return true;
+  return normalized.toLowerCase() === "remote";
+}
+
+function withLocationFallback(location: string, fallbackLocation: string): string {
+  const normalizedLocation = String(location || "").trim();
+  const fallback = String(fallbackLocation || "").trim();
+  if (!fallback) return normalizedLocation || "Remote";
+  if (isInvalidLocation(normalizedLocation)) return fallback;
+  return normalizedLocation;
+}
+
+function classifyJobSource(source: string): "linkedin" | "career" | "other" {
+  const s = String(source || "").toLowerCase();
+  if (s.includes("linkedin") || s.includes("vigxjrrhqdtpue6m4")) return "linkedin";
+  if (s.includes("career") || s.includes("s3dtstzszwftavln5")) return "career";
+  return "other";
+}
+
+function formatSourceLabel(source: string): string {
+  const bucket = classifyJobSource(source);
+  if (bucket === "linkedin") return "LinkedIn";
+  if (bucket === "career") return "Career Site";
+  return source || "source";
 }
 
 function toNumber(value: unknown): number | null {
@@ -453,6 +483,7 @@ export function FantasticJobsBoard() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [searchMode, setSearchMode] = useState<SearchMode>("all");
+  const [sourceTab, setSourceTab] = useState<SourceTab>("all");
   const [selectedSources, setSelectedSources] = useState({ linkedin: true, career: true });
   const [sortBy, setSortBy] = useState<"posted" | "salary">("posted");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -553,6 +584,7 @@ export function FantasticJobsBoard() {
   const runSearch = useCallback(
     async (mode: SearchMode) => {
       setSearchMode(mode);
+      setSourceTab(mode === "all" ? "all" : mode);
 
       const cached = searchHistory.find((item) => {
         if (item.mode !== mode) return false;
@@ -584,7 +616,12 @@ export function FantasticJobsBoard() {
           });
           setWarnedOutdatedBackend(true);
         }
-        const capped = incoming.slice(0, requestedCount);
+        const searchLocation = normalizeLocationExpression(filters.location);
+        const normalizedIncoming = incoming.map((job) => ({
+          ...job,
+          location: withLocationFallback(job.location, searchLocation),
+        }));
+        const capped = normalizedIncoming.slice(0, requestedCount);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
         const visibleRows = strictPEOnly
@@ -675,12 +712,31 @@ export function FantasticJobsBoard() {
   };
 
   const scopedJobs = useMemo(() => {
-    let out = jobs;
+    const sourceScoped =
+      sourceTab === "all"
+        ? jobs
+        : jobs.filter((job) => classifyJobSource(job.source) === sourceTab);
+
+    let out = sourceScoped;
     if (strictPEOnly) {
       out = out.filter((job) => matchesPESignal(job));
     }
     return out;
-  }, [jobs, strictPEOnly]);
+  }, [jobs, strictPEOnly, sourceTab]);
+
+  const sourceCounts = useMemo(() => {
+    return jobs.reduce(
+      (acc, job) => {
+        const bucket = classifyJobSource(job.source);
+        if (bucket === "linkedin") acc.linkedin += 1;
+        if (bucket === "career") acc.career += 1;
+        return acc;
+      },
+      { linkedin: 0, career: 0 },
+    );
+  }, [jobs]);
+
+  const showSourceTabs = sourceCounts.linkedin > 0 && sourceCounts.career > 0;
 
   const sortedJobs = useMemo(() => {
     return [...scopedJobs].sort((a, b) => {
@@ -765,6 +821,7 @@ export function FantasticJobsBoard() {
       remote: false,
     });
     setSearchMode(item.mode);
+    setSourceTab(item.mode === "all" ? "all" : item.mode);
     const restored = Array.isArray(item.results) ? item.results : [];
     if (restored.length === 0) {
       setSearchHistory((prev) => prev.filter((x) => x.id !== item.id && hasHistoryResults(x)));
@@ -774,8 +831,13 @@ export function FantasticJobsBoard() {
       });
       return;
     }
-    setJobs(restored);
-    setTotal(item.resultCount || restored.length);
+    const searchLocation = normalizeLocationExpression(item.filters.location || "");
+    const normalizedRestored = restored.map((job) => ({
+      ...job,
+      location: withLocationFallback(job.location, searchLocation),
+    }));
+    setJobs(normalizedRestored);
+    setTotal(item.resultCount || normalizedRestored.length);
     setLastRefresh(new Date(item.createdAt));
     setLoading(false);
     setStrictPEOnly(typeof item.strictPEOnly === "boolean" ? item.strictPEOnly : false);
@@ -1094,6 +1156,31 @@ export function FantasticJobsBoard() {
             <CardTitle className="text-lg">{sortedJobs.length > 0 ? `${sortedJobs.length} Jobs Found` : "Job Results"}</CardTitle>
             {total > 0 ? <p className="text-xs text-muted-foreground">{total} rows fetched</p> : null}
           </div>
+          {showSourceTabs ? (
+            <div className="flex items-center gap-2 pt-2">
+              <Button
+                size="sm"
+                variant={sourceTab === "all" ? "default" : "outline"}
+                onClick={() => setSourceTab("all")}
+              >
+                All ({jobs.length})
+              </Button>
+              <Button
+                size="sm"
+                variant={sourceTab === "linkedin" ? "default" : "outline"}
+                onClick={() => setSourceTab("linkedin")}
+              >
+                LinkedIn ({sourceCounts.linkedin})
+              </Button>
+              <Button
+                size="sm"
+                variant={sourceTab === "career" ? "default" : "outline"}
+                onClick={() => setSourceTab("career")}
+              >
+                Career Sites ({sourceCounts.career})
+              </Button>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -1179,7 +1266,7 @@ export function FantasticJobsBoard() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{job.source || "source"}</Badge>
+                        <Badge variant="outline">{formatSourceLabel(job.source)}</Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
