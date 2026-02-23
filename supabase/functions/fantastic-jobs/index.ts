@@ -1,4 +1,4 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// deno-lint-ignore-file
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -325,14 +325,19 @@ function filterByPostedAfter(
 
 async function fetchWithRetry(
   fetchFn: () => Promise<Response>,
-  maxRetries = 0,
-  _baseDelayMs = 0,
+  maxRetries = 3,
+  baseDelayMs = 2000,
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetchFn();
     if (res.status === 429) {
-      await res.text();
-      if (attempt < maxRetries) continue;
+      await res.text(); // consume body
+      if (attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        console.log(`[fantastic-jobs] Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
       throw new Error("Rate limit exceeded");
     }
     return res;
@@ -496,7 +501,7 @@ async function readApiSettings(): Promise<Record<string, string>> {
   }
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
