@@ -409,7 +409,7 @@ export function FantasticJobsBoard() {
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [searchMode, setSearchMode] = useState<SearchMode>("all");
-  const [selectedSources, setSelectedSources] = useState({ linkedin: false, career: false });
+  const [selectedSources, setSelectedSources] = useState({ linkedin: true, career: true });
   const [sortBy, setSortBy] = useState<"posted" | "salary">("posted");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [strictPEOnly, setStrictPEOnly] = useState(false);
