@@ -807,11 +807,8 @@ export function FantasticJobsBoard() {
     }
     const win = window.open(url, "_blank", "noopener,noreferrer");
     if (!win) {
-      toast({
-        title: "Popup blocked",
-        description: "Allow popups for this site to open job links.",
-        variant: "destructive",
-      });
+      // Lovable preview can block popups; fall back to same-tab navigation.
+      window.location.assign(url);
     }
   };
 
