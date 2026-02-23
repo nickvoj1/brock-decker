@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const RAPID_HOST = "active-jobs-db.p.rapidapi.com";
+// RapidAPI removed — Apify only
 const REMOTE_TERMS = [
   "remote",
   "work from home",
@@ -345,59 +345,6 @@ async function fetchWithRetry(
   throw new Error("Rate limit exceeded");
 }
 
-async function fetchViaRapidAPI(
-  rapidApiKey: string,
-  body: Record<string, unknown>,
-  url: URL,
-): Promise<Record<string, unknown>[]> {
-  const postedAfter = getParam(body, url, "posted_after", "7days");
-  const endpoint =
-    postedAfter === "24hours" || postedAfter === "24h"
-      ? "/active-ats-24h"
-      : postedAfter === "1hour" || postedAfter === "1h"
-        ? "/active-ats-1h"
-        : "/active-ats-7d";
-
-  const queryParams = new URLSearchParams();
-  const keyword = getParam(body, url, "keyword");
-  const location = normalizeLocationExpression(getParam(body, url, "location"));
-  const salaryMin = getParam(body, url, "salary_min");
-  const limit = getParam(body, url, "limit", "50");
-  const offset = getParam(body, url, "offset", "0");
-
-  if (keyword) {
-    queryParams.set("title_filter", keyword);
-    queryParams.set("keyword", keyword);
-  }
-  if (location) {
-    queryParams.set("location_filter", location);
-    queryParams.set("location", location);
-  }
-  if (salaryMin) queryParams.set("salary_min", salaryMin);
-  queryParams.set("limit", limit);
-  queryParams.set("offset", offset);
-
-  const apiUrl = `https://${RAPID_HOST}${endpoint}${queryParams.toString() ? `?${queryParams.toString()}` : ""}`;
-  console.log("[fantastic-jobs] RapidAPI URL:", apiUrl);
-
-  const res = await fetchWithRetry(() =>
-    fetch(apiUrl, {
-      method: "GET",
-      headers: {
-        "X-RapidAPI-Key": rapidApiKey,
-        "X-RapidAPI-Host": RAPID_HOST,
-      },
-    }),
-  );
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`RapidAPI request failed: ${res.status} - ${errText.substring(0, 200)}`);
-  }
-
-  const data = await res.json();
-  return Array.isArray(data) ? data : ((data.jobs || data.results || data.data || []) as Record<string, unknown>[]);
-}
 
 async function fetchViaApify(
   apifyToken: string,
@@ -489,7 +436,7 @@ async function readApiSettings(): Promise<Record<string, string>> {
     const { data, error } = await supabase
       .from("api_settings")
       .select("setting_key, setting_value")
-      .in("setting_key", ["apify_token", "apify_actor_id", "rapidapi_key"]);
+      .in("setting_key", ["apify_token", "apify_actor_id"]);
 
     if (error || !data) return {};
     return data.reduce((acc: Record<string, string>, row: any) => {
@@ -535,13 +482,6 @@ Deno.serve(async (req) => {
     } else {
       apifyActorIds = uniqueStrings(selectActorsForSource(envActorIds, sourceMode));
     }
-    const rapidApiKey =
-      (body.rapidapi_key as string) ||
-      (body.rapidApiKey as string) ||
-      savedSettings.rapidapi_key ||
-      Deno.env.get("RAPIDAPI_KEY") ||
-      "";
-
     let rawJobs: Record<string, unknown>[] = [];
     let provider = "";
     let providerError = "";
@@ -570,21 +510,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (rawJobs.length === 0 && rapidApiKey) {
-      try {
-        rawJobs = await fetchViaRapidAPI(rapidApiKey, body, url);
-        provider = "rapidapi";
-      } catch (error) {
-        const rapidErr = error instanceof Error ? error.message : "RapidAPI failed";
-        providerError = providerError ? `${providerError}; ${rapidErr}` : rapidErr;
-        console.error("[fantastic-jobs] RapidAPI error:", rapidErr);
-      }
-    }
-
     if (rawJobs.length === 0 && !provider) {
       throw new Error(
         providerError ||
-          "No jobs provider available. Configure Apify token + actor IDs (preferred) or RapidAPI key.",
+          "No jobs provider available. Configure Apify token + actor IDs in Settings.",
       );
     }
 
