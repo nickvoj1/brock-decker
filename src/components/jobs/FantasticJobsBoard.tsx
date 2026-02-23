@@ -1013,7 +1013,7 @@ export function FantasticJobsBoard() {
 
   return (
     <div className="space-y-4">
-      <Card>
+      <Card className="panel-shell">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -1021,13 +1021,14 @@ export function FantasticJobsBoard() {
               Job Board
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Badge variant="secondary">Shared API</Badge>
+              <Badge variant="secondary" className="font-mono-ui text-[10px] tracking-wide">Shared API</Badge>
               {lastRefresh ? <span className="text-xs text-muted-foreground">Last: {format(lastRefresh, "HH:mm")}</span> : null}
             </div>
           </div>
+          <p className="mono-label">Targeted PE / VC job intelligence</p>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="control-surface p-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
               placeholder="Title / Position (e.g. VP, Principal, CFO)"
               list="job-position-suggestions"
@@ -1075,7 +1076,7 @@ export function FantasticJobsBoard() {
             ))}
           </datalist>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="control-surface p-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <Input
               placeholder="Exclude keywords"
               value={filters.exclude}
@@ -1138,7 +1139,7 @@ export function FantasticJobsBoard() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="control-surface p-3 flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <Checkbox
                 checked={selectedSources.linkedin}
@@ -1187,7 +1188,7 @@ export function FantasticJobsBoard() {
           </div>
 
           {searchHistory.length > 0 ? (
-            <div className="rounded-md border border-border/60 p-3">
+            <div className="control-surface p-3">
               <p className="text-xs font-medium text-muted-foreground mb-2">Recent Searches</p>
               <div className="space-y-2 max-h-36 overflow-auto">
                 {searchHistory.slice(0, 8).map((h) => (
@@ -1216,7 +1217,7 @@ export function FantasticJobsBoard() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="panel-shell">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">{sortedJobs.length > 0 ? `${sortedJobs.length} Jobs Found` : "Job Results"}</CardTitle>
@@ -1262,15 +1263,15 @@ export function FantasticJobsBoard() {
               <p className="text-sm mt-2">Adjust filters or check Settings / Fantastic.jobs configuration.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-lg border border-border/40">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[220px]">Title</TableHead>
-                    <TableHead className="min-w-[140px]">Company</TableHead>
-                    <TableHead className="min-w-[140px]">Location</TableHead>
+                  <TableRow className="bg-muted/40">
+                    <TableHead className="min-w-[220px] mono-label">Title</TableHead>
+                    <TableHead className="min-w-[140px] mono-label">Company</TableHead>
+                    <TableHead className="min-w-[140px] mono-label">Location</TableHead>
                     <TableHead
-                      className="min-w-[120px] cursor-pointer hover:bg-muted/50"
+                      className="min-w-[120px] cursor-pointer hover:bg-muted/50 mono-label"
                       onClick={() => {
                         if (sortBy === "salary") setSortOrder((v) => (v === "asc" ? "desc" : "asc"));
                         else {
@@ -1282,7 +1283,7 @@ export function FantasticJobsBoard() {
                       Salary {sortBy === "salary" ? (sortOrder === "desc" ? "↓" : "↑") : ""}
                     </TableHead>
                     <TableHead
-                      className="min-w-[120px] cursor-pointer hover:bg-muted/50"
+                      className="min-w-[120px] cursor-pointer hover:bg-muted/50 mono-label"
                       onClick={() => {
                         if (sortBy === "posted") setSortOrder((v) => (v === "asc" ? "desc" : "asc"));
                         else {
@@ -1293,13 +1294,13 @@ export function FantasticJobsBoard() {
                     >
                       Posted {sortBy === "posted" ? (sortOrder === "desc" ? "↓" : "↑") : ""}
                     </TableHead>
-                    <TableHead className="min-w-[110px]">Source</TableHead>
-                    <TableHead className="w-[170px]">Actions</TableHead>
+                    <TableHead className="min-w-[110px] mono-label">Source</TableHead>
+                    <TableHead className="w-[170px] mono-label">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sortedJobs.map((job) => (
-                    <TableRow key={job.id} className="hover:bg-muted/30">
+                    <TableRow key={job.id} className="hover:bg-primary/5">
                       <TableCell>
                         <div className="font-medium">{job.title}</div>
                         <div className="flex gap-1 mt-1">

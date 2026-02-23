@@ -851,58 +851,80 @@ export default function SignalsDashboard() {
 
   return (
     <AppLayout title="Signals Dashboard" description="Recruitment Intel">
-      <div className="space-y-8">
+      <div className="space-y-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="space-y-1">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
-              Signals
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              PE/VC hiring intelligence across {Object.keys(REGION_CONFIG).length} regions
-            </p>
+        <div className="panel-shell p-4 md:p-6 space-y-4">
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+            <div className="space-y-2">
+              <p className="mono-label">Signals Command Center</p>
+              <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground">
+                Signals
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                PE/VC hiring intelligence across {Object.keys(REGION_CONFIG).length} regions
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleRegionalSurge}
+                disabled={isSurgeRunning || isRefreshing || isScraping || isHunting}
+                className="gap-2 h-10 px-5"
+              >
+                {isSurgeRunning || isRefreshing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Zap className="h-4 w-4" />
+                )}
+                {isSurgeRunning ? "Fetching..." : "Fetch Signals"}
+              </Button>
+              
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" className="h-10 w-10 control-surface">
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={handleHuntPEFunds} disabled={isHunting || isSurgeRunning}>
+                    <Target className="h-4 w-4 mr-2" />
+                    Hunt All Regions
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleScrapeJobs} disabled={isScraping || isRefreshing}>
+                    <Search className="h-4 w-4 mr-2" />
+                    Scrape Job Pages
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleExportCSV} disabled={filteredSignals.length === 0}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={handleRegionalSurge}
-              disabled={isSurgeRunning || isRefreshing || isScraping || isHunting}
-              className="gap-2 h-10 px-5"
-            >
-              {isSurgeRunning || isRefreshing ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Zap className="h-4 w-4" />
-              )}
-              {isSurgeRunning ? "Fetching..." : "Fetch Signals"}
-            </Button>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="h-10 w-10">
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={handleHuntPEFunds} disabled={isHunting || isSurgeRunning}>
-                  <Target className="h-4 w-4 mr-2" />
-                  Hunt All Regions
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleScrapeJobs} disabled={isScraping || isRefreshing}>
-                  <Search className="h-4 w-4 mr-2" />
-                  Scrape Job Pages
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleExportCSV} disabled={filteredSignals.length === 0}>
-                  <Download className="h-4 w-4 mr-2" />
-                  Export CSV
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <div className="meta-chip justify-between">
+              <span className="mono-label text-[10px]">Visible</span>
+              <span className="text-foreground font-semibold tabular-nums">{filteredSignals.length}</span>
+            </div>
+            <div className="meta-chip justify-between">
+              <span className="mono-label text-[10px]">Total</span>
+              <span className="text-foreground font-semibold tabular-nums">{signals.filter((s) => !s.is_dismissed).length}</span>
+            </div>
+            <div className="meta-chip justify-between">
+              <span className="mono-label text-[10px]">Pending</span>
+              <span className="text-foreground font-semibold tabular-nums">{pendingCount}</span>
+            </div>
+            <div className="meta-chip justify-between">
+              <span className="mono-label text-[10px]">Region</span>
+              <span className="text-foreground font-semibold">{REGION_CONFIG[activeRegion].label}</span>
+            </div>
           </div>
         </div>
 
         {/* Region Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {(Object.entries(REGION_CONFIG) as [Region, typeof REGION_CONFIG.europe][]).map(
             ([key, config]) => {
               const count = regionCounts[key] || 0;
@@ -911,15 +933,15 @@ export default function SignalsDashboard() {
                 <button
                   key={key}
                   onClick={() => setActiveRegion(key)}
-                  className={`relative p-5 rounded-xl border-2 text-left transition-all duration-200 ${
+                  className={`panel-shell relative p-4 rounded-xl text-left transition-all duration-200 ${
                     isActive
-                      ? "border-primary bg-primary/5 shadow-lg ring-1 ring-primary/20"
-                      : "border-border/30 hover:border-border/60 hover:shadow-sm bg-card"
+                      ? "border-primary/70 bg-primary/5 shadow-lg ring-1 ring-primary/30"
+                      : "border-border/50 hover:border-border/80 hover:shadow-sm bg-card"
                   }`}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <span className="text-2xl">{config.emoji}</span>
-                    <span className={`text-3xl font-bold tabular-nums tracking-tight ${isActive ? "text-primary" : "text-foreground"}`}>
+                    <span className={`text-3xl font-semibold tabular-nums tracking-tight ${isActive ? "text-primary" : "text-foreground"}`}>
                       {count}
                     </span>
                   </div>
@@ -936,7 +958,7 @@ export default function SignalsDashboard() {
         </div>
 
         {/* Tier summary */}
-        <div className="flex items-center gap-5 text-sm text-muted-foreground">
+        <div className="panel-shell flex flex-wrap items-center gap-4 p-3 text-sm text-muted-foreground">
           <span className="font-semibold text-foreground tabular-nums">{signals.filter(s => !s.is_dismissed).length} signals</span>
           <div className="h-4 w-px bg-border" />
           <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-destructive" /> Tier 1: {tierCounts.tier_1 || 0}</span>
@@ -946,7 +968,7 @@ export default function SignalsDashboard() {
 
         {/* Tabs: Signals vs Jobs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
-          <TabsList className="grid h-12 w-full max-w-lg grid-cols-2 rounded-xl border border-primary/30 bg-primary/5 p-1.5 shadow-sm">
+          <TabsList className="grid h-12 w-full max-w-xl grid-cols-2 rounded-xl border border-primary/40 bg-primary/5 p-1.5 shadow-sm">
             <TabsTrigger
               value="signals"
               className="gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
@@ -965,9 +987,9 @@ export default function SignalsDashboard() {
           
           <TabsContent value="signals" className="mt-6 space-y-5">
             {/* Filters Row */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="panel-shell flex flex-wrap items-center gap-3 p-3">
               {/* View Mode Toggle */}
-              <div className="flex items-center border rounded-lg overflow-hidden bg-muted/30">
+              <div className="flex items-center border border-border/60 rounded-lg overflow-hidden bg-muted/30">
                 <button
                   onClick={() => setViewMode("table")}
                   className={`p-2 transition-colors ${viewMode === "table" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
@@ -985,7 +1007,7 @@ export default function SignalsDashboard() {
               </div>
 
               <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TierFilter)}>
-                <SelectTrigger className="w-[160px] h-9 bg-card">
+                <SelectTrigger className="w-[160px] h-9 control-surface">
                   <SelectValue placeholder="Tier" />
                 </SelectTrigger>
                 <SelectContent className="bg-background border">
@@ -998,7 +1020,7 @@ export default function SignalsDashboard() {
               </Select>
 
               <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                <SelectTrigger className="w-[140px] h-9 bg-card">
+                <SelectTrigger className="w-[140px] h-9 control-surface">
                   <SelectValue placeholder="Sort" />
                 </SelectTrigger>
                 <SelectContent className="bg-background border">
@@ -1011,7 +1033,7 @@ export default function SignalsDashboard() {
               </Select>
 
               <Select value={datePreset} onValueChange={(v) => setDatePreset(v as DatePreset)}>
-                <SelectTrigger className="w-[150px] h-9 bg-card">
+                <SelectTrigger className="w-[150px] h-9 control-surface">
                   <SelectValue placeholder="Date" />
                 </SelectTrigger>
                 <SelectContent className="bg-background border">
@@ -1026,7 +1048,7 @@ export default function SignalsDashboard() {
               {datePreset === "custom" && (
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="h-9 justify-start text-left font-normal w-[240px]">
+                    <Button variant="outline" className="h-9 justify-start text-left font-normal w-[240px] control-surface">
                       <CalendarDays className="mr-2 h-4 w-4" />
                       {customDateRange?.from ? (
                         customDateRange.to ? (
@@ -1058,7 +1080,7 @@ export default function SignalsDashboard() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Must-match terms (e.g. fintech growth)"
-                  className="h-9 pl-8"
+                  className="h-9 pl-8 control-surface"
                 />
               </div>
 
@@ -1066,7 +1088,7 @@ export default function SignalsDashboard() {
                 value={excludeQuery}
                 onChange={(e) => setExcludeQuery(e.target.value)}
                 placeholder="Exclude terms (e.g. nordic, intern)"
-                className="h-9 w-full sm:w-[260px]"
+                className="h-9 w-full sm:w-[260px] control-surface"
               />
 
               <Button
@@ -1079,7 +1101,7 @@ export default function SignalsDashboard() {
               </Button>
 
               {fitOnly && (
-                <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5">
+                <div className="flex items-center gap-2 control-surface px-3 py-1.5">
                   <span className="text-xs text-muted-foreground whitespace-nowrap">
                     Fit ≥ {minFitScore}
                   </span>
@@ -1093,7 +1115,7 @@ export default function SignalsDashboard() {
                 </div>
               )}
 
-              <div className="flex items-center gap-2 bg-card border rounded-lg px-3 py-1.5">
+              <div className="flex items-center gap-2 control-surface px-3 py-1.5">
                 <span className="text-xs text-muted-foreground whitespace-nowrap">
                   Score ≥ {minScore}
                 </span>

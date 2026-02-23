@@ -247,7 +247,7 @@ export const SignalCard = memo(function SignalCard({
   };
   
   return (
-    <Card className="group border-border/30 hover:border-primary/20 transition-all duration-200 hover:shadow-md overflow-hidden rounded-xl">
+    <Card className="group panel-shell border-border/40 hover:border-primary/30 transition-all duration-200 hover:shadow-md overflow-hidden rounded-xl">
       <CardContent className="p-0">
         {/* Tier indicator bar */}
         <div className={`h-1 w-full ${tierConfig.dotColor}`} />
@@ -300,7 +300,7 @@ export const SignalCard = memo(function SignalCard({
                 )}
                 {/* AI Confidence */}
                 {signal.ai_confidence !== undefined && signal.ai_confidence > 0 && (
-                  <Badge variant="outline" className="text-xs text-muted-foreground">
+                  <Badge variant="outline" className="text-xs text-muted-foreground font-mono-ui">
                     {signal.ai_confidence}% conf
                   </Badge>
                 )}
@@ -465,6 +465,7 @@ export const SignalCard = memo(function SignalCard({
           {/* Meta & Source */}
           <div className="flex items-center justify-between pt-2 border-t border-border/20">
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="mono-label text-[9px]">Signal</span>
               {signal.source && (
                 <span className="truncate max-w-[120px]">{signal.source}</span>
               )}
