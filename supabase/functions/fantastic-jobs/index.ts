@@ -353,6 +353,7 @@ async function fetchViaApify(
   url: URL,
 ): Promise<Record<string, unknown>[]> {
   const keyword = getParam(body, url, "keyword");
+  const industryKeywords = getParam(body, url, "industry_keywords");
   const location = normalizeLocationExpression(getParam(body, url, "location"));
   const postedAfter = getParam(body, url, "posted_after", "7days");
   const salaryMin = getParam(body, url, "salary_min");
@@ -362,8 +363,10 @@ async function fetchViaApify(
   const timeRange = mapTimeRange(postedAfter);
   const maxItems = Math.min(Math.max(Number(limit) || 50, 10), 5000);
   const titleSearch = splitTerms(keyword);
+  const industrySearch = splitTerms(industryKeywords);
   const locationSearch = splitTerms(location);
   const actorLower = actorId.toLowerCase();
+  const isLinkedInActor = actorLower.includes("vigxjrrhqdtpue6m4") || actorLower.includes("advanced-linkedin-job-search-api");
   const isCareerActor = actorLower.includes("s3dtstzszwftavln5") || actorLower.includes("career-site-job-listing-api");
 
   const actorInput: Record<string, unknown> = {
@@ -377,6 +380,12 @@ async function fetchViaApify(
   };
 
   if (titleSearch.length > 0) actorInput.titleSearch = titleSearch;
+  if (industrySearch.length > 0) {
+    if (isCareerActor) actorInput.descriptionSearch = industrySearch;
+    if (isLinkedInActor) actorInput.OrganizationDescriptionSearch = industrySearch;
+    // Safety alias in case actor schema uses lower camel case.
+    if (isLinkedInActor) actorInput.organizationDescriptionSearch = industrySearch;
+  }
   if (locationSearch.length > 0) actorInput.locationSearch = locationSearch;
   if (salaryMin) actorInput.aiHasSalary = true;
   if (isCareerActor) actorInput.includeLinkedIn = true;
