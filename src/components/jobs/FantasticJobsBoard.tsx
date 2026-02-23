@@ -463,6 +463,7 @@ export function FantasticJobsBoard() {
   const [apolloContacts, setApolloContacts] = useState<ApolloJobContact[]>([]);
   const [apolloTargetJob, setApolloTargetJob] = useState<Job | null>(null);
   const [apolloModalOpen, setApolloModalOpen] = useState(false);
+  const [warnedOutdatedBackend, setWarnedOutdatedBackend] = useState(false);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => {
     try {
       const raw = localStorage.getItem(SEARCH_HISTORY_KEY);
@@ -575,6 +576,14 @@ export function FantasticJobsBoard() {
         const backendResult = await fetchViaBackend(mode);
         const incoming = backendResult.jobs;
         const diagnostics = backendResult.diagnostics;
+        if (!warnedOutdatedBackend && (!diagnostics || typeof diagnostics.returned !== "number")) {
+          toast({
+            title: "Backend update required",
+            description: "Job API is running an older function version that can filter out Apify rows. Deploy latest fantastic-jobs function.",
+            variant: "destructive",
+          });
+          setWarnedOutdatedBackend(true);
+        }
         const capped = incoming.slice(0, requestedCount);
         const withPEFlags = capped.map((job) => ({ ...job, is_pe_match: matchesPESignal(job) }));
         const peMatches = withPEFlags.filter((job) => job.is_pe_match).length;
@@ -642,7 +651,7 @@ export function FantasticJobsBoard() {
         setLoading(false);
       }
     },
-    [fetchViaBackend, toast, filters, requestedCount, strictPEOnly, searchHistory],
+    [fetchViaBackend, toast, filters, requestedCount, strictPEOnly, searchHistory, warnedOutdatedBackend],
   );
 
   const runSelectedSearch = () => {
