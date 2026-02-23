@@ -1,5 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { evaluateSignalQuality } from "../_shared/signal-quality.ts";
+import {
+  createSourceRunMetric,
+  fetchSourcePriorityMap,
+  rankSourcesByPriority,
+  saveSourceRunMetrics,
+  type SourceRunMetric,
+} from "../_shared/signal-source-quality.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -663,9 +670,12 @@ Deno.serve(async (req) => {
       pending: 0,
       byRegion: {} as Record<string, { validated: number; rejected: number; pending: number }>,
     };
+    const sourceRunMetrics: SourceRunMetric[] = [];
     
     for (const region of regionsToProcess) {
-      const sources = SOURCES[region as keyof typeof SOURCES] || [];
+      const staticSources = SOURCES[region as keyof typeof SOURCES] || [];
+      const sourcePriorityMap = await fetchSourcePriorityMap(supabase, "regional-surge", region, 21);
+      const sources = rankSourcesByPriority(staticSources, sourcePriorityMap);
       results.byRegion[region] = { validated: 0, rejected: 0, pending: 0 };
       
       console.log(`Processing ${sources.length} sources for ${region}...`);
@@ -673,6 +683,10 @@ Deno.serve(async (req) => {
       for (const source of sources) {
         console.log(`Collecting ${source.source}: ${source.url}`);
         const isRssSource = Boolean((source as { isRSS?: boolean }).isRSS);
+        const runMetric = createSourceRunMetric("regional-surge", region, source.source, source.url);
+        sourceRunMetrics.push(runMetric);
+        let sourceGeoConfidenceSum = 0;
+        let sourceGeoConfidenceCount = 0;
 
         let candidates: SignalCandidate[] = [];
         if (isRssSource) {
@@ -685,23 +699,35 @@ Deno.serve(async (req) => {
           candidates = extractArticleCandidatesFromMarkdown(scraped.content, source.url);
         }
 
-        if (candidates.length === 0) continue;
-        results.processed += candidates.length;
-
         const candidateLimit = isRssSource ? 20 : 8;
-        for (const candidate of candidates.slice(0, candidateLimit)) {
+        const candidatesForProcessing = candidates.slice(0, candidateLimit);
+        runMetric.candidates += candidatesForProcessing.length;
+        if (candidatesForProcessing.length === 0) continue;
+        results.processed += candidatesForProcessing.length;
+
+        for (const candidate of candidatesForProcessing) {
           const articleContent = candidate.content;
-          if (!articleContent || articleContent.length < 80) continue;
+          if (!articleContent || articleContent.length < 80) {
+            runMetric.rejected += 1;
+            continue;
+          }
 
           // Step 1: LLM Geo-Validation
           const geoResult = await validateRegionWithAI(articleContent, region);
-          if (!geoResult) continue;
+          if (!geoResult) {
+            runMetric.errors += 1;
+            continue;
+          }
+          runMetric.geo_validated += 1;
           
           const { company, detectedRegion, geoConfidence, rawContent } = geoResult;
+          sourceGeoConfidenceSum += Math.max(0, Math.min(100, Number(geoConfidence || 0)));
+          sourceGeoConfidenceCount += 1;
           
           // Reject if no company detected
           if (!company) {
             console.log(`Rejected: No company detected`);
+            runMetric.rejected += 1;
             results.rejected++;
             results.byRegion[region].rejected++;
             continue;
@@ -710,6 +736,7 @@ Deno.serve(async (req) => {
           // Reject if wrong region
           if (detectedRegion === "rejected" || (detectedRegion && detectedRegion !== region)) {
             console.log(`Rejected: Region mismatch (${detectedRegion} vs ${region})`);
+            runMetric.rejected += 1;
             results.rejected++;
             results.byRegion[region].rejected++;
             continue;
@@ -718,6 +745,7 @@ Deno.serve(async (req) => {
           // Self-learning check
           const shouldAutoReject = await checkSelfLearningRejection(supabase, company, region);
           if (shouldAutoReject) {
+            runMetric.rejected += 1;
             results.rejected++;
             results.byRegion[region].rejected++;
             continue;
@@ -750,10 +778,12 @@ Deno.serve(async (req) => {
           });
           if (!quality.accepted) {
             console.log(`Rejected by quality pipeline: ${quality.reason || "unknown"} :: ${title.slice(0, 80)}`);
+            runMetric.rejected += 1;
             results.rejected++;
             results.byRegion[region].rejected++;
             continue;
           }
+          runMetric.quality_passed += 1;
 
           const normalizedCompany = quality.company;
           const normalizedSignalType = quality.signalType;
@@ -780,6 +810,7 @@ Deno.serve(async (req) => {
             seenDedupeKeys.has(dedupeKey)
           ) {
             console.log(`Skipping duplicate: ${company} (${source.source})`);
+            runMetric.duplicates += 1;
             continue;
           }
           
@@ -818,25 +849,34 @@ Deno.serve(async (req) => {
           
           if (insertError) {
             console.error("Insert error:", insertError);
+            runMetric.errors += 1;
           } else {
+            runMetric.inserted += 1;
             if (urlKey) seenUrlKeys.add(urlKey);
             seenTitleKeys.add(titleKey);
             seenCompanyTypeKeys.add(companyTypeKey);
             seenDedupeKeys.add(dedupeKey);
             if (isPending) {
+              runMetric.pending += 1;
               results.pending++;
               results.byRegion[region].pending++;
             } else {
+              runMetric.validated += 1;
               results.validated++;
               results.byRegion[region].validated++;
             }
           }
         }
+
+        runMetric.avg_geo_confidence = sourceGeoConfidenceCount > 0
+          ? Number((sourceGeoConfidenceSum / sourceGeoConfidenceCount).toFixed(2))
+          : 0;
         
         // Rate limit between sources
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    await saveSourceRunMetrics(supabase, sourceRunMetrics);
     
     console.log("Regional surge scrape complete:", results);
     
@@ -844,6 +884,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         success: true,
         ...results,
+        sourceRunMetricsSaved: sourceRunMetrics.length,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

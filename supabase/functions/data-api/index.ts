@@ -63,11 +63,42 @@ function isDisplayableSignal(row: any): boolean {
   if (!row?.company || typeof row.company !== "string" || row.company.trim().length < 2) {
     return false;
   }
+  const companyLower = row.company.trim().toLowerCase();
+  if (
+    companyLower.includes("market buyouts") ||
+    companyLower.includes("buyouts shop") ||
+    companyLower.includes("latest manager") ||
+    companyLower.includes("for debut") ||
+    companyLower.includes("bn for debut")
+  ) {
+    return false;
+  }
+
+  const strictDealRegion = normalizeTextForDedup(row?.details?.strict_deal_region || "");
+  const rowRegion = normalizeTextForDedup(row?.region || "");
+  if (strictDealRegion && rowRegion && strictDealRegion !== rowRegion) {
+    return false;
+  }
 
   const title = String(row?.title || "");
   const description = typeof row?.description === "string" ? row.description : "";
   const hasHttpUrl = row?.url && typeof row.url === "string" && row.url.startsWith("http");
   const mustHave = Boolean(row?.details?.must_have);
+  const signalType = normalizeTextForDedup(row?.signal_type || "");
+  const isFundCloseLike =
+    signalType === "funding" &&
+    /\b(fund close|final close|first close|closes fund|closed fund|raises fund|hard cap)\b/i.test(
+      `${title} ${description}`,
+    );
+
+  if (isFundCloseLike) {
+    const amountNum = Number(row?.amount);
+    const hasAmount = Number.isFinite(amountNum) && amountNum > 0;
+    if (!hasAmount) {
+      const parsed = extractAmountFromText(`${title} ${description}`);
+      if (!parsed) return false;
+    }
+  }
   
   // Prefer rows with clear news headline semantics.
   if (hasHttpUrl) {
@@ -1491,6 +1522,104 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ success: true, data: { signals: signals || [], regionCounts, tierCounts } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "get-signal-source-runs") {
+      const { region, pipeline, days } = data || {};
+      const lookbackDays = Math.max(1, Math.min(60, Number(days || 14)));
+      const cutoffDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+
+      let query = supabase
+        .from("signal_source_runs")
+        .select("*")
+        .gte("created_at", cutoffDate)
+        .order("created_at", { ascending: false })
+        .limit(2500);
+
+      if (region) query = query.eq("region", region);
+      if (pipeline) query = query.eq("pipeline", pipeline);
+
+      const { data: runs, error } = await query;
+      if (error) throw error;
+
+      const aggregate = new Map<string, any>();
+      for (const row of runs || []) {
+        const sourceUrl = normalizeUrlForDedup(row.source_url || row.source_name || "unknown");
+        const key = `${row.pipeline || "unknown"}|${row.region || "unknown"}|${sourceUrl}`;
+        const existing = aggregate.get(key) || {
+          pipeline: row.pipeline || "unknown",
+          region: row.region || "unknown",
+          source_name: row.source_name || sourceUrl,
+          source_url: row.source_url || sourceUrl,
+          runs: 0,
+          candidates: 0,
+          geo_validated: 0,
+          quality_passed: 0,
+          inserted: 0,
+          rejected: 0,
+          duplicates: 0,
+          errors: 0,
+          pending: 0,
+          validated: 0,
+          avg_geo_confidence: 0,
+        };
+
+        const nextRuns = existing.runs + 1;
+        const incomingGeo = Number(row.avg_geo_confidence || 0);
+        existing.avg_geo_confidence = Number.isFinite(incomingGeo)
+          ? ((existing.avg_geo_confidence * existing.runs + incomingGeo) / nextRuns)
+          : existing.avg_geo_confidence;
+        existing.runs = nextRuns;
+        existing.candidates += Number(row.candidates || 0);
+        existing.geo_validated += Number(row.geo_validated || 0);
+        existing.quality_passed += Number(row.quality_passed || 0);
+        existing.inserted += Number(row.inserted || 0);
+        existing.rejected += Number(row.rejected || 0);
+        existing.duplicates += Number(row.duplicates || 0);
+        existing.errors += Number(row.errors || 0);
+        existing.pending += Number(row.pending || 0);
+        existing.validated += Number(row.validated || 0);
+
+        aggregate.set(key, existing);
+      }
+
+      const summary = Array.from(aggregate.values())
+        .map((row) => {
+          const candidates = Math.max(1, Number(row.candidates || 0));
+          const insertedRate = Number(row.inserted || 0) / candidates;
+          const qualityRate = Number(row.quality_passed || 0) / candidates;
+          const duplicateRate = Number(row.duplicates || 0) / candidates;
+          const rejectRate = Number(row.rejected || 0) / candidates;
+          const score = Math.max(
+            0,
+            Math.min(
+              100,
+              insertedRate * 60 + qualityRate * 25 + (Number(row.avg_geo_confidence || 0) / 100) * 20 - duplicateRate * 15 - rejectRate * 10,
+            ),
+          );
+          return {
+            ...row,
+            avg_geo_confidence: Number(Number(row.avg_geo_confidence || 0).toFixed(2)),
+            inserted_rate: Number(insertedRate.toFixed(4)),
+            quality_rate: Number(qualityRate.toFixed(4)),
+            duplicate_rate: Number(duplicateRate.toFixed(4)),
+            reject_rate: Number(rejectRate.toFixed(4)),
+            score: Number(score.toFixed(2)),
+          };
+        })
+        .sort((a, b) => b.score - a.score || b.inserted - a.inserted)
+        .slice(0, 120);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            runs: runs || [],
+            summary,
+          },
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 

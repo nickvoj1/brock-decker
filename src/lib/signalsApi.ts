@@ -46,6 +46,29 @@ export interface SignalsResponse {
   tierCounts: Record<string, number>;
 }
 
+export interface SignalSourceRunSummaryRow {
+  pipeline: string;
+  region: string;
+  source_name: string;
+  source_url: string;
+  runs: number;
+  candidates: number;
+  geo_validated: number;
+  quality_passed: number;
+  inserted: number;
+  rejected: number;
+  duplicates: number;
+  errors: number;
+  pending: number;
+  validated: number;
+  avg_geo_confidence: number;
+  inserted_rate: number;
+  quality_rate: number;
+  duplicate_rate: number;
+  reject_rate: number;
+  score: number;
+}
+
 interface DataApiResponse<T = unknown> {
   success: boolean;
   data?: T;
@@ -151,6 +174,21 @@ export async function getSignals(profileName: string, region?: string) {
       signals: hydrateSignalAmounts(response.data.signals),
     },
   };
+}
+
+export async function getSignalSourceRuns(
+  profileName: string,
+  opts?: { region?: string; pipeline?: string; days?: number },
+) {
+  return callDataApi<{ runs: Record<string, unknown>[]; summary: SignalSourceRunSummaryRow[] }>(
+    "get-signal-source-runs",
+    profileName,
+    {
+      region: opts?.region,
+      pipeline: opts?.pipeline,
+      days: opts?.days,
+    },
+  );
 }
 
 export async function dismissSignal(profileName: string, signalId: string) {

@@ -1,5 +1,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.91.1'
 import { evaluateSignalQuality } from '../_shared/signal-quality.ts'
+import {
+  createSourceRunMetric,
+  fetchSourcePriorityMap,
+  normalizeSourceUrl,
+  saveSourceRunMetrics,
+  type SourceRunMetric,
+} from '../_shared/signal-source-quality.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -237,6 +244,25 @@ function resolveSourceHost(url?: string | null): string {
   }
 }
 
+function sourceMetricUrl(sourceHost: string): string {
+  const host = String(sourceHost || '').trim().toLowerCase()
+  if (/^[a-z0-9.-]+\.[a-z]{2,}$/.test(host)) {
+    return `https://${host}`
+  }
+  return `https://source.local/${encodeURIComponent(host || 'unknown')}`
+}
+
+function sourcePriorityForHost(priorityMap: Record<string, number>, sourceHost: string): number {
+  const key = normalizeSourceUrl(sourceMetricUrl(sourceHost))
+  return priorityMap[key] ?? 0.45
+}
+
+type SourceMetricState = {
+  metric: SourceRunMetric
+  geoConfidenceSum: number
+  geoConfidenceCount: number
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -268,6 +294,7 @@ Deno.serve(async (req) => {
 
     const allParsed: ParsedSignal[] = []
     const regionResults: Record<string, { searched: number; parsed: number; inserted: number }> = {}
+    const sourceRunMetrics: SourceRunMetric[] = []
 
     const dedupeCutoffIso = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString()
     const { data: recentSignals } = await supabase
@@ -312,9 +339,37 @@ Deno.serve(async (req) => {
 
       console.log(`Hunting PE funds in ${region}...`)
 
+      const regionSourceStats = new Map<string, SourceMetricState>()
+      const getRegionSourceState = (sourceHost: string): SourceMetricState => {
+        const key = String(sourceHost || '').trim().toLowerCase() || 'unknown'
+        const existing = regionSourceStats.get(key)
+        if (existing) return existing
+        const created: SourceMetricState = {
+          metric: createSourceRunMetric('hunt-pe-funds', region, sourceHost || 'Unknown', sourceMetricUrl(sourceHost)),
+          geoConfidenceSum: 0,
+          geoConfidenceCount: 0,
+        }
+        regionSourceStats.set(key, created)
+        return created
+      }
+
       try {
-        const searchResults = await searchSerper(query, serperKey)
+        const sourcePriorityMap = await fetchSourcePriorityMap(supabase, 'hunt-pe-funds', region, 21)
+        const searchResultsRaw = await searchSerper(query, serperKey)
+        const searchResults = [...searchResultsRaw].sort((a, b) => {
+          const aHost = resolveSourceHost(a.link)
+          const bHost = resolveSourceHost(b.link)
+          const scoreDiff = sourcePriorityForHost(sourcePriorityMap, bHost) - sourcePriorityForHost(sourcePriorityMap, aHost)
+          if (Math.abs(scoreDiff) > 0.0001) return scoreDiff
+          return 0
+        })
         console.log(`Serper returned ${searchResults.length} results for ${region}`)
+
+        for (const result of searchResults) {
+          const sourceHost = resolveSourceHost(result.link)
+          const state = getRegionSourceState(sourceHost)
+          state.metric.candidates += 1
+        }
 
         const parsed = await parseWithAI(searchResults, region, lovableKey)
         console.log(`AI parsed ${parsed.length} valid signals for ${region}`)
@@ -328,6 +383,8 @@ Deno.serve(async (req) => {
         const acceptedForOutput: ParsedSignal[] = []
         for (const signal of filtered) {
           const source = resolveSourceHost(signal.url)
+          const sourceState = getRegionSourceState(source)
+          sourceState.metric.geo_validated += 1
           const description = `${signal.fund_name}${signal.key_people && signal.key_people !== 'N/A' ? ` • Key People: ${signal.key_people}` : ''}`
           const fallbackAmount = parseAmountToMillions(signal.size)
           const fallbackCurrency = detectCurrency(signal.size)
@@ -345,8 +402,18 @@ Deno.serve(async (req) => {
           })
           if (!quality.accepted) {
             console.log(`Skipping by quality pipeline (${quality.reason || 'unknown'}): ${signal.summary.slice(0, 60)}...`)
+            sourceState.metric.rejected += 1
             continue
           }
+          sourceState.metric.quality_passed += 1
+          const geoConfidenceGuess =
+            quality.detectedRegion === quality.expectedRegion
+              ? 95
+              : quality.detectedRegion
+                ? 35
+                : 72
+          sourceState.geoConfidenceSum += geoConfidenceGuess
+          sourceState.geoConfidenceCount += 1
           qualityAccepted++
           acceptedForOutput.push(signal)
 
@@ -374,6 +441,7 @@ Deno.serve(async (req) => {
             seenCompanyTypeKeys.has(companyTypeKey) ||
             seenDedupeKeys.has(dedupeKey)
           ) {
+            sourceState.metric.duplicates += 1
             continue
           }
 
@@ -415,8 +483,11 @@ Deno.serve(async (req) => {
           const { error: insertErr } = await supabase.from('signals').insert(row)
           if (insertErr) {
             console.error(`Failed to insert signal for ${signal.firm}:`, insertErr.message)
+            sourceState.metric.errors += 1
           } else {
             inserted++
+            sourceState.metric.inserted += 1
+            sourceState.metric.validated += 1
             if (urlKey) seenUrlKeys.add(urlKey)
             seenTitleKeys.add(titleKey)
             seenCompanyTypeKeys.add(companyTypeKey)
@@ -435,7 +506,16 @@ Deno.serve(async (req) => {
         console.error(`Error hunting ${region}:`, regionErr)
         regionResults[region] = { searched: 0, parsed: 0, inserted: 0 }
       }
+
+      for (const state of regionSourceStats.values()) {
+        state.metric.avg_geo_confidence = state.geoConfidenceCount > 0
+          ? Number((state.geoConfidenceSum / state.geoConfidenceCount).toFixed(2))
+          : 0
+        sourceRunMetrics.push(state.metric)
+      }
     }
+
+    await saveSourceRunMetrics(supabase, sourceRunMetrics)
 
     const totalInserted = Object.values(regionResults).reduce((s, r) => s + r.inserted, 0)
 
@@ -444,6 +524,7 @@ Deno.serve(async (req) => {
       totalInserted,
       totalParsed: allParsed.length,
       regionResults,
+      sourceRunMetricsSaved: sourceRunMetrics.length,
       signals: allParsed,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
