@@ -266,25 +266,28 @@
   .signals-flat-table th,
   .signals-flat-table td {
     background-image: none !important;
-    background-color: hsl(var(--card)) !important;
+    background-color: #ffffff !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+    mix-blend-mode: normal !important;
   }
 
   .signals-flat-table th {
-    color: hsl(var(--foreground) / 0.78) !important;
+    color: #4b5563 !important;
     font-weight: 600 !important;
   }
 
   .signals-flat-table td {
-    color: hsl(var(--foreground) / 0.9) !important;
+    color: #1f2937 !important;
   }
 
   .signals-flat-table .text-muted-foreground {
-    color: hsl(var(--foreground) / 0.74) !important;
+    color: #4b5563 !important;
   }
 
   .signals-flat-table tbody tr:hover,
   .signals-flat-table tbody tr:hover td {
-    background-color: hsl(var(--muted) / 0.45) !important;
+    background-color: #f7f7f8 !important;
   }
 
   .depth-header {
