@@ -384,6 +384,51 @@ function uniqueCaseInsensitive(values: string[]): string[] {
   return out;
 }
 
+type FilterTokenMode = "keyword" | "location";
+
+function parseFilterTokens(value: string, mode: FilterTokenMode): string[] {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  const split = raw
+    .split(/\s+OR\s+|\||,/i)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const normalized = split.map((token) => (mode === "location" ? normalizeLocationToken(token) : token));
+  return uniqueCaseInsensitive(normalized);
+}
+
+function serializeFilterTokens(tokens: string[], mode: FilterTokenMode): string {
+  const normalized = uniqueCaseInsensitive(
+    tokens
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .map((token) => (mode === "location" ? normalizeLocationToken(token) : token)),
+  );
+  if (normalized.length === 0) return "";
+  if (mode === "location") return normalizeLocationExpression(normalized.join(" OR "));
+  return normalized.join(" OR ");
+}
+
+function addTokenToFilterExpression(currentValue: string, token: string, mode: FilterTokenMode): string {
+  const trimmed = String(token || "").trim();
+  if (!trimmed) return currentValue;
+  const existing = parseFilterTokens(currentValue, mode);
+  return serializeFilterTokens([...existing, trimmed], mode);
+}
+
+function removeTokenFromFilterExpression(currentValue: string, token: string, mode: FilterTokenMode): string {
+  const target = String(token || "").trim().toLowerCase();
+  if (!target) return currentValue;
+  const nextTokens = parseFilterTokens(currentValue, mode).filter((value) => value.toLowerCase() !== target);
+  return serializeFilterTokens(nextTokens, mode);
+}
+
+function hasFilterToken(currentValue: string, token: string, mode: FilterTokenMode): boolean {
+  const target = String(token || "").trim().toLowerCase();
+  if (!target) return false;
+  return parseFilterTokens(currentValue, mode).some((value) => value.toLowerCase() === target);
+}
+
 function buildSuggestions(
   defaults: string[],
   historyValues: string[],
@@ -526,6 +571,8 @@ export function FantasticJobsBoard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [industryKeywordInput, setIndustryKeywordInput] = useState("");
+  const [locationInput, setLocationInput] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("all");
   const [sourceTab, setSourceTab] = useState<SourceTab>("all");
   const [selectedSources, setSelectedSources] = useState({ linkedin: true, career: true });
@@ -598,6 +645,64 @@ export function FantasticJobsBoard() {
     () => buildSuggestions(DEFAULT_LOCATION_SUGGESTIONS, searchHistory.map((h) => h.filters.location || ""), "location"),
     [searchHistory],
   );
+
+  const selectedIndustryKeywordTokens = useMemo(
+    () => parseFilterTokens(filters.industryKeywords, "keyword"),
+    [filters.industryKeywords],
+  );
+
+  const selectedLocationTokens = useMemo(
+    () => parseFilterTokens(filters.location, "location"),
+    [filters.location],
+  );
+
+  const addIndustryKeyword = useCallback((keyword: string) => {
+    setFilters((f) => ({
+      ...f,
+      industryKeywords: addTokenToFilterExpression(f.industryKeywords, keyword, "keyword"),
+    }));
+    setIndustryKeywordInput("");
+  }, []);
+
+  const toggleIndustryKeyword = useCallback((keyword: string) => {
+    setFilters((f) => ({
+      ...f,
+      industryKeywords: hasFilterToken(f.industryKeywords, keyword, "keyword")
+        ? removeTokenFromFilterExpression(f.industryKeywords, keyword, "keyword")
+        : addTokenToFilterExpression(f.industryKeywords, keyword, "keyword"),
+    }));
+  }, []);
+
+  const removeIndustryKeyword = useCallback((keyword: string) => {
+    setFilters((f) => ({
+      ...f,
+      industryKeywords: removeTokenFromFilterExpression(f.industryKeywords, keyword, "keyword"),
+    }));
+  }, []);
+
+  const addLocation = useCallback((location: string) => {
+    setFilters((f) => ({
+      ...f,
+      location: addTokenToFilterExpression(f.location, location, "location"),
+    }));
+    setLocationInput("");
+  }, []);
+
+  const toggleLocation = useCallback((location: string) => {
+    setFilters((f) => ({
+      ...f,
+      location: hasFilterToken(f.location, location, "location")
+        ? removeTokenFromFilterExpression(f.location, location, "location")
+        : addTokenToFilterExpression(f.location, location, "location"),
+    }));
+  }, []);
+
+  const removeLocation = useCallback((location: string) => {
+    setFilters((f) => ({
+      ...f,
+      location: removeTokenFromFilterExpression(f.location, location, "location"),
+    }));
+  }, []);
 
   const fetchViaBackend = useCallback(
     async (mode: SearchMode, offset = 0): Promise<FetchJobsResult> => {
@@ -810,9 +915,16 @@ export function FantasticJobsBoard() {
     });
   }, [scopedJobs, sortBy, sortOrder]);
 
-  const clearFilters = () =>
+  const clearFilters = () => {
     setFilters({ ...DEFAULT_FILTERS, title: "", industryKeywords: "", location: "", industry: "all", jobsPerSearch: "10" });
-  const resetToDefaults = () => setFilters(DEFAULT_FILTERS);
+    setIndustryKeywordInput("");
+    setLocationInput("");
+  };
+  const resetToDefaults = () => {
+    setFilters(DEFAULT_FILTERS);
+    setIndustryKeywordInput("");
+    setLocationInput("");
+  };
 
   const formatDate = (dateStr: string) => {
     try {
@@ -1029,51 +1141,165 @@ export function FantasticJobsBoard() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="mono-label">Search Targets</p>
-          <div className="control-surface p-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <Input
-              placeholder="Title / Position (e.g. VP, Principal, CFO)"
-              list="job-position-suggestions"
-              value={filters.title}
-              onChange={(e) => setFilters((f) => ({ ...f, title: e.target.value }))}
-            />
-            <Input
-              placeholder="Industry keywords (e.g. buyout, infra, secondaries)"
-              list="job-industry-keyword-suggestions"
-              value={filters.industryKeywords}
-              onChange={(e) => setFilters((f) => ({ ...f, industryKeywords: e.target.value }))}
-            />
-            <Input
-              placeholder="Company include (optional)"
-              value={filters.company}
-              onChange={(e) => setFilters((f) => ({ ...f, company: e.target.value }))}
-            />
-            <Input
-              placeholder="Location (London, New York)"
-              list="job-location-suggestions"
-              value={filters.location}
-              onChange={(e) => setFilters((f) => ({ ...f, location: e.target.value }))}
-              onBlur={(e) =>
-                setFilters((f) => ({
-                  ...f,
-                  location: normalizeLocationExpression(e.target.value),
-                }))
-              }
-            />
+          <div className="control-surface p-3 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                placeholder="Title / Position (e.g. VP, Principal, CFO)"
+                list="job-position-suggestions"
+                value={filters.title}
+                onChange={(e) => setFilters((f) => ({ ...f, title: e.target.value }))}
+              />
+              <Input
+                placeholder="Company include (optional)"
+                value={filters.company}
+                onChange={(e) => setFilters((f) => ({ ...f, company: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="rounded-md border border-border/50 bg-background/80 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">Industry Keywords (multi-select)</p>
+                  {selectedIndustryKeywordTokens.length > 0 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setFilters((f) => ({ ...f, industryKeywords: "" }))}
+                    >
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Add keyword and press Enter"
+                    value={industryKeywordInput}
+                    onChange={(e) => setIndustryKeywordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      addIndustryKeyword(industryKeywordInput);
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!industryKeywordInput.trim()}
+                    onClick={() => addIndustryKeyword(industryKeywordInput)}
+                  >
+                    Add
+                  </Button>
+                </div>
+
+                {selectedIndustryKeywordTokens.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedIndustryKeywordTokens.map((keyword) => (
+                      <Badge key={`kw-${keyword}`} variant="secondary" className="gap-1">
+                        {keyword}
+                        <button
+                          type="button"
+                          onClick={() => removeIndustryKeyword(keyword)}
+                          className="rounded-sm hover:bg-muted p-0.5"
+                          aria-label={`Remove ${keyword}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Pick one or more industry keywords below.</p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-auto rounded-md border border-border/40 bg-background p-2">
+                  {industryKeywordSuggestions.map((value) => (
+                    <label key={`kw-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <Checkbox
+                        checked={hasFilterToken(filters.industryKeywords, value, "keyword")}
+                        onCheckedChange={() => toggleIndustryKeyword(value)}
+                      />
+                      <span className="truncate">{value}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-background/80 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-muted-foreground">Locations (multi-select)</p>
+                  {selectedLocationTokens.length > 0 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setFilters((f) => ({ ...f, location: "" }))}
+                    >
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Add location and press Enter"
+                    value={locationInput}
+                    onChange={(e) => setLocationInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      addLocation(locationInput);
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!locationInput.trim()}
+                    onClick={() => addLocation(locationInput)}
+                  >
+                    Add
+                  </Button>
+                </div>
+
+                {selectedLocationTokens.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedLocationTokens.map((location) => (
+                      <Badge key={`loc-${location}`} variant="secondary" className="gap-1">
+                        {location}
+                        <button
+                          type="button"
+                          onClick={() => removeLocation(location)}
+                          className="rounded-sm hover:bg-muted p-0.5"
+                          aria-label={`Remove ${location}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Pick one or more locations below.</p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-auto rounded-md border border-border/40 bg-background p-2">
+                  {locationSuggestions.map((value) => (
+                    <label key={`loc-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <Checkbox
+                        checked={hasFilterToken(filters.location, value, "location")}
+                        onCheckedChange={() => toggleLocation(value)}
+                      />
+                      <span className="truncate">{value}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
           <datalist id="job-position-suggestions">
             {positionSuggestions.map((value) => (
               <option key={`pos-${value}`} value={value} />
-            ))}
-          </datalist>
-          <datalist id="job-industry-keyword-suggestions">
-            {industryKeywordSuggestions.map((value) => (
-              <option key={`ind-${value}`} value={value} />
-            ))}
-          </datalist>
-          <datalist id="job-location-suggestions">
-            {locationSuggestions.map((value) => (
-              <option key={`loc-${value}`} value={value} />
             ))}
           </datalist>
 
