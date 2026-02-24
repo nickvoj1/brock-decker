@@ -1176,18 +1176,34 @@ Deno.serve(async (req) => {
       new Set(
         searchLocations
           .map((loc) => {
-            const lookup = normalizeLocationLookup(loc)
+            const raw = String(loc || '').trim()
+            const lookup = normalizeLocationLookup(raw)
             const slugLookup = lookup.replace(/\s+/g, '-')
             if (locationLabels[lookup]) return locationLabels[lookup]
             if (locationLabels[slugLookup]) return locationLabels[slugLookup]
 
-            const normalizedCountry = normalizeCountry(loc)
-            if (normalizedCountry && normalizedCountry !== lookup) {
+            if (raw.includes(',')) {
+              const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
+              if (parts.length > 1) {
+                const cityLookup = normalizeLocationLookup(parts[0])
+                const citySlugLookup = cityLookup.replace(/\s+/g, '-')
+                if (locationLabels[cityLookup]) return locationLabels[cityLookup]
+                if (locationLabels[citySlugLookup]) return locationLabels[citySlugLookup]
+
+                const countryToken = normalizeCountry(parts[parts.length - 1])
+                if (countryToken) {
+                  return `${parts[0]}, ${countryTokenToQueryLabel(countryToken)}`
+                }
+              }
+            }
+
+            const normalizedCountry = normalizeCountry(raw)
+            if (normalizedCountry && (isLocationCountryOnly(raw) || normalizedCountry !== lookup)) {
               return countryTokenToQueryLabel(normalizedCountry)
             }
 
             // Preserve explicit city/country formats from upstream payloads.
-            return String(loc || '').trim()
+            return raw
           })
           .filter(Boolean)
       )
