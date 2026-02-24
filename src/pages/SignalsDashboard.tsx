@@ -964,7 +964,7 @@ export default function SignalsDashboard() {
           
           <TabsContent value="signals" className="mt-6 space-y-5">
             {/* Filters Row */}
-            <div className="panel-shell p-3 space-y-3">
+            <div className="rounded-xl border border-border/65 bg-card p-3 space-y-3 shadow-sm">
               <div className="flex flex-wrap items-center gap-3">
                 <p className="mono-label">Filter Stack</p>
                 <span className="meta-chip">{REGION_CONFIG[activeRegion].label}</span>
