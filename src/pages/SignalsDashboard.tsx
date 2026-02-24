@@ -830,11 +830,6 @@ export default function SignalsDashboard() {
     return filtered;
   }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
-  // Count pending signals for badge
-  const pendingCount = useMemo(() => {
-    return signals.filter(s => s.region === activeRegion && !s.user_feedback && !s.validated_region && !s.is_dismissed).length;
-  }, [signals, activeRegion]);
-
   if (!profileName) {
     return (
       <AppLayout title="Signals Dashboard" description="Recruitment intel">
@@ -903,50 +898,6 @@ export default function SignalsDashboard() {
             </div>
           </div>
           
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            <div className="kpi-tile">
-              <div className="relative z-[1] flex items-start justify-between">
-                <div>
-                  <p className="kpi-label">Visible Signals</p>
-                  <p className="kpi-value">{filteredSignals.length}</p>
-                  <p className="kpi-meta">After filters</p>
-                </div>
-                <Filter className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-            <div className="kpi-tile">
-              <div className="relative z-[1] flex items-start justify-between">
-                <div>
-                  <p className="kpi-label">Total Signals</p>
-                  <p className="kpi-value">{signals.filter((s) => !s.is_dismissed).length}</p>
-                  <p className="kpi-meta">All active rows</p>
-                </div>
-                <Briefcase className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-            <div className="kpi-tile">
-              <div className="relative z-[1] flex items-start justify-between">
-                <div>
-                  <p className="kpi-label">Pending Review</p>
-                  <p className="kpi-value">{pendingCount}</p>
-                  <p className="kpi-meta">Needs validation</p>
-                </div>
-                <Target className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-            <div className="kpi-tile">
-              <div className="relative z-[1] flex items-start justify-between">
-                <div>
-                  <p className="kpi-label">Active Region</p>
-                  <p className="text-lg md:text-xl font-semibold tracking-tight text-foreground">
-                    {REGION_CONFIG[activeRegion].label}
-                  </p>
-                  <p className="kpi-meta">Current workspace</p>
-                </div>
-                <Check className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Region Cards */}
@@ -959,7 +910,7 @@ export default function SignalsDashboard() {
                 <button
                   key={key}
                   onClick={() => setActiveRegion(key)}
-                  className={`panel-shell relative p-4 rounded-xl text-left transition-all duration-200 ${
+                  className={`panel-shell interactive-lift relative p-4 rounded-xl text-left transition-all duration-200 ${
                     isActive
                       ? "border-primary/70 bg-primary/5 shadow-lg ring-1 ring-primary/30"
                       : "border-border/50 hover:border-border/80 hover:shadow-sm bg-card"
@@ -994,17 +945,17 @@ export default function SignalsDashboard() {
 
         {/* Tabs: Signals vs Jobs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
-          <TabsList className="grid h-12 w-full max-w-xl grid-cols-2 rounded-xl border border-primary/40 bg-primary/5 p-1.5 shadow-sm">
+          <TabsList className="control-surface grid h-12 w-full max-w-xl grid-cols-2 rounded-xl border border-primary/40 bg-primary/5 p-1.5 shadow-sm">
             <TabsTrigger
               value="signals"
-              className="gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+              className="interactive-lift gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
             >
               <Sparkles className="h-4 w-4" />
               Signals Feed
             </TabsTrigger>
             <TabsTrigger
               value="jobboard"
-              className="gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+              className="interactive-lift gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
             >
               <Search className="h-4 w-4" />
               Job Board

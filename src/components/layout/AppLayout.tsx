@@ -23,7 +23,7 @@ export function AppLayout({ children, title, description }: AppLayoutProps) {
         <div className="min-h-screen flex w-full tech-grid-bg">
           <AppSidebar />
           <SidebarInset className="flex-1 min-w-0">
-            <header className="sticky top-0 z-30 flex h-16 md:h-[4.5rem] items-center justify-between gap-4 border-b border-border/70 bg-background/85 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 px-4 md:px-6">
+            <header className="depth-header sticky top-0 z-30 flex h-16 md:h-[4.5rem] items-center justify-between gap-4 px-4 md:px-6">
               <div className="flex items-center gap-4">
                 <SidebarTrigger className="-ml-1 h-8 w-8 rounded-lg border border-border/60 bg-card hover:bg-accent/80" />
                 <div className="flex flex-col gap-0.5">

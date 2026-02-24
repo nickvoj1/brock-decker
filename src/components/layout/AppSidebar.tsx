@@ -44,7 +44,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar className="border-r border-sidebar-border bg-sidebar/95 backdrop-blur-sm" collapsible="icon">
+    <Sidebar className="depth-sidebar border-r border-sidebar-border bg-sidebar/95 backdrop-blur-sm" collapsible="icon">
       <SidebarHeader className="px-2 py-2 border-b border-sidebar-border/70">
         <div className="flex items-center justify-start">
           <img
@@ -72,7 +72,7 @@ export function AppSidebar() {
                     <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
                       <NavLink
                         to={item.url}
-                        className={`group flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
+                        className={`interactive-lift group flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
                           isActive
                             ? "border-primary/30 bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-sm"
                             : "border-transparent text-sidebar-foreground/70 hover:border-sidebar-border/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
@@ -102,7 +102,7 @@ export function AppSidebar() {
                       <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
                         <NavLink
                           to={item.url}
-                          className={`group flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
+                          className={`interactive-lift group flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
                             isActive
                               ? "border-primary/40 bg-primary/10 text-primary font-medium"
                               : "border-transparent text-primary/70 hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
