@@ -479,37 +479,82 @@ function normalizeLocationSlug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-function inferLocationsForEnrichment(location: string): string[] {
-  const lower = (location || "").toLowerCase();
-  const mapped: string[] = [];
-  if (lower.includes("london")) mapped.push("london");
-  if (lower.includes("new york") || lower.includes("nyc")) mapped.push("new-york");
-  if (lower.includes("boston")) mapped.push("boston");
-  if (lower.includes("san francisco")) mapped.push("san-francisco");
-  if (lower.includes("los angeles")) mapped.push("los-angeles");
-  if (lower.includes("chicago")) mapped.push("chicago");
-  if (lower.includes("miami")) mapped.push("miami");
-  if (lower.includes("dubai")) mapped.push("dubai");
-  if (lower.includes("abu dhabi")) mapped.push("abu-dhabi");
+const NON_GEOGRAPHIC_LOCATION_TERMS = new Set([
+  "remote",
+  "hybrid",
+  "anywhere",
+  "worldwide",
+  "global",
+  "work from home",
+  "wfh",
+  "virtual",
+]);
 
-  const rawParts = (location || "")
+const ENRICH_LOCATION_ALIASES: Record<string, string> = {
+  london: "london",
+  "united kingdom": "united-kingdom",
+  uk: "united-kingdom",
+  england: "united-kingdom",
+  "new york": "new-york",
+  nyc: "new-york",
+  boston: "boston",
+  "san francisco": "san-francisco",
+  "los angeles": "los-angeles",
+  chicago: "chicago",
+  miami: "miami",
+  usa: "united-states",
+  "united states": "united-states",
+  germany: "germany",
+  france: "france",
+  netherlands: "netherlands",
+  switzerland: "switzerland",
+  dubai: "dubai",
+  "abu dhabi": "abu-dhabi",
+  uae: "united-arab-emirates",
+  "united arab emirates": "united-arab-emirates",
+};
+
+function normalizeLocationLookup(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[().]/g, " ")
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canonicalizeEnrichmentLocationToken(value: string): string | null {
+  const normalized = normalizeLocationLookup(value);
+  if (!normalized || NON_GEOGRAPHIC_LOCATION_TERMS.has(normalized)) return null;
+
+  if (ENRICH_LOCATION_ALIASES[normalized]) {
+    return ENRICH_LOCATION_ALIASES[normalized];
+  }
+
+  const slug = normalizeLocationSlug(normalized);
+  if (!slug || slug.length < 2) return null;
+  if (NON_GEOGRAPHIC_LOCATION_TERMS.has(slug.replace(/-/g, " "))) return null;
+  return slug;
+}
+
+function inferLocationsForEnrichment(location: string, fallbackLocation = ""): string[] {
+  const mergedSource = [location, fallbackLocation].filter(Boolean).join(" | ");
+  if (!mergedSource.trim()) return [];
+
+  const tokens = mergedSource
     .split("|")
     .map((part) => part.trim())
     .filter(Boolean)
-    .flatMap((part) => part.split(",").map((s) => s.trim()).filter(Boolean))
-    .slice(0, 4);
+    .flatMap((part) => part.split(",").map((chunk) => chunk.trim()).filter(Boolean))
+    .slice(0, 8)
+    .map((chunk) => canonicalizeEnrichmentLocationToken(chunk))
+    .filter((chunk): chunk is string => Boolean(chunk));
 
-  const normalizedRaw = rawParts
-    .map((part) => normalizeLocationSlug(part))
-    .filter((part) => part.length > 1);
-
-  const merged = Array.from(new Set([...mapped, ...normalizedRaw]));
-  if (merged.length > 0) return merged;
-  return ["new-york"];
+  return Array.from(new Set(tokens));
 }
 
-function inferSignalRegionFromLocation(location: string): "london" | "europe" | "uae" | "usa" {
-  const lower = (location || "").toLowerCase();
+function inferSignalRegionFromLocation(location: string, fallbackLocation = ""): "london" | "europe" | "uae" | "usa" {
+  const lower = `${location || ""} ${fallbackLocation || ""}`.toLowerCase();
   if (lower.includes("dubai") || lower.includes("abu dhabi") || lower.includes("uae")) return "uae";
   if (lower.includes("london") || lower.includes("united kingdom") || lower.includes("uk")) return "london";
   if (
@@ -1079,8 +1124,8 @@ export function FantasticJobsBoard() {
     }
 
     const departments = inferDepartmentsFromJobTitle(job.title);
-    const locations = inferLocationsForEnrichment(job.location);
-    const signalRegion = inferSignalRegionFromLocation(job.location);
+    const locations = inferLocationsForEnrichment(job.location, filters.location);
+    const signalRegion = inferSignalRegionFromLocation(job.location, filters.location);
     const targetRoles = inferTargetRolesForJob(job.title);
     const industry = filters.industry !== "all"
       ? filters.industry

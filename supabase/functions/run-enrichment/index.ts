@@ -703,9 +703,27 @@ const COUNTRY_ALIASES: Record<string, string> = {
   'denver': 'united states',
   'washington dc': 'united states',
   'washington d c': 'united states',
+  'bavaria': 'germany',
+  'lower saxony': 'germany',
+  'north rhine westphalia': 'germany',
+  'baden wurttemberg': 'germany',
+  'hesse': 'germany',
+  'ile de france': 'france',
+  'greater london': 'united kingdom',
   'uae': 'united arab emirates',
   'emirates': 'united arab emirates',
 }
+
+const NON_GEOGRAPHIC_LOCATION_TOKENS = new Set([
+  'remote',
+  'hybrid',
+  'anywhere',
+  'worldwide',
+  'global',
+  'work from home',
+  'wfh',
+  'virtual',
+])
 
 function normalizeLocationToken(value: string): string {
   return String(value || '')
@@ -720,6 +738,51 @@ function normalizeCountry(value: string): string {
   const normalized = normalizeLocationToken(value)
   if (!normalized) return ''
   return COUNTRY_ALIASES[normalized] || normalized
+}
+
+function normalizeLocationLookup(value: string): string {
+  const normalized = normalizeLocationToken(value)
+  if (!normalized) return ''
+  if (/^lo+ndon$/.test(normalized) || /^london+$/.test(normalized) || normalized === 'lndon') {
+    return 'london'
+  }
+  return normalized
+}
+
+function sanitizeSearchLocations(locations: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const raw of locations || []) {
+    const value = String(raw || '').trim()
+    if (!value) continue
+
+    const normalized = normalizeLocationLookup(value)
+    if (!normalized || NON_GEOGRAPHIC_LOCATION_TOKENS.has(normalized)) {
+      continue
+    }
+
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    out.push(value)
+  }
+
+  return out
+}
+
+function formatApolloApiError(status: number, rawBody: string): string {
+  const body = String(rawBody || '').slice(0, 300).toLowerCase()
+
+  if (status === 401 || status === 403 || body.includes('invalid api key') || body.includes('unauthorized')) {
+    return 'Apollo API key is invalid or unauthorized.'
+  }
+  if (status === 402 || body.includes('insufficient') || body.includes('quota') || body.includes('credit')) {
+    return 'Apollo credits exhausted or quota exceeded.'
+  }
+  if (status >= 500) {
+    return 'Apollo API temporary server error.'
+  }
+  return `Apollo API request failed (${status}).`
 }
 
 function isLocationCountryOnly(value: string): boolean {
@@ -808,7 +871,8 @@ function buildRetryStrategies(
   signalRegion: string,
   originalLocations: string[],
   countryFallbackLocations: string[],
-  strictLocationEnabled: boolean
+  strictLocationEnabled: boolean,
+  allowNoLocationFilter: boolean
 ): RetryStrategy[] {
   const strategies: RetryStrategy[] = []
   const originalLocationMode: 'city' | 'country' =
@@ -861,8 +925,8 @@ function buildRetryStrategies(
     }
   }
   
-  // Strategy 5: No location filter (last resort, disabled for strict location mode)
-  if (!strictLocationEnabled) {
+  // Strategy 5: No location filter (for broad searches and job-board/special target-company rescue)
+  if (!strictLocationEnabled || allowNoLocationFilter) {
     strategies.push({
       name: 'no_location_filter',
       companyName: originalCompany,
@@ -989,6 +1053,7 @@ Deno.serve(async (req) => {
     const seenPersonIds = new Set<string>() // Track unique Apollo person IDs to prevent double-enrichment
     const seenNameCompany = new Set<string>() // O(1) dedup for name+company across all loops
     const companyContactCount: Record<string, number> = {}
+    let apolloApiErrorMessage: string | null = null
     let processedCount = 0
     let creditsUsed = 0 // Track people/match calls for logging
 
@@ -1002,7 +1067,8 @@ Deno.serve(async (req) => {
     const baseTargetRoles = preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
 
     // Get locations from preferences (all prefs share the same locations)
-    const searchLocations = preferences[0]?.locations || []
+    const rawSearchLocations = preferences[0]?.locations || []
+    const searchLocations = sanitizeSearchLocations(rawSearchLocations)
     
     // Get target company if specified (signal/job-board/special targeted searches)
     const targetCompany = preferences[0]?.targetCompany || null
@@ -1106,7 +1172,26 @@ Deno.serve(async (req) => {
       'rio': 'Rio de Janeiro, Brazil',
     }
     
-    const apolloLocations = searchLocations.map(loc => locationLabels[loc] || loc)
+    const apolloLocations = Array.from(
+      new Set(
+        searchLocations
+          .map((loc) => {
+            const lookup = normalizeLocationLookup(loc)
+            const slugLookup = lookup.replace(/\s+/g, '-')
+            if (locationLabels[lookup]) return locationLabels[lookup]
+            if (locationLabels[slugLookup]) return locationLabels[slugLookup]
+
+            const normalizedCountry = normalizeCountry(loc)
+            if (normalizedCountry && normalizedCountry !== lookup) {
+              return countryTokenToQueryLabel(normalizedCountry)
+            }
+
+            // Preserve explicit city/country formats from upstream payloads.
+            return String(loc || '').trim()
+          })
+          .filter(Boolean)
+      )
+    )
     const strictLocationEnabled = Boolean(targetCompany)
     const strictCityLocations = Array.from(
       new Set(apolloLocations.filter((loc) => !isLocationCountryOnly(loc)))
@@ -1150,7 +1235,7 @@ Deno.serve(async (req) => {
     }
 
     // Build all search combinations: industries × sectors (OR logic for maximum coverage)
-    // If no sectors, just use industries. If no industries, just use sectors.
+    // For target-company searches, keep a single broad combo to avoid over-constraining.
     const allIndustries = preferences.map(p => p.industry).filter(Boolean)
     const allSectors = preferences[0]?.sectors || []
     
@@ -1161,8 +1246,14 @@ Deno.serve(async (req) => {
     }
     
     const searchCombinations: SearchCombo[] = []
-    
-    if (allIndustries.length > 0 && allSectors.length > 0) {
+
+    if (targetCompany) {
+      searchCombinations.push({
+        industry: null,
+        sector: null,
+        label: 'Target company (broad)',
+      })
+    } else if (allIndustries.length > 0 && allSectors.length > 0) {
       // Create all industry × sector combinations for maximum coverage
       for (const industry of allIndustries) {
         for (const sector of allSectors) {
@@ -1229,7 +1320,7 @@ Deno.serve(async (req) => {
       console.log('Contact quotas per industry:', industryQuotas)
     }
     
-    const useEqualDistribution = allIndustries.length > 1
+    const useEqualDistribution = !targetCompany && allIndustries.length > 1
     
     // Check if targeting legal sector (include law firms if so)
     const includeLawFirms = hasLegalIndustryIntent(allIndustries)
@@ -1270,14 +1361,17 @@ Deno.serve(async (req) => {
           console.log(`Filtering by company: ${targetCompany}`)
         }
         
-        // Build optimized keyword query from industry and/or sector
-        const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
-
-        if (qKeywords) {
-          queryParams.append('q_keywords', qKeywords)
-          console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
+        // Target-company runs should not be narrowed by keyword constraints.
+        if (!targetCompany) {
+          const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
+          if (qKeywords) {
+            queryParams.append('q_keywords', qKeywords)
+            console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
+          } else {
+            console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
+          }
         } else {
-          console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
+          console.log(`Search [${combo.label}] - Keyword filter skipped for target-company mode`)
         }
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
@@ -1316,7 +1410,7 @@ Deno.serve(async (req) => {
             console.log(`Apollo page ${currentPage}: ${people.length} people returned (total available: ${totalAvailable})`)
 
             // If no results on first page with sector, retry without sector constraint
-            if (people.length === 0 && currentPage === 1 && combo.sector && combo.industry) {
+            if (!targetCompany && people.length === 0 && currentPage === 1 && combo.sector && combo.industry) {
               try {
                 console.log('No people found; retrying without sector keyword...')
                 const retryParams = new URLSearchParams(pageParams)
@@ -1342,6 +1436,9 @@ Deno.serve(async (req) => {
                   console.log('Apollo people returned (retry):', people.length)
                 } else {
                   const errorText = await retryResponse.text()
+                  if (!apolloApiErrorMessage) {
+                    apolloApiErrorMessage = formatApolloApiError(retryResponse.status, errorText)
+                  }
                   console.error('Apollo retry error:', retryResponse.status, errorText)
                 }
               } catch (retryError) {
@@ -1562,7 +1659,13 @@ Deno.serve(async (req) => {
                       },
                       body: JSON.stringify({ id: personData.id }),
                     })
-                    if (!enrichResponse.ok) return null
+                    if (!enrichResponse.ok) {
+                      const errorText = await enrichResponse.text()
+                      if (!apolloApiErrorMessage) {
+                        apolloApiErrorMessage = formatApolloApiError(enrichResponse.status, errorText)
+                      }
+                      return null
+                    }
                     const enriched = await enrichResponse.json()
                     return { personData, person: enriched.person || {} }
                   })
@@ -1642,6 +1745,9 @@ Deno.serve(async (req) => {
             }
           } else {
             const errorText = await apolloResponse.text()
+            if (!apolloApiErrorMessage) {
+              apolloApiErrorMessage = formatApolloApiError(apolloResponse.status, errorText)
+            }
             console.error('Apollo API error:', apolloResponse.status, errorText)
             hasMoreResults = false
           }
@@ -1680,7 +1786,8 @@ Deno.serve(async (req) => {
         signalRegion,
         primarySearchLocations,
         strictCountryLocations,
-        strictLocationEnabled
+        strictLocationEnabled,
+        isJobBoardSearch || isSpecialRequestSearch
       )
       console.log(`Trying ${retryStrategies.length} retry strategies...`)
       
@@ -1861,7 +1968,13 @@ Deno.serve(async (req) => {
                         },
                         body: JSON.stringify({ id: personData.id }),
                       })
-                      if (!enrichResponse.ok) return null
+                      if (!enrichResponse.ok) {
+                        const errorText = await enrichResponse.text()
+                        if (!apolloApiErrorMessage) {
+                          apolloApiErrorMessage = formatApolloApiError(enrichResponse.status, errorText)
+                        }
+                        return null
+                      }
                       const enriched = await enrichResponse.json()
                       return { personData, person: enriched.person || {} }
                     })
@@ -1918,6 +2031,9 @@ Deno.serve(async (req) => {
               }
             } else {
               const errorText = await apolloResponse.text()
+              if (!apolloApiErrorMessage) {
+                apolloApiErrorMessage = formatApolloApiError(apolloResponse.status, errorText)
+              }
               console.error(`Retry Apollo error:`, apolloResponse.status, errorText.substring(0, 200))
               hasMoreResults = false
             }
@@ -1974,6 +2090,7 @@ Deno.serve(async (req) => {
     // Determine status
     const status = allContacts.length === 0 ? 'failed' : 
                    allContacts.length < maxContacts ? 'partial' : 'success'
+    const zeroContactsErrorMessage = apolloApiErrorMessage || 'No contacts found matching criteria'
 
     // Update run with results
     await supabase
@@ -1983,7 +2100,7 @@ Deno.serve(async (req) => {
         processed_count: preferences.length,
         enriched_data: allContacts,
         enriched_csv_url: csvContent, // Store CSV content directly for now
-        error_message: allContacts.length === 0 ? 'No contacts found matching criteria' : null,
+        error_message: allContacts.length === 0 ? zeroContactsErrorMessage : null,
       })
       .eq('id', runId)
 
