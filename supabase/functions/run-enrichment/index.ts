@@ -1258,7 +1258,9 @@ Deno.serve(async (req) => {
           .filter(Boolean)
       )
     )
-    const strictLocationEnabled = Boolean(targetCompany)
+    // User-requested behavior: do not hard-reject contacts by location.
+    // Keep location as informational output only.
+    const strictLocationEnabled = false
     const useApolloLocationQuery = !targetCompany
     const strictCityLocations = Array.from(
       new Set(apolloLocations.filter((loc) => !isLocationCountryOnly(loc)))
@@ -1301,11 +1303,8 @@ Deno.serve(async (req) => {
       strictCountryTokens
     )
 
-    if (strictLocationEnabled) {
-      console.log('Strict location mode enabled for target-company search')
-      console.log(`Primary city locations: ${primarySearchLocations.join(' | ') || 'none'}`)
-      console.log(`Country fallback locations: ${strictCountryLocations.join(' | ') || 'none'}`)
-      console.log('Apollo person_locations query filter disabled in target-company mode (post-filter only)')
+    if (targetCompany) {
+      console.log('Strict location filtering disabled for target-company search')
     }
 
     // Build all search combinations: industries × sectors (OR logic for maximum coverage)
@@ -1527,37 +1526,6 @@ Deno.serve(async (req) => {
                   console.error('Apollo no-title fallback error:', relaxedResponse.status, errorText)
                 }
 
-                // If still empty in strict target-company mode, try country-scoped Apollo query
-                // to pull location-relevant people into early pages while still post-filtering.
-                if (
-                  people.length === 0 &&
-                  strictLocationEnabled &&
-                  strictCountryLocations.length > 0
-                ) {
-                  const countryScopedParams = buildComboParams(false)
-                  strictCountryLocations.forEach((loc) => countryScopedParams.append('person_locations[]', loc))
-                  countryScopedParams.set('per_page', String(perPage))
-                  countryScopedParams.set('page', String(currentPage))
-                  const countryScopedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${countryScopedParams.toString()}`
-                  const countryScopedResponse = await fetch(countryScopedUrl, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'x-api-key': apolloApiKey,
-                    },
-                  })
-                  if (countryScopedResponse.ok) {
-                    const countryScopedData = await countryScopedResponse.json()
-                    people = countryScopedData.people || []
-                    console.log(`Apollo people returned (country-scoped fallback): ${people.length}`)
-                  } else {
-                    const errorText = await countryScopedResponse.text()
-                    if (!apolloApiErrorMessage) {
-                      apolloApiErrorMessage = formatApolloApiError(countryScopedResponse.status, errorText)
-                    }
-                    console.error('Apollo country-scoped fallback error:', countryScopedResponse.status, errorText)
-                  }
-                }
               } catch (fallbackError) {
                 console.error('Apollo no-title fallback exception:', fallbackError)
               }
@@ -1980,10 +1948,7 @@ Deno.serve(async (req) => {
               targetRoles.forEach(title => params.append('person_titles[]', title))
             }
 
-            // Add locations:
-            // - normal mode: standard Apollo location query
-            // - target-company retry country mode: enable country query for better early-page recall
-            if ((useApolloLocationQuery || strategy.locationMode === 'country') && strategy.locations.length > 0) {
+            if (useApolloLocationQuery && strategy.locations.length > 0) {
               strategy.locations.forEach(loc => params.append('person_locations[]', loc))
             }
 
