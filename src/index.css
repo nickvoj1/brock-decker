@@ -269,6 +269,19 @@
     background-color: hsl(var(--card)) !important;
   }
 
+  .signals-flat-table th {
+    color: hsl(var(--foreground) / 0.78) !important;
+    font-weight: 600 !important;
+  }
+
+  .signals-flat-table td {
+    color: hsl(var(--foreground) / 0.9) !important;
+  }
+
+  .signals-flat-table .text-muted-foreground {
+    color: hsl(var(--foreground) / 0.74) !important;
+  }
+
   .signals-flat-table tbody tr:hover,
   .signals-flat-table tbody tr:hover td {
     background-color: hsl(var(--muted) / 0.45) !important;
