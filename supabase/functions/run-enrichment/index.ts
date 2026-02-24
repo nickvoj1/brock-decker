@@ -1193,6 +1193,7 @@ Deno.serve(async (req) => {
       )
     )
     const strictLocationEnabled = Boolean(targetCompany)
+    const useApolloLocationQuery = !targetCompany
     const strictCityLocations = Array.from(
       new Set(apolloLocations.filter((loc) => !isLocationCountryOnly(loc)))
     )
@@ -1232,6 +1233,7 @@ Deno.serve(async (req) => {
       console.log('Strict location mode enabled for target-company search')
       console.log(`Primary city locations: ${primarySearchLocations.join(' | ') || 'none'}`)
       console.log(`Country fallback locations: ${strictCountryLocations.join(' | ') || 'none'}`)
+      console.log('Apollo person_locations query filter disabled in target-company mode (post-filter only)')
     }
 
     // Build all search combinations: industries × sectors (OR logic for maximum coverage)
@@ -1350,8 +1352,8 @@ Deno.serve(async (req) => {
         // Add target roles
         targetRoles.forEach(title => queryParams.append('person_titles[]', title))
         
-        // Add locations
-        if (primarySearchLocations.length > 0) {
+        // Add locations (disabled for target-company mode; strict location enforced post-fetch)
+        if (useApolloLocationQuery && primarySearchLocations.length > 0) {
           primarySearchLocations.forEach(loc => queryParams.append('person_locations[]', loc))
         }
         
@@ -1376,7 +1378,7 @@ Deno.serve(async (req) => {
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
         const maxPages = targetCompany
-          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 4 : 3)
+          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 8 : 6)
           : 2
         let currentPage = 1
         let hasMoreResults = true
@@ -1816,8 +1818,8 @@ Deno.serve(async (req) => {
           const retryParams = new URLSearchParams()
           targetRoles.forEach(title => retryParams.append('person_titles[]', title))
           
-          // Add locations (may be widened)
-          if (strategy.locations.length > 0) {
+          // Add locations (disabled for target-company mode; strict location enforced post-fetch)
+          if (useApolloLocationQuery && strategy.locations.length > 0) {
             strategy.locations.forEach(loc => retryParams.append('person_locations[]', loc))
           }
           
@@ -1825,7 +1827,7 @@ Deno.serve(async (req) => {
           retryParams.append('q_organization_name', strategy.companyName)
           
           // Search more pages for retries
-          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4
+          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 8 : 6
           let currentPage = 1
           let hasMoreResults = true
           
