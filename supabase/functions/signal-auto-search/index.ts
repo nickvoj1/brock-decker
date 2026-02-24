@@ -724,139 +724,146 @@ async function searchWithStrategy(
   const contacts: ApolloContact[] = []
   const pendingReveals: { person: Record<string, unknown>; categoryName: string }[] = []
   
-  // Build query params for Apollo api_search endpoint
-  const queryParams = new URLSearchParams()
-  
-  // Add target roles
-  roles.forEach(title => queryParams.append('person_titles[]', title))
-  
-  // Add locations
-  if (strategy.locations.length > 0) {
-    strategy.locations.forEach(loc => queryParams.append('person_locations[]', loc))
+  const buildStrategyParams = (includeRoleFilters: boolean, page: number): URLSearchParams => {
+    const params = new URLSearchParams()
+    if (includeRoleFilters) {
+      roles.forEach(title => params.append('person_titles[]', title))
+    }
+    if (strategy.locations.length > 0) {
+      strategy.locations.forEach(loc => params.append('person_locations[]', loc))
+    }
+    params.append('q_organization_name', strategy.company)
+    params.set('per_page', '50')
+    params.set('page', String(page))
+    return params
   }
-  
-  // Add company filter
-  queryParams.append('q_organization_name', strategy.company)
 
-  // Search up to 3 pages per strategy
-  for (let page = 1; page <= 3; page++) {
-    // CREDIT OPTIMIZATION: Stop if we already have enough contacts
-    if (contacts.length >= maxContactsNeeded) {
-      console.log(`  CREDIT SAVER: Already have ${contacts.length} contacts, skipping further pages`)
-      break
-    }
-    
-    queryParams.set('per_page', '25')
-    queryParams.set('page', String(page))
-
-    try {
-      // Use the new api_search endpoint (POST with query params)
-      const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${queryParams.toString()}`
-      
-      const apolloResponse = await fetch(searchUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Api-Key': apolloApiKey,
-        },
-      })
-
-      if (!apolloResponse.ok) {
-        const errorText = await apolloResponse.text()
-        console.error(`Apollo API error: ${apolloResponse.status} - ${errorText}`)
+  const runPageScan = async (includeRoleFilters: boolean): Promise<void> => {
+    for (let page = 1; page <= 2; page++) {
+      // CREDIT OPTIMIZATION: Stop if we already have enough contacts
+      if (contacts.length >= maxContactsNeeded) {
+        console.log(`  CREDIT SAVER: Already have ${contacts.length} contacts, skipping further pages`)
         break
       }
 
-      const apolloData = await apolloResponse.json()
-      const people = apolloData.people || []
-
-      if (people.length === 0) {
-        break
-      }
-
-      for (const person of people) {
-        // CREDIT OPTIMIZATION: Stop collecting if we have enough
-        if (contacts.length + pendingReveals.length >= maxContactsNeeded) break
+      try {
+        const pageParams = buildStrategyParams(includeRoleFilters, page)
+        // Use the new api_search endpoint (POST with query params)
+        const searchUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${pageParams.toString()}`
         
-        const personId = person.id
-        if (!personId || seenPersonIds.has(personId)) continue
-        seenPersonIds.add(personId)
+        const apolloResponse = await fetch(searchUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Api-Key': apolloApiKey,
+          },
+        })
 
-        const personCompany = person.organization?.name || ''
-        const personIndustry = person.organization?.industry || null
-
-        const locationPasses = isPersonInAllowedLocation(
-          { city: person.city, state: person.state, country: person.country },
-          strategy.locationMode,
-          strategy.allowedCityTokens,
-          strategy.allowedCountryTokens
-        )
-        if (!locationPasses) {
-          continue
-        }
-        
-        // Strict company match
-        if (!companiesMatch(strategy.company, personCompany)) {
-          continue
-        }
-        
-        // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
-        // Skip exclusion if user is targeting legal sector
-        if (isLawFirm(personCompany, personIndustry, includeLawFirms)) {
-          continue
-        }
-        
-        // Exclude recruitment/headhunting companies (competitors, not clients)
-        if (isRecruitmentCompany(personCompany, personIndustry)) {
-          continue
+        if (!apolloResponse.ok) {
+          const errorText = await apolloResponse.text()
+          console.error(`Apollo API error: ${apolloResponse.status} - ${errorText}`)
+          break
         }
 
-        // Check max per company
-        const companyKey = normalizeCompanyName(personCompany)
-        const companyCount = contacts.filter(c => 
-          normalizeCompanyName(c.company) === companyKey
-        ).length + pendingReveals.filter(p => 
-          normalizeCompanyName((p.person.organization as Record<string, unknown>)?.name as string || '') === companyKey
-        ).length
-        if (companyCount >= maxPerCompany) continue
+        const apolloData = await apolloResponse.json()
+        const people = apolloData.people || []
 
-        const firstName = person.first_name || ''
-        const lastName = person.last_name || ''
-        const fullName = `${firstName} ${lastName}`.trim()
-        if (!fullName || fullName.length < 2) continue
+        if (people.length === 0) {
+          break
+        }
 
-        // If email already available (already revealed), use it directly
-        if (person.email) {
-          const email = person.email.toLowerCase()
-          if (!seenEmails.has(email)) {
-            const locationParts = [
-              person.city,
-              person.state,
-              person.country
-            ].filter(Boolean)
-            const location = locationParts.join(', ') || 'Unknown'
+        for (const person of people) {
+          // CREDIT OPTIMIZATION: Stop collecting if we have enough
+          if (contacts.length + pendingReveals.length >= maxContactsNeeded) break
+          
+          const personId = person.id
+          if (!personId || seenPersonIds.has(personId)) continue
+          seenPersonIds.add(personId)
 
-            contacts.push({
-              name: fullName,
-              title: person.title || 'Unknown',
-              location,
-              email,
-              company: personCompany,
-              category: categoryName,
-            })
-            seenEmails.add(email)
-            console.log(`  [Direct] ${fullName} at ${personCompany} (email from search)`)
+          const personCompany = person.organization?.name || ''
+          const personIndustry = person.organization?.industry || null
+
+          const locationPasses = isPersonInAllowedLocation(
+            { city: person.city, state: person.state, country: person.country },
+            strategy.locationMode,
+            strategy.allowedCityTokens,
+            strategy.allowedCountryTokens
+          )
+          if (!locationPasses) {
+            continue
           }
-        } else {
-          // Queue for reveal (only if we still need more contacts)
-          pendingReveals.push({ person, categoryName })
-        }
-      }
+          
+          // Strict company match
+          if (!companiesMatch(strategy.company, personCompany)) {
+            continue
+          }
+          
+          // Exclude law firms (they often appear in PE/Buy Side searches as deal advisors)
+          // Skip exclusion if user is targeting legal sector
+          if (isLawFirm(personCompany, personIndustry, includeLawFirms)) {
+            continue
+          }
+          
+          // Exclude recruitment/headhunting companies (competitors, not clients)
+          if (isRecruitmentCompany(personCompany, personIndustry)) {
+            continue
+          }
 
-    } catch (err) {
-      console.error(`Apollo request failed:`, err)
-      break
+          // Check max per company
+          const companyKey = normalizeCompanyName(personCompany)
+          const companyCount = contacts.filter(c => 
+            normalizeCompanyName(c.company) === companyKey
+          ).length + pendingReveals.filter(p => 
+            normalizeCompanyName((p.person.organization as Record<string, unknown>)?.name as string || '') === companyKey
+          ).length
+          if (companyCount >= maxPerCompany) continue
+
+          const firstName = person.first_name || ''
+          const lastName = person.last_name || ''
+          const fullName = `${firstName} ${lastName}`.trim()
+          if (!fullName || fullName.length < 2) continue
+
+          // If email already available (already revealed), use it directly
+          if (person.email) {
+            const email = person.email.toLowerCase()
+            if (!seenEmails.has(email)) {
+              const locationParts = [
+                person.city,
+                person.state,
+                person.country
+              ].filter(Boolean)
+              const location = locationParts.join(', ') || 'Unknown'
+
+              contacts.push({
+                name: fullName,
+                title: person.title || 'Unknown',
+                location,
+                email,
+                company: personCompany,
+                category: categoryName,
+              })
+              seenEmails.add(email)
+              console.log(`  [Direct] ${fullName} at ${personCompany} (email from search)`)
+            }
+          } else {
+            // Queue for reveal (only if we still need more contacts)
+            pendingReveals.push({ person, categoryName })
+          }
+        }
+
+      } catch (err) {
+        console.error(`Apollo request failed:`, err)
+        break
+      }
     }
+  }
+
+  // Primary pass with role filters.
+  await runPageScan(true)
+  // Fallback pass without role filters if the strict pass returns zero.
+  if (contacts.length === 0 && pendingReveals.length === 0 && roles.length > 0) {
+    console.log('  No contacts with title filters; retrying strategy without person_titles...')
+    await runPageScan(false)
   }
 
   // CREDIT OPTIMIZATION: Only enrich as many as we actually need
@@ -870,74 +877,78 @@ async function searchWithStrategy(
       console.log(`  Enriching ${limitedPendingReveals.length} contacts...`)
     }
     
-    for (const pending of limitedPendingReveals) {
+    const ENRICH_BATCH_SIZE = 8
+    for (let i = 0; i < limitedPendingReveals.length; i += ENRICH_BATCH_SIZE) {
       // Double-check we still need more contacts
       if (contacts.length >= maxContactsNeeded) {
         console.log(`  CREDIT SAVER: Stopping enrichment - reached ${contacts.length} contacts`)
         break
       }
-      
-      const person = pending.person
-      const personId = person.id as string
-      
-      try {
-        const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Api-Key': apolloApiKey,
-          },
-          body: JSON.stringify({ id: personId }),
-        })
-        globalCreditsUsed++ // Track credit usage
 
-        if (enrichResponse.ok) {
-          const enriched = await enrichResponse.json()
-          const enrichedPerson = enriched.person || {}
-          
-          const email = enrichedPerson.email?.toLowerCase()
-          if (!email || seenEmails.has(email)) continue
-          
-          const firstName = enrichedPerson.first_name || person.first_name || ''
-          const lastName = enrichedPerson.last_name || person.last_name || ''
-          const fullName = `${firstName} ${lastName}`.trim()
-          const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
-
-          const locationPasses = isPersonInAllowedLocation(
-            {
-              city: enrichedPerson.city || person.city,
-              state: enrichedPerson.state || person.state,
-              country: enrichedPerson.country || person.country,
+      const batch = limitedPendingReveals.slice(i, i + ENRICH_BATCH_SIZE)
+      const enrichResults = await Promise.allSettled(
+        batch.map(async (pending) => {
+          const person = pending.person
+          const personId = person.id as string
+          const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Api-Key': apolloApiKey,
             },
-            strategy.locationMode,
-            strategy.allowedCityTokens,
-            strategy.allowedCountryTokens
-          )
-          if (!locationPasses) continue
-          
-          const locationParts = [
-            enrichedPerson.city || person.city,
-            enrichedPerson.state || person.state,
-            enrichedPerson.country || person.country
-          ].filter(Boolean)
-          const location = (locationParts as string[]).join(', ') || 'Unknown'
-
-          contacts.push({
-            name: fullName,
-            title: enrichedPerson.title || (person.title as string) || 'Unknown',
-            location,
-            email,
-            company: personCompany,
-            category: pending.categoryName,
+            body: JSON.stringify({ id: personId }),
           })
-          seenEmails.add(email)
-          console.log(`  [Enriched] ${fullName} at ${personCompany}`)
-        }
-        
-        // Small delay between calls
-        await new Promise(resolve => setTimeout(resolve, 100))
-      } catch (err) {
-        console.error('Enrichment failed:', err)
+          globalCreditsUsed++ // Track credit usage
+
+          if (!enrichResponse.ok) return null
+          const enriched = await enrichResponse.json()
+          return { pending, person: enriched.person || {} }
+        })
+      )
+
+      for (const result of enrichResults) {
+        if (contacts.length >= maxContactsNeeded) break
+        if (result.status !== 'fulfilled' || !result.value) continue
+
+        const { pending, person: enrichedPerson } = result.value
+        const person = pending.person
+        const email = enrichedPerson.email?.toLowerCase()
+        if (!email || seenEmails.has(email)) continue
+
+        const firstName = enrichedPerson.first_name || person.first_name || ''
+        const lastName = enrichedPerson.last_name || person.last_name || ''
+        const fullName = `${firstName} ${lastName}`.trim()
+        const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
+
+        const locationPasses = isPersonInAllowedLocation(
+          {
+            city: enrichedPerson.city || person.city,
+            state: enrichedPerson.state || person.state,
+            country: enrichedPerson.country || person.country,
+          },
+          strategy.locationMode,
+          strategy.allowedCityTokens,
+          strategy.allowedCountryTokens
+        )
+        if (!locationPasses) continue
+
+        const locationParts = [
+          enrichedPerson.city || person.city,
+          enrichedPerson.state || person.state,
+          enrichedPerson.country || person.country
+        ].filter(Boolean)
+        const location = (locationParts as string[]).join(', ') || 'Unknown'
+
+        contacts.push({
+          name: fullName,
+          title: enrichedPerson.title || (person.title as string) || 'Unknown',
+          location,
+          email,
+          company: personCompany,
+          category: pending.categoryName,
+        })
+        seenEmails.add(email)
+        console.log(`  [Enriched] ${fullName} at ${personCompany}`)
       }
     }
   }
@@ -1150,8 +1161,13 @@ Deno.serve(async (req) => {
 
     console.log(`Will try ${categoryPriority.length} role categories across ${strategies.length} strategies`)
 
-    // Try EVERY category, not just until we have enough
+    // Try categories in priority order; stop once we have enough usable contacts.
     for (const categoryName of categoryPriority) {
+      if (allContacts.length >= TARGET_MIN_CONTACTS) {
+        console.log(`Reached target minimum (${TARGET_MIN_CONTACTS}) contacts, stopping category loop`)
+        break
+      }
+
       const roles = ROLE_CATEGORIES[categoryName]
       if (!roles) {
         console.log(`Skipping unknown category: ${categoryName}`)

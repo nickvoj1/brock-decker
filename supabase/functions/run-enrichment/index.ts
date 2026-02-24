@@ -703,9 +703,27 @@ const COUNTRY_ALIASES: Record<string, string> = {
   'denver': 'united states',
   'washington dc': 'united states',
   'washington d c': 'united states',
+  'bavaria': 'germany',
+  'lower saxony': 'germany',
+  'north rhine westphalia': 'germany',
+  'baden wurttemberg': 'germany',
+  'hesse': 'germany',
+  'ile de france': 'france',
+  'greater london': 'united kingdom',
   'uae': 'united arab emirates',
   'emirates': 'united arab emirates',
 }
+
+const NON_GEOGRAPHIC_LOCATION_TOKENS = new Set([
+  'remote',
+  'hybrid',
+  'anywhere',
+  'worldwide',
+  'global',
+  'work from home',
+  'wfh',
+  'virtual',
+])
 
 function normalizeLocationToken(value: string): string {
   return String(value || '')
@@ -720,6 +738,51 @@ function normalizeCountry(value: string): string {
   const normalized = normalizeLocationToken(value)
   if (!normalized) return ''
   return COUNTRY_ALIASES[normalized] || normalized
+}
+
+function normalizeLocationLookup(value: string): string {
+  const normalized = normalizeLocationToken(value)
+  if (!normalized) return ''
+  if (/^lo+ndon$/.test(normalized) || /^london+$/.test(normalized) || normalized === 'lndon') {
+    return 'london'
+  }
+  return normalized
+}
+
+function sanitizeSearchLocations(locations: string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+
+  for (const raw of locations || []) {
+    const value = String(raw || '').trim()
+    if (!value) continue
+
+    const normalized = normalizeLocationLookup(value)
+    if (!normalized || NON_GEOGRAPHIC_LOCATION_TOKENS.has(normalized)) {
+      continue
+    }
+
+    if (seen.has(normalized)) continue
+    seen.add(normalized)
+    out.push(value)
+  }
+
+  return out
+}
+
+function formatApolloApiError(status: number, rawBody: string): string {
+  const body = String(rawBody || '').slice(0, 300).toLowerCase()
+
+  if (status === 401 || status === 403 || body.includes('invalid api key') || body.includes('unauthorized')) {
+    return 'Apollo API key is invalid or unauthorized.'
+  }
+  if (status === 402 || body.includes('insufficient') || body.includes('quota') || body.includes('credit')) {
+    return 'Apollo credits exhausted or quota exceeded.'
+  }
+  if (status >= 500) {
+    return 'Apollo API temporary server error.'
+  }
+  return `Apollo API request failed (${status}).`
 }
 
 function isLocationCountryOnly(value: string): boolean {
@@ -779,6 +842,48 @@ function countryTokenToQueryLabel(token: string): string {
     .join(' ')
 }
 
+const KNOWN_COUNTRY_TOKENS = new Set<string>([
+  'united kingdom',
+  'united states',
+  'united arab emirates',
+  'germany',
+  'france',
+  'netherlands',
+  'switzerland',
+  'ireland',
+  'spain',
+  'italy',
+  'belgium',
+  'luxembourg',
+  'saudi arabia',
+  'qatar',
+  'bahrain',
+  'kuwait',
+  'oman',
+  'austria',
+  'poland',
+  'portugal',
+  'sweden',
+  'denmark',
+  'norway',
+  'finland',
+  'canada',
+  'mexico',
+  'brazil',
+  'india',
+  'china',
+  'japan',
+  'south korea',
+  'australia',
+  'singapore',
+  'hong kong',
+  'israel',
+])
+
+function isKnownCountryToken(token: string): boolean {
+  return KNOWN_COUNTRY_TOKENS.has(normalizeCountry(token))
+}
+
 function matchesStrictLocation(
   person: { city?: string | null; state?: string | null; country?: string | null },
   mode: 'city' | 'country' | 'none',
@@ -808,7 +913,8 @@ function buildRetryStrategies(
   signalRegion: string,
   originalLocations: string[],
   countryFallbackLocations: string[],
-  strictLocationEnabled: boolean
+  strictLocationEnabled: boolean,
+  allowNoLocationFilter: boolean
 ): RetryStrategy[] {
   const strategies: RetryStrategy[] = []
   const originalLocationMode: 'city' | 'country' =
@@ -861,8 +967,8 @@ function buildRetryStrategies(
     }
   }
   
-  // Strategy 5: No location filter (last resort, disabled for strict location mode)
-  if (!strictLocationEnabled) {
+  // Strategy 5: No location filter (for broad searches and job-board/special target-company rescue)
+  if (!strictLocationEnabled || allowNoLocationFilter) {
     strategies.push({
       name: 'no_location_filter',
       companyName: originalCompany,
@@ -989,6 +1095,7 @@ Deno.serve(async (req) => {
     const seenPersonIds = new Set<string>() // Track unique Apollo person IDs to prevent double-enrichment
     const seenNameCompany = new Set<string>() // O(1) dedup for name+company across all loops
     const companyContactCount: Record<string, number> = {}
+    let apolloApiErrorMessage: string | null = null
     let processedCount = 0
     let creditsUsed = 0 // Track people/match calls for logging
 
@@ -1002,7 +1109,8 @@ Deno.serve(async (req) => {
     const baseTargetRoles = preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
 
     // Get locations from preferences (all prefs share the same locations)
-    const searchLocations = preferences[0]?.locations || []
+    const rawSearchLocations = preferences[0]?.locations || []
+    const searchLocations = sanitizeSearchLocations(rawSearchLocations)
     
     // Get target company if specified (signal/job-board/special targeted searches)
     const targetCompany = preferences[0]?.targetCompany || null
@@ -1011,14 +1119,21 @@ Deno.serve(async (req) => {
     const targetCompanyGoalContacts = targetCompany
       ? (
           (isJobBoardSearch || isSpecialRequestSearch)
-            ? maxContacts
+            ? Math.min(maxContacts, 12)
             : Math.min(maxContacts, 10)
         )
       : 0
+    const searchTargetContacts = targetCompany ? targetCompanyGoalContacts : maxContacts
+    const searchStartedAt = Date.now()
+    const SEARCH_BUDGET_MS = targetCompany
+      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
+      : 60000
+    const hasTimeBudgetExceeded = () => (Date.now() - searchStartedAt) >= SEARCH_BUDGET_MS
     
     if (targetCompany) {
       console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
       console.log(`Location fallback goal: ${targetCompanyGoalContacts} contacts`)
+      console.log(`Search time budget: ${Math.round(SEARCH_BUDGET_MS / 1000)}s`)
       if (skipUsedContactsExclusion) {
         console.log('Used-contacts exclusion disabled for this run (jobboard/special request)')
       }
@@ -1106,14 +1221,52 @@ Deno.serve(async (req) => {
       'rio': 'Rio de Janeiro, Brazil',
     }
     
-    const apolloLocations = searchLocations.map(loc => locationLabels[loc] || loc)
+    const apolloLocations = Array.from(
+      new Set(
+        searchLocations
+          .map((loc) => {
+            const raw = String(loc || '').trim()
+            const lookup = normalizeLocationLookup(raw)
+            const slugLookup = lookup.replace(/\s+/g, '-')
+            if (locationLabels[lookup]) return locationLabels[lookup]
+            if (locationLabels[slugLookup]) return locationLabels[slugLookup]
+
+            if (raw.includes(',')) {
+              const parts = raw.split(',').map((p) => p.trim()).filter(Boolean)
+              if (parts.length > 1) {
+                const cityLookup = normalizeLocationLookup(parts[0])
+                const citySlugLookup = cityLookup.replace(/\s+/g, '-')
+                if (locationLabels[cityLookup]) return locationLabels[cityLookup]
+                if (locationLabels[citySlugLookup]) return locationLabels[citySlugLookup]
+
+                const countryToken = normalizeCountry(parts[parts.length - 1])
+                if (countryToken && isKnownCountryToken(countryToken)) {
+                  return `${parts[0]}, ${countryTokenToQueryLabel(countryToken)}`
+                }
+                return raw
+              }
+            }
+
+            const normalizedCountry = normalizeCountry(raw)
+            if (normalizedCountry && isKnownCountryToken(normalizedCountry)) {
+              return countryTokenToQueryLabel(normalizedCountry)
+            }
+
+            // Preserve explicit city/country formats from upstream payloads.
+            return raw
+          })
+          .filter(Boolean)
+      )
+    )
     const strictLocationEnabled = Boolean(targetCompany)
+    const useApolloLocationQuery = !targetCompany
     const strictCityLocations = Array.from(
       new Set(apolloLocations.filter((loc) => !isLocationCountryOnly(loc)))
     )
     const explicitCountryTokens = apolloLocations
       .filter((loc) => isLocationCountryOnly(loc))
       .map((loc) => normalizeCountry(loc))
+      .filter((token) => isKnownCountryToken(token))
       .filter(Boolean)
     const derivedCountryTokens = strictCityLocations
       .map((loc) => {
@@ -1128,11 +1281,16 @@ Deno.serve(async (req) => {
     const strictCountryLocations = Array.from(
       new Set(strictCountryTokens.map((token) => countryTokenToQueryLabel(token)).filter(Boolean))
     )
-    const primarySearchLocations = strictLocationEnabled && strictCityLocations.length > 0
-      ? strictCityLocations
+    const fallbackCityLocations = strictLocationEnabled && strictCityLocations.length === 0 && strictCountryTokens.length === 0
+      ? apolloLocations
+      : []
+    const primarySearchLocations = strictLocationEnabled
+      ? (strictCityLocations.length > 0 ? strictCityLocations : fallbackCityLocations)
       : apolloLocations
     const initialLocationMode: 'city' | 'country' =
-      strictLocationEnabled && strictCityLocations.length > 0 ? 'city' : 'country'
+      strictLocationEnabled
+        ? ((strictCityLocations.length > 0 || (strictCountryTokens.length === 0 && fallbackCityLocations.length > 0)) ? 'city' : 'country')
+        : 'country'
 
     const allowedCityTokens = new Set(
       primarySearchLocations
@@ -1147,10 +1305,11 @@ Deno.serve(async (req) => {
       console.log('Strict location mode enabled for target-company search')
       console.log(`Primary city locations: ${primarySearchLocations.join(' | ') || 'none'}`)
       console.log(`Country fallback locations: ${strictCountryLocations.join(' | ') || 'none'}`)
+      console.log('Apollo person_locations query filter disabled in target-company mode (post-filter only)')
     }
 
     // Build all search combinations: industries × sectors (OR logic for maximum coverage)
-    // If no sectors, just use industries. If no industries, just use sectors.
+    // For target-company searches, keep a single broad combo to avoid over-constraining.
     const allIndustries = preferences.map(p => p.industry).filter(Boolean)
     const allSectors = preferences[0]?.sectors || []
     
@@ -1161,8 +1320,14 @@ Deno.serve(async (req) => {
     }
     
     const searchCombinations: SearchCombo[] = []
-    
-    if (allIndustries.length > 0 && allSectors.length > 0) {
+
+    if (targetCompany) {
+      searchCombinations.push({
+        industry: null,
+        sector: null,
+        label: 'Target company (broad)',
+      })
+    } else if (allIndustries.length > 0 && allSectors.length > 0) {
       // Create all industry × sector combinations for maximum coverage
       for (const industry of allIndustries) {
         for (const sector of allSectors) {
@@ -1229,7 +1394,7 @@ Deno.serve(async (req) => {
       console.log('Contact quotas per industry:', industryQuotas)
     }
     
-    const useEqualDistribution = allIndustries.length > 1
+    const useEqualDistribution = !targetCompany && allIndustries.length > 1
     
     // Check if targeting legal sector (include law firms if so)
     const includeLawFirms = hasLegalIndustryIntent(allIndustries)
@@ -1239,7 +1404,11 @@ Deno.serve(async (req) => {
 
     // Search across each combination
     for (const combo of searchCombinations) {
-      if (allContacts.length >= maxContacts) break
+      if (allContacts.length >= searchTargetContacts) break
+      if (hasTimeBudgetExceeded()) {
+        console.log(`Time budget reached (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping primary search loops`)
+        break
+      }
       
       // For equal distribution: check if this industry's quota is already filled
       const comboIndustry = combo.industry
@@ -1253,41 +1422,56 @@ Deno.serve(async (req) => {
       }
 
       try {
-        // Build query params for new API search endpoint
-        const queryParams = new URLSearchParams()
-        
-        // Add target roles
-        targetRoles.forEach(title => queryParams.append('person_titles[]', title))
-        
-        // Add locations
-        if (primarySearchLocations.length > 0) {
-          primarySearchLocations.forEach(loc => queryParams.append('person_locations[]', loc))
-        }
-        
-        // Add target company filter if specified (signal-based search)
-        if (targetCompany) {
-          queryParams.append('q_organization_name', targetCompany)
-          console.log(`Filtering by company: ${targetCompany}`)
-        }
-        
-        // Build optimized keyword query from industry and/or sector
-        const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
+        const buildComboParams = (includeRoleFilters: boolean): URLSearchParams => {
+          const params = new URLSearchParams()
 
-        if (qKeywords) {
-          queryParams.append('q_keywords', qKeywords)
-          console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
+          if (includeRoleFilters) {
+            targetRoles.forEach(title => params.append('person_titles[]', title))
+          }
+
+          // Add locations (generally disabled for target-company mode; strict location enforced post-fetch)
+          if (useApolloLocationQuery && primarySearchLocations.length > 0) {
+            primarySearchLocations.forEach(loc => params.append('person_locations[]', loc))
+          }
+
+          // Add target company filter if specified (signal-based search)
+          if (targetCompany) {
+            params.append('q_organization_name', targetCompany)
+          }
+
+          // Target-company runs should not be narrowed by keyword constraints.
+          if (!targetCompany) {
+            const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
+            if (qKeywords) {
+              params.append('q_keywords', qKeywords)
+            }
+          }
+
+          return params
+        }
+
+        const queryParams = buildComboParams(true)
+        if (targetCompany) {
+          console.log(`Filtering by company: ${targetCompany}`)
+          console.log(`Search [${combo.label}] - role filter count: ${targetRoles.length}`)
+          console.log(`Search [${combo.label}] - Keyword filter skipped for target-company mode`)
         } else {
-          console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
+          const qKeywords = queryParams.get('q_keywords')
+          if (qKeywords) {
+            console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
+          } else {
+            console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
+          }
         }
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
         const maxPages = targetCompany
-          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 4 : 3)
+          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
           : 2
         let currentPage = 1
         let hasMoreResults = true
         
-        while (hasMoreResults && currentPage <= maxPages && allContacts.length < maxContacts) {
+        while (hasMoreResults && currentPage <= maxPages && allContacts.length < searchTargetContacts && !hasTimeBudgetExceeded()) {
           const perPage = 100 // Always request max per page for efficiency
           
           const pageParams = new URLSearchParams(queryParams)
@@ -1315,8 +1499,72 @@ Deno.serve(async (req) => {
 
             console.log(`Apollo page ${currentPage}: ${people.length} people returned (total available: ${totalAvailable})`)
 
+            // Target-company safeguard: if role filters are too narrow, retry first page without person_titles.
+            if (targetCompany && people.length === 0 && currentPage === 1 && targetRoles.length > 0) {
+              try {
+                console.log('No people found with title filters; retrying first page without person_titles...')
+                const relaxedParams = buildComboParams(false)
+                relaxedParams.set('per_page', String(perPage))
+                relaxedParams.set('page', String(currentPage))
+                const relaxedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${relaxedParams.toString()}`
+                const relaxedResponse = await fetch(relaxedUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apolloApiKey,
+                  },
+                })
+
+                if (relaxedResponse.ok) {
+                  const relaxedData = await relaxedResponse.json()
+                  people = relaxedData.people || []
+                  console.log(`Apollo people returned (no-title fallback): ${people.length}`)
+                } else {
+                  const errorText = await relaxedResponse.text()
+                  if (!apolloApiErrorMessage) {
+                    apolloApiErrorMessage = formatApolloApiError(relaxedResponse.status, errorText)
+                  }
+                  console.error('Apollo no-title fallback error:', relaxedResponse.status, errorText)
+                }
+
+                // If still empty in strict target-company mode, try country-scoped Apollo query
+                // to pull location-relevant people into early pages while still post-filtering.
+                if (
+                  people.length === 0 &&
+                  strictLocationEnabled &&
+                  strictCountryLocations.length > 0
+                ) {
+                  const countryScopedParams = buildComboParams(false)
+                  strictCountryLocations.forEach((loc) => countryScopedParams.append('person_locations[]', loc))
+                  countryScopedParams.set('per_page', String(perPage))
+                  countryScopedParams.set('page', String(currentPage))
+                  const countryScopedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${countryScopedParams.toString()}`
+                  const countryScopedResponse = await fetch(countryScopedUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': apolloApiKey,
+                    },
+                  })
+                  if (countryScopedResponse.ok) {
+                    const countryScopedData = await countryScopedResponse.json()
+                    people = countryScopedData.people || []
+                    console.log(`Apollo people returned (country-scoped fallback): ${people.length}`)
+                  } else {
+                    const errorText = await countryScopedResponse.text()
+                    if (!apolloApiErrorMessage) {
+                      apolloApiErrorMessage = formatApolloApiError(countryScopedResponse.status, errorText)
+                    }
+                    console.error('Apollo country-scoped fallback error:', countryScopedResponse.status, errorText)
+                  }
+                }
+              } catch (fallbackError) {
+                console.error('Apollo no-title fallback exception:', fallbackError)
+              }
+            }
+
             // If no results on first page with sector, retry without sector constraint
-            if (people.length === 0 && currentPage === 1 && combo.sector && combo.industry) {
+            if (!targetCompany && people.length === 0 && currentPage === 1 && combo.sector && combo.industry) {
               try {
                 console.log('No people found; retrying without sector keyword...')
                 const retryParams = new URLSearchParams(pageParams)
@@ -1342,6 +1590,9 @@ Deno.serve(async (req) => {
                   console.log('Apollo people returned (retry):', people.length)
                 } else {
                   const errorText = await retryResponse.text()
+                  if (!apolloApiErrorMessage) {
+                    apolloApiErrorMessage = formatApolloApiError(retryResponse.status, errorText)
+                  }
                   console.error('Apollo retry error:', retryResponse.status, errorText)
                 }
               } catch (retryError) {
@@ -1362,14 +1613,14 @@ Deno.serve(async (req) => {
             
             // Determine quota limit for this combination's industry
             const comboIndustryQuota = (useEqualDistribution && comboIndustry) 
-              ? (industryQuotas[comboIndustry] || maxContacts) 
-              : maxContacts
+              ? (industryQuotas[comboIndustry] || searchTargetContacts) 
+              : searchTargetContacts
             const currentIndustryCount = (useEqualDistribution && comboIndustry)
               ? (industryContacts[comboIndustry]?.length || 0)
               : 0
             
             for (const person of people) {
-              if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= maxContacts) break
+              if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= searchTargetContacts) break
               
               // For equal distribution: check industry-specific quota
               if (useEqualDistribution && comboIndustry) {
@@ -1523,7 +1774,7 @@ Deno.serve(async (req) => {
               // Calculate how many more contacts we actually need
               const contactsStillNeeded = useEqualDistribution && comboIndustry
                 ? Math.max(0, (industryQuotas[comboIndustry] || 0) - (industryContacts[comboIndustry]?.length || 0))
-                : Math.max(0, maxContacts - allContacts.length)
+                : Math.max(0, searchTargetContacts - allContacts.length)
               
               // Only enrich up to what we need (saves credits!)
               const enrichLimit = Math.min(peopleToEnrich.length, contactsStillNeeded)
@@ -1537,8 +1788,12 @@ Deno.serve(async (req) => {
               
               for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
                 // Double-check we still need contacts before each batch
-                if (allContacts.length >= maxContacts) {
+                if (allContacts.length >= searchTargetContacts) {
                   console.log('CREDIT SAVER: Stopping enrichment - global quota reached')
+                  break
+                }
+                if (hasTimeBudgetExceeded()) {
+                  console.log(`Time budget reached during enrichment batches (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping`)
                   break
                 }
                 if (useEqualDistribution && comboIndustry) {
@@ -1562,14 +1817,20 @@ Deno.serve(async (req) => {
                       },
                       body: JSON.stringify({ id: personData.id }),
                     })
-                    if (!enrichResponse.ok) return null
+                    if (!enrichResponse.ok) {
+                      const errorText = await enrichResponse.text()
+                      if (!apolloApiErrorMessage) {
+                        apolloApiErrorMessage = formatApolloApiError(enrichResponse.status, errorText)
+                      }
+                      return null
+                    }
                     const enriched = await enrichResponse.json()
                     return { personData, person: enriched.person || {} }
                   })
                 )
 
                 for (const result of enrichResults) {
-                  if (allContacts.length >= maxContacts) break
+                  if (allContacts.length >= searchTargetContacts) break
                   if (result.status !== 'fulfilled' || !result.value) continue
 
                   const { personData, person } = result.value
@@ -1642,6 +1903,9 @@ Deno.serve(async (req) => {
             }
           } else {
             const errorText = await apolloResponse.text()
+            if (!apolloApiErrorMessage) {
+              apolloApiErrorMessage = formatApolloApiError(apolloResponse.status, errorText)
+            }
             console.error('Apollo API error:', apolloResponse.status, errorText)
             hasMoreResults = false
           }
@@ -1670,7 +1934,7 @@ Deno.serve(async (req) => {
 
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
-    if (targetCompany && allContacts.length < targetCompanyGoalContacts) {
+    if (targetCompany && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
       console.log(`\n=== TARGET-COMPANY RETRY LOOP ===`)
       console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${targetCompanyGoalContacts}`)
       
@@ -1680,13 +1944,18 @@ Deno.serve(async (req) => {
         signalRegion,
         primarySearchLocations,
         strictCountryLocations,
-        strictLocationEnabled
+        strictLocationEnabled,
+        isJobBoardSearch || isSpecialRequestSearch
       )
       console.log(`Trying ${retryStrategies.length} retry strategies...`)
       
       for (const strategy of retryStrategies) {
         if (allContacts.length >= targetCompanyGoalContacts) {
           console.log(`Target reached (${allContacts.length} contacts), stopping retries`)
+          break
+        }
+        if (hasTimeBudgetExceeded()) {
+          console.log(`Time budget reached (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping retry strategies`)
           break
         }
         
@@ -1705,24 +1974,32 @@ Deno.serve(async (req) => {
         )
         
         try {
-          // Build query params for retry
-          const retryParams = new URLSearchParams()
-          targetRoles.forEach(title => retryParams.append('person_titles[]', title))
-          
-          // Add locations (may be widened)
-          if (strategy.locations.length > 0) {
-            strategy.locations.forEach(loc => retryParams.append('person_locations[]', loc))
+          const buildRetryParams = (includeRoleFilters: boolean): URLSearchParams => {
+            const params = new URLSearchParams()
+            if (includeRoleFilters) {
+              targetRoles.forEach(title => params.append('person_titles[]', title))
+            }
+
+            // Add locations:
+            // - normal mode: standard Apollo location query
+            // - target-company retry country mode: enable country query for better early-page recall
+            if ((useApolloLocationQuery || strategy.locationMode === 'country') && strategy.locations.length > 0) {
+              strategy.locations.forEach(loc => params.append('person_locations[]', loc))
+            }
+
+            // Use the strategy's company name
+            params.append('q_organization_name', strategy.companyName)
+            return params
           }
-          
-          // Use the strategy's company name
-          retryParams.append('q_organization_name', strategy.companyName)
+
+          const retryParams = buildRetryParams(true)
           
           // Search more pages for retries
-          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4
+          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4
           let currentPage = 1
           let hasMoreResults = true
           
-          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < targetCompanyGoalContacts) {
+          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
             const pageParams = new URLSearchParams(retryParams)
             pageParams.set('per_page', '100')
             pageParams.set('page', String(currentPage))
@@ -1742,8 +2019,40 @@ Deno.serve(async (req) => {
             
             if (apolloResponse.ok) {
               const apolloData = await apolloResponse.json()
-              const people = apolloData.people || []
+              let people = apolloData.people || []
               console.log(`Retry page ${currentPage}: ${people.length} people`)
+
+              // Retry safeguard for target-company mode: remove title filters if the first page is empty.
+              if (people.length === 0 && currentPage === 1 && targetRoles.length > 0) {
+                try {
+                  console.log('Retry strategy returned 0 with title filters; retrying without person_titles...')
+                  const relaxedParams = buildRetryParams(false)
+                  relaxedParams.set('per_page', '100')
+                  relaxedParams.set('page', String(currentPage))
+                  const relaxedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${relaxedParams.toString()}`
+                  const relaxedResponse = await fetch(relaxedUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': apolloApiKey,
+                    },
+                  })
+
+                  if (relaxedResponse.ok) {
+                    const relaxedData = await relaxedResponse.json()
+                    people = relaxedData.people || []
+                    console.log(`Retry no-title fallback people: ${people.length}`)
+                  } else {
+                    const errorText = await relaxedResponse.text()
+                    if (!apolloApiErrorMessage) {
+                      apolloApiErrorMessage = formatApolloApiError(relaxedResponse.status, errorText)
+                    }
+                    console.error('Retry no-title fallback Apollo error:', relaxedResponse.status, errorText.substring(0, 200))
+                  }
+                } catch (fallbackError) {
+                  console.error('Retry no-title fallback exception:', fallbackError)
+                }
+              }
               
               if (people.length === 0) {
                 hasMoreResults = false
@@ -1861,7 +2170,13 @@ Deno.serve(async (req) => {
                         },
                         body: JSON.stringify({ id: personData.id }),
                       })
-                      if (!enrichResponse.ok) return null
+                      if (!enrichResponse.ok) {
+                        const errorText = await enrichResponse.text()
+                        if (!apolloApiErrorMessage) {
+                          apolloApiErrorMessage = formatApolloApiError(enrichResponse.status, errorText)
+                        }
+                        return null
+                      }
                       const enriched = await enrichResponse.json()
                       return { personData, person: enriched.person || {} }
                     })
@@ -1918,6 +2233,9 @@ Deno.serve(async (req) => {
               }
             } else {
               const errorText = await apolloResponse.text()
+              if (!apolloApiErrorMessage) {
+                apolloApiErrorMessage = formatApolloApiError(apolloResponse.status, errorText)
+              }
               console.error(`Retry Apollo error:`, apolloResponse.status, errorText.substring(0, 200))
               hasMoreResults = false
             }
@@ -1974,6 +2292,7 @@ Deno.serve(async (req) => {
     // Determine status
     const status = allContacts.length === 0 ? 'failed' : 
                    allContacts.length < maxContacts ? 'partial' : 'success'
+    const zeroContactsErrorMessage = apolloApiErrorMessage || 'No contacts found matching criteria'
 
     // Update run with results
     await supabase
@@ -1983,7 +2302,7 @@ Deno.serve(async (req) => {
         processed_count: preferences.length,
         enriched_data: allContacts,
         enriched_csv_url: csvContent, // Store CSV content directly for now
-        error_message: allContacts.length === 0 ? 'No contacts found matching criteria' : null,
+        error_message: allContacts.length === 0 ? zeroContactsErrorMessage : null,
       })
       .eq('id', runId)
 
