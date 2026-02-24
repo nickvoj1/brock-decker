@@ -708,6 +708,7 @@ async function revealEmail(apolloApiKey: string, personId: string): Promise<stri
 
 // Track credit usage globally
 let globalCreditsUsed = 0
+const ENFORCE_STRICT_LOCATION = false
 
 async function searchWithStrategy(
   apolloApiKey: string,
@@ -729,7 +730,7 @@ async function searchWithStrategy(
     if (includeRoleFilters) {
       roles.forEach(title => params.append('person_titles[]', title))
     }
-    if (strategy.locations.length > 0) {
+    if (ENFORCE_STRICT_LOCATION && strategy.locations.length > 0) {
       strategy.locations.forEach(loc => params.append('person_locations[]', loc))
     }
     params.append('q_organization_name', strategy.company)
@@ -783,14 +784,16 @@ async function searchWithStrategy(
           const personCompany = person.organization?.name || ''
           const personIndustry = person.organization?.industry || null
 
-          const locationPasses = isPersonInAllowedLocation(
-            { city: person.city, state: person.state, country: person.country },
-            strategy.locationMode,
-            strategy.allowedCityTokens,
-            strategy.allowedCountryTokens
-          )
-          if (!locationPasses) {
-            continue
+          if (ENFORCE_STRICT_LOCATION) {
+            const locationPasses = isPersonInAllowedLocation(
+              { city: person.city, state: person.state, country: person.country },
+              strategy.locationMode,
+              strategy.allowedCityTokens,
+              strategy.allowedCountryTokens
+            )
+            if (!locationPasses) {
+              continue
+            }
           }
           
           // Strict company match
@@ -920,17 +923,19 @@ async function searchWithStrategy(
         const fullName = `${firstName} ${lastName}`.trim()
         const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
 
-        const locationPasses = isPersonInAllowedLocation(
-          {
-            city: enrichedPerson.city || person.city,
-            state: enrichedPerson.state || person.state,
-            country: enrichedPerson.country || person.country,
-          },
-          strategy.locationMode,
-          strategy.allowedCityTokens,
-          strategy.allowedCountryTokens
-        )
-        if (!locationPasses) continue
+        if (ENFORCE_STRICT_LOCATION) {
+          const locationPasses = isPersonInAllowedLocation(
+            {
+              city: enrichedPerson.city || person.city,
+              state: enrichedPerson.state || person.state,
+              country: enrichedPerson.country || person.country,
+            },
+            strategy.locationMode,
+            strategy.allowedCityTokens,
+            strategy.allowedCountryTokens
+          )
+          if (!locationPasses) continue
+        }
 
         const locationParts = [
           enrichedPerson.city || person.city,
@@ -1117,9 +1122,23 @@ Deno.serve(async (req) => {
     const uniqueVariants = Array.from(allCompanyVariants)
     console.log(`All company variants to try: ${uniqueVariants.join(', ')}`)
 
-    // Build search strategies (company variant × location level)
+    // Build search strategies:
+    // strict location mode -> company × location levels
+    // relaxed mode -> company only (faster and higher recall)
     const strategies: SearchStrategy[] = []
     for (const company of uniqueVariants) {
+      if (!ENFORCE_STRICT_LOCATION) {
+        strategies.push({
+          name: `${company}_broad`,
+          company,
+          locations: [],
+          locationMode: 'none',
+          allowedCityTokens: new Set<string>(),
+          allowedCountryTokens: new Set<string>(),
+        })
+        continue
+      }
+
       if (cityLocations.length > 0) {
         strategies.push({
           name: `${company}_cities`,
@@ -1140,6 +1159,9 @@ Deno.serve(async (req) => {
           allowedCountryTokens: countryLocationTokens,
         })
       }
+    }
+    if (!ENFORCE_STRICT_LOCATION) {
+      console.log('Strict location filtering disabled for signal auto-search')
     }
 
     const TARGET_MIN_CONTACTS = 10
