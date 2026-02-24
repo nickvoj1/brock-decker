@@ -224,7 +224,7 @@ export default function Dashboard() {
       title={`Welcome, ${profileName.split(' ')[0]}`}
       description="Your personal workspace overview"
     >
-      <div className="space-y-6">
+      <div className="buttons-3d space-y-6">
         {/* Stats Overview */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card className="animate-slide-up" style={{ animationDelay: '0ms' }}>

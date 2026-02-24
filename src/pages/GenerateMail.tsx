@@ -446,7 +446,7 @@ export default function GenerateMail() {
       title="Generate Mail" 
       description="Generate personalized pitch emails for candidates"
     >
-      <div className="max-w-4xl space-y-6">
+      <div className="buttons-3d max-w-4xl space-y-6">
         {/* Template Management Bar */}
         <Card className="animate-slide-up">
           <CardHeader className="pb-3">

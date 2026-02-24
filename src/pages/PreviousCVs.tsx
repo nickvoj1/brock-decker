@@ -197,7 +197,7 @@ export default function PreviousCVs() {
       title="CVs"
       description="View and manage saved candidate profiles"
     >
-      <div className="max-w-4xl space-y-6">
+      <div className="buttons-3d max-w-4xl space-y-6">
         {renderCVBrandingCard()}
         <Card>
           <CardHeader>

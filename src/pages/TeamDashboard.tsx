@@ -221,7 +221,7 @@ export default function TeamDashboard() {
       title="Brock & Decker Dashboard"
       description="Team recruitment metrics & Apollo contacts"
     >
-      <div className="space-y-6">
+      <div className="buttons-3d space-y-6">
         {/* KPI Grid - Time-period responsive stats */}
         <div className="grid gap-4 md:grid-cols-4">
           <Card className="bg-primary/5 border-primary/20 animate-slide-up" style={{ animationDelay: '0ms' }}>
