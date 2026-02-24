@@ -8,11 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { supabase } from "@/integrations/supabase/client";
 import { createEnrichmentRun } from "@/lib/dataApi";
-import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users } from "lucide-react";
+import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users, ChevronDown } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 
 interface Job {
@@ -384,7 +385,13 @@ function uniqueCaseInsensitive(values: string[]): string[] {
   return out;
 }
 
-type FilterTokenMode = "keyword" | "location";
+function summarizeTokens(tokens: string[], emptyLabel: string): string {
+  if (!tokens.length) return emptyLabel;
+  if (tokens.length <= 2) return tokens.join(", ");
+  return `${tokens[0]}, ${tokens[1]} +${tokens.length - 2}`;
+}
+
+type FilterTokenMode = "position" | "keyword" | "location";
 
 function parseFilterTokens(value: string, mode: FilterTokenMode): string[] {
   const raw = String(value || "").trim();
@@ -571,6 +578,7 @@ export function FantasticJobsBoard() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [positionInput, setPositionInput] = useState("");
   const [industryKeywordInput, setIndustryKeywordInput] = useState("");
   const [locationInput, setLocationInput] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("all");
@@ -651,10 +659,39 @@ export function FantasticJobsBoard() {
     [filters.industryKeywords],
   );
 
+  const selectedPositionTokens = useMemo(
+    () => parseFilterTokens(filters.title, "position"),
+    [filters.title],
+  );
+
   const selectedLocationTokens = useMemo(
     () => parseFilterTokens(filters.location, "location"),
     [filters.location],
   );
+
+  const addPosition = useCallback((position: string) => {
+    setFilters((f) => ({
+      ...f,
+      title: addTokenToFilterExpression(f.title, position, "position"),
+    }));
+    setPositionInput("");
+  }, []);
+
+  const togglePosition = useCallback((position: string) => {
+    setFilters((f) => ({
+      ...f,
+      title: hasFilterToken(f.title, position, "position")
+        ? removeTokenFromFilterExpression(f.title, position, "position")
+        : addTokenToFilterExpression(f.title, position, "position"),
+    }));
+  }, []);
+
+  const removePosition = useCallback((position: string) => {
+    setFilters((f) => ({
+      ...f,
+      title: removeTokenFromFilterExpression(f.title, position, "position"),
+    }));
+  }, []);
 
   const addIndustryKeyword = useCallback((keyword: string) => {
     setFilters((f) => ({
@@ -917,11 +954,13 @@ export function FantasticJobsBoard() {
 
   const clearFilters = () => {
     setFilters({ ...DEFAULT_FILTERS, title: "", industryKeywords: "", location: "", industry: "all", jobsPerSearch: "10" });
+    setPositionInput("");
     setIndustryKeywordInput("");
     setLocationInput("");
   };
   const resetToDefaults = () => {
     setFilters(DEFAULT_FILTERS);
+    setPositionInput("");
     setIndustryKeywordInput("");
     setLocationInput("");
   };
@@ -972,6 +1011,9 @@ export function FantasticJobsBoard() {
       location: normalizeLocationExpression(item.filters.location || ""),
       remote: false,
     });
+    setPositionInput("");
+    setIndustryKeywordInput("");
+    setLocationInput("");
     setSearchMode(item.mode);
     setSourceTab(item.mode === "all" ? "all" : item.mode);
     const restored = Array.isArray(item.results) ? item.results : [];
@@ -1142,57 +1184,144 @@ export function FantasticJobsBoard() {
         <CardContent className="space-y-4">
           <p className="mono-label">Search Targets</p>
           <div className="control-surface p-3 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Input
-                placeholder="Title / Position (e.g. VP, Principal, CFO)"
-                list="job-position-suggestions"
-                value={filters.title}
-                onChange={(e) => setFilters((f) => ({ ...f, title: e.target.value }))}
-              />
-              <Input
-                placeholder="Company include (optional)"
-                value={filters.company}
-                onChange={(e) => setFilters((f) => ({ ...f, company: e.target.value }))}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="rounded-md border border-border/50 bg-background/80 p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-muted-foreground">Industry Keywords (multi-select)</p>
-                  {selectedIndustryKeywordTokens.length > 0 ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setFilters((f) => ({ ...f, industryKeywords: "" }))}
-                    >
-                      Clear
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Position (dropdown multi-select)</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span className="truncate text-left">
+                        {summarizeTokens(selectedPositionTokens, "Select position(s)")}
+                      </span>
+                      <ChevronDown className="h-4 w-4 opacity-70" />
                     </Button>
-                  ) : null}
-                </div>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-[360px] p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">Choose positions</p>
+                      {selectedPositionTokens.length > 0 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setFilters((f) => ({ ...f, title: "" }))}
+                        >
+                          Clear
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add position"
+                        value={positionInput}
+                        onChange={(e) => setPositionInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          addPosition(positionInput);
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!positionInput.trim()}
+                        onClick={() => addPosition(positionInput)}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                    <div className="max-h-52 overflow-auto rounded-md border border-border/40 bg-background p-2 space-y-1.5">
+                      {positionSuggestions.map((value) => (
+                        <label key={`pos-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
+                          <Checkbox
+                            checked={hasFilterToken(filters.title, value, "position")}
+                            onCheckedChange={() => togglePosition(value)}
+                          />
+                          <span className="truncate">{value}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                {selectedPositionTokens.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedPositionTokens.map((position) => (
+                      <Badge key={`position-${position}`} variant="secondary" className="gap-1">
+                        {position}
+                        <button
+                          type="button"
+                          onClick={() => removePosition(position)}
+                          className="rounded-sm hover:bg-muted p-0.5"
+                          aria-label={`Remove ${position}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No positions selected.</p>
+                )}
+              </div>
 
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add keyword and press Enter"
-                    value={industryKeywordInput}
-                    onChange={(e) => setIndustryKeywordInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      e.preventDefault();
-                      addIndustryKeyword(industryKeywordInput);
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!industryKeywordInput.trim()}
-                    onClick={() => addIndustryKeyword(industryKeywordInput)}
-                  >
-                    Add
-                  </Button>
-                </div>
-
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Industry Keywords (dropdown multi-select)</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span className="truncate text-left">
+                        {summarizeTokens(selectedIndustryKeywordTokens, "Select keyword(s)")}
+                      </span>
+                      <ChevronDown className="h-4 w-4 opacity-70" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-[360px] p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">Choose industry keywords</p>
+                      {selectedIndustryKeywordTokens.length > 0 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setFilters((f) => ({ ...f, industryKeywords: "" }))}
+                        >
+                          Clear
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add keyword"
+                        value={industryKeywordInput}
+                        onChange={(e) => setIndustryKeywordInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          addIndustryKeyword(industryKeywordInput);
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!industryKeywordInput.trim()}
+                        onClick={() => addIndustryKeyword(industryKeywordInput)}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                    <div className="max-h-52 overflow-auto rounded-md border border-border/40 bg-background p-2 space-y-1.5">
+                      {industryKeywordSuggestions.map((value) => (
+                        <label key={`kw-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
+                          <Checkbox
+                            checked={hasFilterToken(filters.industryKeywords, value, "keyword")}
+                            onCheckedChange={() => toggleIndustryKeyword(value)}
+                          />
+                          <span className="truncate">{value}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 {selectedIndustryKeywordTokens.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {selectedIndustryKeywordTokens.map((keyword) => (
@@ -1210,58 +1339,68 @@ export function FantasticJobsBoard() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground">Pick one or more industry keywords below.</p>
+                  <p className="text-xs text-muted-foreground">No keywords selected.</p>
                 )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-auto rounded-md border border-border/40 bg-background p-2">
-                  {industryKeywordSuggestions.map((value) => (
-                    <label key={`kw-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
-                      <Checkbox
-                        checked={hasFilterToken(filters.industryKeywords, value, "keyword")}
-                        onCheckedChange={() => toggleIndustryKeyword(value)}
-                      />
-                      <span className="truncate">{value}</span>
-                    </label>
-                  ))}
-                </div>
               </div>
 
-              <div className="rounded-md border border-border/50 bg-background/80 p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-muted-foreground">Locations (multi-select)</p>
-                  {selectedLocationTokens.length > 0 ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => setFilters((f) => ({ ...f, location: "" }))}
-                    >
-                      Clear
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Location (dropdown multi-select)</p>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span className="truncate text-left">
+                        {summarizeTokens(selectedLocationTokens, "Select location(s)")}
+                      </span>
+                      <ChevronDown className="h-4 w-4 opacity-70" />
                     </Button>
-                  ) : null}
-                </div>
-
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Add location and press Enter"
-                    value={locationInput}
-                    onChange={(e) => setLocationInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      e.preventDefault();
-                      addLocation(locationInput);
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!locationInput.trim()}
-                    onClick={() => addLocation(locationInput)}
-                  >
-                    Add
-                  </Button>
-                </div>
-
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-[360px] p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground">Choose locations</p>
+                      {selectedLocationTokens.length > 0 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setFilters((f) => ({ ...f, location: "" }))}
+                        >
+                          Clear
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add location"
+                        value={locationInput}
+                        onChange={(e) => setLocationInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          addLocation(locationInput);
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!locationInput.trim()}
+                        onClick={() => addLocation(locationInput)}
+                      >
+                        Add
+                      </Button>
+                    </div>
+                    <div className="max-h-52 overflow-auto rounded-md border border-border/40 bg-background p-2 space-y-1.5">
+                      {locationSuggestions.map((value) => (
+                        <label key={`loc-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
+                          <Checkbox
+                            checked={hasFilterToken(filters.location, value, "location")}
+                            onCheckedChange={() => toggleLocation(value)}
+                          />
+                          <span className="truncate">{value}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 {selectedLocationTokens.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {selectedLocationTokens.map((location) => (
@@ -1279,29 +1418,20 @@ export function FantasticJobsBoard() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground">Pick one or more locations below.</p>
+                  <p className="text-xs text-muted-foreground">No locations selected.</p>
                 )}
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-36 overflow-auto rounded-md border border-border/40 bg-background p-2">
-                  {locationSuggestions.map((value) => (
-                    <label key={`loc-suggest-${value}`} className="flex items-center gap-2 text-xs cursor-pointer">
-                      <Checkbox
-                        checked={hasFilterToken(filters.location, value, "location")}
-                        onCheckedChange={() => toggleLocation(value)}
-                      />
-                      <span className="truncate">{value}</span>
-                    </label>
-                  ))}
-                </div>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Company include (optional)</p>
+                <Input
+                  placeholder="e.g., KKR, Blackstone"
+                  value={filters.company}
+                  onChange={(e) => setFilters((f) => ({ ...f, company: e.target.value }))}
+                />
               </div>
             </div>
           </div>
-
-          <datalist id="job-position-suggestions">
-            {positionSuggestions.map((value) => (
-              <option key={`pos-${value}`} value={value} />
-            ))}
-          </datalist>
 
           <p className="mono-label">Scope & Constraints</p>
           <div className="control-surface p-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
