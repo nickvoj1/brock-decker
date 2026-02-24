@@ -1152,9 +1152,9 @@ Deno.serve(async (req) => {
       // Get all enrichment runs from all users
       const { data: runs, error: runsError } = await supabase
         .from("enrichment_runs")
-        .select("id, uploaded_by, status, candidates_count, processed_count, created_at, updated_at, preferences_data")
+        .select("id, uploaded_by, status, search_counter, candidates_count, processed_count, error_message, created_at, updated_at, preferences_data")
         .order("created_at", { ascending: false })
-        .limit(100);
+        .limit(300);
 
       if (runsError) throw runsError;
 

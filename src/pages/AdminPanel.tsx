@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -9,7 +9,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock, Filter } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -20,6 +22,17 @@ export default function AdminPanel() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AdminActivityData | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const userStatsArray = data?.userStats 
+    ? Object.entries(data.userStats).map(([name, stats]) => ({ name, ...stats }))
+    : [];
+
+  const filteredRuns = useMemo(() => {
+    if (!data?.runs) return [];
+    if (statusFilter === "all") return data.runs;
+    return data.runs.filter(r => r.status === statusFilter);
+  }, [data?.runs, statusFilter]);
 
   useEffect(() => {
     // Redirect non-admin users
@@ -54,19 +67,6 @@ export default function AdminPanel() {
     return null;
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "success": return "bg-green-500/10 text-green-600 border-green-500/20";
-      case "partial": return "bg-amber-500/10 text-amber-600 border-amber-500/20";
-      case "failed": return "bg-red-500/10 text-red-600 border-red-500/20";
-      case "running": return "bg-blue-500/10 text-blue-600 border-blue-500/20";
-      default: return "bg-muted text-muted-foreground";
-    }
-  };
-
-  const userStatsArray = data?.userStats 
-    ? Object.entries(data.userStats).map(([name, stats]) => ({ name, ...stats }))
-    : [];
 
   return (
     <AppLayout title="Admin Panel" description="Monitor team activity and usage">
@@ -207,8 +207,28 @@ export default function AdminPanel() {
           <TabsContent value="runs">
             <Card>
               <CardHeader>
-                <CardTitle>Enrichment Runs</CardTitle>
-                <CardDescription>All team search activity</CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Enrichment Runs</CardTitle>
+                    <CardDescription>All team search activity ({filteredRuns.length} shown)</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-4 w-4 text-muted-foreground" />
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Filter status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="success">Success</SelectItem>
+                        <SelectItem value="partial">Partial</SelectItem>
+                        <SelectItem value="failed">Failed</SelectItem>
+                        <SelectItem value="running">Running</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -224,26 +244,30 @@ export default function AdminPanel() {
                         <TableRow>
                           <TableHead>User</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>Search #</TableHead>
                           <TableHead>Results</TableHead>
                           <TableHead>Industries</TableHead>
+                          <TableHead>Error</TableHead>
                           <TableHead className="text-right">Time</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {data?.runs.map((run) => {
+                        {filteredRuns.map((run) => {
                           const prefs = run.preferences_data as any;
                           const industries = prefs?.industries?.slice(0, 2)?.join(", ") || "-";
                           return (
                             <TableRow key={run.id}>
                               <TableCell className="font-medium">{run.uploaded_by}</TableCell>
                               <TableCell>
-                                <Badge variant="outline" className={getStatusColor(run.status)}>
-                                  {run.status}
-                                </Badge>
+                                <StatusBadge status={run.status as any} />
                               </TableCell>
+                              <TableCell className="text-center">{run.search_counter ?? "-"}</TableCell>
                               <TableCell>{run.processed_count}/{run.candidates_count}</TableCell>
                               <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
                                 {industries}
+                              </TableCell>
+                              <TableCell className="max-w-[150px] truncate text-xs text-destructive">
+                                {run.error_message || "-"}
                               </TableCell>
                               <TableCell className="text-right text-xs text-muted-foreground">
                                 <div className="flex items-center justify-end gap-1">
