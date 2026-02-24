@@ -508,6 +508,66 @@ export type Database = {
           },
         ]
       }
+      signal_source_runs: {
+        Row: {
+          avg_geo_confidence: number
+          candidates: number
+          created_at: string
+          duplicates: number
+          errors: number
+          geo_validated: number
+          id: string
+          inserted: number
+          pending: number
+          pipeline: string
+          quality_passed: number
+          region: string
+          rejected: number
+          source_name: string
+          source_url: string
+          updated_at: string
+          validated: number
+        }
+        Insert: {
+          avg_geo_confidence?: number
+          candidates?: number
+          created_at?: string
+          duplicates?: number
+          errors?: number
+          geo_validated?: number
+          id?: string
+          inserted?: number
+          pending?: number
+          pipeline: string
+          quality_passed?: number
+          region: string
+          rejected?: number
+          source_name: string
+          source_url: string
+          updated_at?: string
+          validated?: number
+        }
+        Update: {
+          avg_geo_confidence?: number
+          candidates?: number
+          created_at?: string
+          duplicates?: number
+          errors?: number
+          geo_validated?: number
+          id?: string
+          inserted?: number
+          pending?: number
+          pipeline?: string
+          quality_passed?: number
+          region?: string
+          rejected?: number
+          source_name?: string
+          source_url?: string
+          updated_at?: string
+          validated?: number
+        }
+        Relationships: []
+      }
       signals: {
         Row: {
           ai_confidence: number | null
