@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   Sparkles,
@@ -109,6 +109,10 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
   { value: "custom", label: "Custom Range" },
 ];
 
+const SIGNALS_PAGE_SIZE = 25;
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const AUTO_REFRESH_FOCUS_THROTTLE_MS = 60 * 1000;
+
 function tokenizeQuery(query: string): string[] {
   return query
     .toLowerCase()
@@ -187,10 +191,13 @@ export default function SignalsDashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchQuery, setSearchQuery] = useState("");
   const [excludeQuery, setExcludeQuery] = useState("");
-  const [fitOnly, setFitOnly] = useState(false);
+  const [fitOnly, setFitOnly] = useState(true);
   const [minFitScore, setMinFitScore] = useState(50);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
+  const [visibleSignalsCount, setVisibleSignalsCount] = useState(SIGNALS_PAGE_SIZE);
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const lastAutoRefreshAtRef = useRef(0);
   
   // CV Matches modal
   const [cvModalOpen, setCvModalOpen] = useState(false);
@@ -256,16 +263,6 @@ export default function SignalsDashboard() {
   }, []);
 
   // Fetch signals on mount and when profile changes
-  useEffect(() => {
-    if (!profileName) return;
-
-    fetchSignals();
-
-    const cleanup = setupRealtimeSubscription();
-    return cleanup;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileName, setupRealtimeSubscription]);
-  
   const SIGNALS_PREFS_KEY = "signals-dashboard-preferences";
 
   useEffect(() => {
@@ -296,7 +293,7 @@ export default function SignalsDashboard() {
       if (prefs.viewMode && ["table", "cards"].includes(prefs.viewMode)) setViewMode(prefs.viewMode);
       if (typeof prefs.searchQuery === "string") setSearchQuery(prefs.searchQuery);
       if (typeof prefs.excludeQuery === "string") setExcludeQuery(prefs.excludeQuery);
-      if (typeof prefs.fitOnly === "boolean") setFitOnly(prefs.fitOnly);
+      if (prefs.fitOnly === true) setFitOnly(true);
       if (typeof prefs.minFitScore === "number" && prefs.minFitScore >= 0 && prefs.minFitScore <= 100) setMinFitScore(prefs.minFitScore);
       if (prefs.datePreset && DATE_PRESETS.some((p) => p.value === prefs.datePreset)) setDatePreset(prefs.datePreset);
       if (prefs.customDateRange?.from || prefs.customDateRange?.to) {
@@ -331,10 +328,11 @@ export default function SignalsDashboard() {
     localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
   }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
-  const fetchSignals = async () => {
+  const fetchSignals = useCallback(async (options?: { silent?: boolean; withLoading?: boolean }) => {
     if (!profileName) return;
-    
-    setIsLoading(true);
+    const { silent = false, withLoading = true } = options || {};
+
+    if (withLoading) setIsLoading(true);
     try {
       const response = await getSignals(profileName);
       if (response.success && response.data) {
@@ -344,11 +342,69 @@ export default function SignalsDashboard() {
       }
     } catch (error) {
       console.error("Error fetching signals:", error);
-      toast.error("Failed to load signals");
+      if (!silent) toast.error("Failed to load signals");
     } finally {
-      setIsLoading(false);
+      if (withLoading) setIsLoading(false);
     }
-  };
+  }, [profileName]);
+
+  useEffect(() => {
+    if (!profileName) return;
+
+    fetchSignals();
+
+    const cleanup = setupRealtimeSubscription();
+    return cleanup;
+  }, [profileName, setupRealtimeSubscription, fetchSignals]);
+
+  useEffect(() => {
+    if (!profileName) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const runAutoRefresh = async () => {
+      const now = Date.now();
+      if (now - lastAutoRefreshAtRef.current < AUTO_REFRESH_FOCUS_THROTTLE_MS) return;
+      if (inFlight || cancelled) return;
+      if (document.hidden || activeTab !== "signals") return;
+      if (isRefreshing || isScraping || isSurgeRunning || isHunting) return;
+
+      inFlight = true;
+      lastAutoRefreshAtRef.current = now;
+      setIsAutoRefreshing(true);
+
+      try {
+        await refreshSignals(profileName);
+        if (!cancelled) {
+          await fetchSignals({ silent: true, withLoading: false });
+        }
+      } catch (error) {
+        console.error("Auto-refresh signals failed:", error);
+      } finally {
+        if (!cancelled) setIsAutoRefreshing(false);
+        inFlight = false;
+      }
+    };
+
+    const onFocusOrVisible = () => {
+      if (!document.hidden) void runAutoRefresh();
+    };
+
+    const intervalId = window.setInterval(() => {
+      void runAutoRefresh();
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, [profileName, activeTab, fetchSignals, isRefreshing, isScraping, isSurgeRunning, isHunting]);
   
   const handleRefresh = async () => {
     if (!profileName) return;
@@ -358,14 +414,14 @@ export default function SignalsDashboard() {
       const response = await refreshSignals(profileName);
       if (response.success && "data" in response && response.data) {
         toast.success(`Refreshed: ${response.data.fetched || 0} new signals found`);
-        await fetchSignals();
+        await fetchSignals({ withLoading: false, silent: true });
         
         // Trigger AI enrichment for new signals
         toast.info("Enriching signals with AI insights...", { duration: 5000 });
         const enrichResult = await enrichSignalsWithAI();
         if (enrichResult.success && enrichResult.enriched > 0) {
           toast.success(`AI enriched ${enrichResult.enriched} signals`);
-          await fetchSignals(); // Reload to show AI insights
+          await fetchSignals({ withLoading: false, silent: true }); // Reload to show AI insights
         }
       } else {
         toast.error("Failed to refresh signals");
@@ -390,7 +446,7 @@ export default function SignalsDashboard() {
         const { scrapedPages, signalsFound, signalsInserted } = response;
         toast.success(`Scraped ${scrapedPages} career pages: ${signalsInserted} new job signals added`);
         if (signalsInserted > 0) {
-          await fetchSignals();
+          await fetchSignals({ withLoading: false, silent: true });
         }
       } else {
         toast.error(response.error || "Failed to scrape job signals");
@@ -417,7 +473,7 @@ export default function SignalsDashboard() {
       const result = await enrichSignalsWithAI(unenrichedSignals.map(s => s.id));
       if (result.success) {
         toast.success(`AI enriched ${result.enriched} signals`);
-        await fetchSignals();
+        await fetchSignals({ withLoading: false, silent: true });
       } else {
         toast.error(result.error || "AI enrichment failed");
       }
@@ -487,7 +543,7 @@ export default function SignalsDashboard() {
         if (result.totalInserted && result.totalInserted > 0) {
           toast.info("Enriching new signals with AI insights...", { duration: 5000 });
           await enrichSignalsWithAI();
-          await fetchSignals();
+          await fetchSignals({ withLoading: false, silent: true });
         }
       } else {
         toast.error(result.error || "Hunt failed", { id: "pe-hunt" });
@@ -830,6 +886,17 @@ export default function SignalsDashboard() {
     return filtered;
   }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
+  const visibleSignals = useMemo(
+    () => filteredSignals.slice(0, visibleSignalsCount),
+    [filteredSignals, visibleSignalsCount]
+  );
+
+  const hasMoreSignals = visibleSignals.length < filteredSignals.length;
+
+  useEffect(() => {
+    setVisibleSignalsCount(SIGNALS_PAGE_SIZE);
+  }, [activeRegion, tierFilter, sortBy, minScore, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange, activeTab]);
+
   if (!profileName) {
     return (
       <AppLayout title="Signals Dashboard" description="Recruitment intel">
@@ -969,7 +1036,10 @@ export default function SignalsDashboard() {
                 {fitOnly ? <span className="meta-chip">Best-fit enabled</span> : null}
                 <span className="ml-auto text-sm text-muted-foreground flex items-center gap-1.5 font-medium">
                   <Filter className="h-3.5 w-3.5" />
-                  {filteredSignals.length} results
+                  {filteredSignals.length} results • showing {visibleSignals.length}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {isAutoRefreshing ? "Updating..." : "Auto-updates every 5 min"}
                 </span>
               </div>
 
@@ -1145,7 +1215,7 @@ export default function SignalsDashboard() {
               </Card>
             ) : viewMode === "table" ? (
               <SignalTableView
-                signals={filteredSignals}
+                signals={visibleSignals}
                 onDismiss={handleDismiss}
                 onTAContacts={handleTAContacts}
                 onCVMatches={handleCVMatches}
@@ -1159,7 +1229,7 @@ export default function SignalsDashboard() {
               />
             ) : (
               <div className="space-y-3">
-                {filteredSignals.map((signal) => (
+                {visibleSignals.map((signal) => (
                   <SignalCard
                     key={signal.id}
                     signal={signal}
@@ -1175,6 +1245,38 @@ export default function SignalsDashboard() {
                     }}
                   />
                 ))}
+              </div>
+            )}
+
+            {filteredSignals.length > SIGNALS_PAGE_SIZE && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/80 px-4 py-3">
+                <p className="text-sm text-muted-foreground">
+                  Showing <span className="font-medium text-foreground">{visibleSignals.length}</span> of{" "}
+                  <span className="font-medium text-foreground">{filteredSignals.length}</span> signals
+                </p>
+                <div className="flex items-center gap-2">
+                  {visibleSignals.length > SIGNALS_PAGE_SIZE && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setVisibleSignalsCount(SIGNALS_PAGE_SIZE)}
+                    >
+                      Show latest 25
+                    </Button>
+                  )}
+                  {hasMoreSignals && (
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        setVisibleSignalsCount((prev) =>
+                          Math.min(prev + SIGNALS_PAGE_SIZE, filteredSignals.length)
+                        )
+                      }
+                    >
+                      Load 25 more
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </TabsContent>
@@ -1286,7 +1388,7 @@ export default function SignalsDashboard() {
         signal={selectedSignalForRetrain}
         profileName={profileName || ""}
         onRetrained={() => {
-          fetchSignals();
+          fetchSignals({ withLoading: false, silent: true });
         }}
       />
     </AppLayout>
