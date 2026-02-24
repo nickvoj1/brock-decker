@@ -1411,39 +1411,51 @@ Deno.serve(async (req) => {
       }
 
       try {
-        // Build query params for new API search endpoint
-        const queryParams = new URLSearchParams()
-        
-        // Add target roles
-        targetRoles.forEach(title => queryParams.append('person_titles[]', title))
-        
-        // Add locations (disabled for target-company mode; strict location enforced post-fetch)
-        if (useApolloLocationQuery && primarySearchLocations.length > 0) {
-          primarySearchLocations.forEach(loc => queryParams.append('person_locations[]', loc))
+        const buildComboParams = (includeRoleFilters: boolean): URLSearchParams => {
+          const params = new URLSearchParams()
+
+          if (includeRoleFilters) {
+            targetRoles.forEach(title => params.append('person_titles[]', title))
+          }
+
+          // Add locations (disabled for target-company mode; strict location enforced post-fetch)
+          if (useApolloLocationQuery && primarySearchLocations.length > 0) {
+            primarySearchLocations.forEach(loc => params.append('person_locations[]', loc))
+          }
+
+          // Add target company filter if specified (signal-based search)
+          if (targetCompany) {
+            params.append('q_organization_name', targetCompany)
+          }
+
+          // Target-company runs should not be narrowed by keyword constraints.
+          if (!targetCompany) {
+            const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
+            if (qKeywords) {
+              params.append('q_keywords', qKeywords)
+            }
+          }
+
+          return params
         }
-        
-        // Add target company filter if specified (signal-based search)
+
+        const queryParams = buildComboParams(true)
         if (targetCompany) {
-          queryParams.append('q_organization_name', targetCompany)
           console.log(`Filtering by company: ${targetCompany}`)
-        }
-        
-        // Target-company runs should not be narrowed by keyword constraints.
-        if (!targetCompany) {
-          const qKeywords = buildApolloKeywordQuery(combo.industry, combo.sector)
+          console.log(`Search [${combo.label}] - role filter count: ${targetRoles.length}`)
+          console.log(`Search [${combo.label}] - Keyword filter skipped for target-company mode`)
+        } else {
+          const qKeywords = queryParams.get('q_keywords')
           if (qKeywords) {
-            queryParams.append('q_keywords', qKeywords)
             console.log(`Search [${combo.label}] - Apollo keywords:`, qKeywords)
           } else {
             console.log(`Search [${combo.label}] - No keyword filter (broad search)`)
           }
-        } else {
-          console.log(`Search [${combo.label}] - Keyword filter skipped for target-company mode`)
         }
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
         const maxPages = targetCompany
-          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 8 : 6)
+          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4)
           : 2
         let currentPage = 1
         let hasMoreResults = true
@@ -1475,6 +1487,38 @@ Deno.serve(async (req) => {
             const totalAvailable = apolloData.pagination?.total_entries || 0
 
             console.log(`Apollo page ${currentPage}: ${people.length} people returned (total available: ${totalAvailable})`)
+
+            // Target-company safeguard: if role filters are too narrow, retry first page without person_titles.
+            if (targetCompany && people.length === 0 && currentPage === 1 && targetRoles.length > 0) {
+              try {
+                console.log('No people found with title filters; retrying first page without person_titles...')
+                const relaxedParams = buildComboParams(false)
+                relaxedParams.set('per_page', String(perPage))
+                relaxedParams.set('page', String(currentPage))
+                const relaxedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${relaxedParams.toString()}`
+                const relaxedResponse = await fetch(relaxedUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apolloApiKey,
+                  },
+                })
+
+                if (relaxedResponse.ok) {
+                  const relaxedData = await relaxedResponse.json()
+                  people = relaxedData.people || []
+                  console.log(`Apollo people returned (no-title fallback): ${people.length}`)
+                } else {
+                  const errorText = await relaxedResponse.text()
+                  if (!apolloApiErrorMessage) {
+                    apolloApiErrorMessage = formatApolloApiError(relaxedResponse.status, errorText)
+                  }
+                  console.error('Apollo no-title fallback error:', relaxedResponse.status, errorText)
+                }
+              } catch (fallbackError) {
+                console.error('Apollo no-title fallback exception:', fallbackError)
+              }
+            }
 
             // If no results on first page with sector, retry without sector constraint
             if (!targetCompany && people.length === 0 && currentPage === 1 && combo.sector && combo.industry) {
@@ -1879,20 +1923,26 @@ Deno.serve(async (req) => {
         )
         
         try {
-          // Build query params for retry
-          const retryParams = new URLSearchParams()
-          targetRoles.forEach(title => retryParams.append('person_titles[]', title))
-          
-          // Add locations (disabled for target-company mode; strict location enforced post-fetch)
-          if (useApolloLocationQuery && strategy.locations.length > 0) {
-            strategy.locations.forEach(loc => retryParams.append('person_locations[]', loc))
+          const buildRetryParams = (includeRoleFilters: boolean): URLSearchParams => {
+            const params = new URLSearchParams()
+            if (includeRoleFilters) {
+              targetRoles.forEach(title => params.append('person_titles[]', title))
+            }
+
+            // Add locations (disabled for target-company mode; strict location enforced post-fetch)
+            if (useApolloLocationQuery && strategy.locations.length > 0) {
+              strategy.locations.forEach(loc => params.append('person_locations[]', loc))
+            }
+
+            // Use the strategy's company name
+            params.append('q_organization_name', strategy.companyName)
+            return params
           }
-          
-          // Use the strategy's company name
-          retryParams.append('q_organization_name', strategy.companyName)
+
+          const retryParams = buildRetryParams(true)
           
           // Search more pages for retries
-          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 8 : 6
+          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4
           let currentPage = 1
           let hasMoreResults = true
           
@@ -1916,8 +1966,40 @@ Deno.serve(async (req) => {
             
             if (apolloResponse.ok) {
               const apolloData = await apolloResponse.json()
-              const people = apolloData.people || []
+              let people = apolloData.people || []
               console.log(`Retry page ${currentPage}: ${people.length} people`)
+
+              // Retry safeguard for target-company mode: remove title filters if the first page is empty.
+              if (people.length === 0 && currentPage === 1 && targetRoles.length > 0) {
+                try {
+                  console.log('Retry strategy returned 0 with title filters; retrying without person_titles...')
+                  const relaxedParams = buildRetryParams(false)
+                  relaxedParams.set('per_page', '100')
+                  relaxedParams.set('page', String(currentPage))
+                  const relaxedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${relaxedParams.toString()}`
+                  const relaxedResponse = await fetch(relaxedUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': apolloApiKey,
+                    },
+                  })
+
+                  if (relaxedResponse.ok) {
+                    const relaxedData = await relaxedResponse.json()
+                    people = relaxedData.people || []
+                    console.log(`Retry no-title fallback people: ${people.length}`)
+                  } else {
+                    const errorText = await relaxedResponse.text()
+                    if (!apolloApiErrorMessage) {
+                      apolloApiErrorMessage = formatApolloApiError(relaxedResponse.status, errorText)
+                    }
+                    console.error('Retry no-title fallback Apollo error:', relaxedResponse.status, errorText.substring(0, 200))
+                  }
+                } catch (fallbackError) {
+                  console.error('Retry no-title fallback exception:', fallbackError)
+                }
+              }
               
               if (people.length === 0) {
                 hasMoreResults = false
