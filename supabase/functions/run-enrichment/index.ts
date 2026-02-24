@@ -842,6 +842,48 @@ function countryTokenToQueryLabel(token: string): string {
     .join(' ')
 }
 
+const KNOWN_COUNTRY_TOKENS = new Set<string>([
+  'united kingdom',
+  'united states',
+  'united arab emirates',
+  'germany',
+  'france',
+  'netherlands',
+  'switzerland',
+  'ireland',
+  'spain',
+  'italy',
+  'belgium',
+  'luxembourg',
+  'saudi arabia',
+  'qatar',
+  'bahrain',
+  'kuwait',
+  'oman',
+  'austria',
+  'poland',
+  'portugal',
+  'sweden',
+  'denmark',
+  'norway',
+  'finland',
+  'canada',
+  'mexico',
+  'brazil',
+  'india',
+  'china',
+  'japan',
+  'south korea',
+  'australia',
+  'singapore',
+  'hong kong',
+  'israel',
+])
+
+function isKnownCountryToken(token: string): boolean {
+  return KNOWN_COUNTRY_TOKENS.has(normalizeCountry(token))
+}
+
 function matchesStrictLocation(
   person: { city?: string | null; state?: string | null; country?: string | null },
   mode: 'city' | 'country' | 'none',
@@ -1191,14 +1233,15 @@ Deno.serve(async (req) => {
                 if (locationLabels[citySlugLookup]) return locationLabels[citySlugLookup]
 
                 const countryToken = normalizeCountry(parts[parts.length - 1])
-                if (countryToken) {
+                if (countryToken && isKnownCountryToken(countryToken)) {
                   return `${parts[0]}, ${countryTokenToQueryLabel(countryToken)}`
                 }
+                return raw
               }
             }
 
             const normalizedCountry = normalizeCountry(raw)
-            if (normalizedCountry && (isLocationCountryOnly(raw) || normalizedCountry !== lookup)) {
+            if (normalizedCountry && isKnownCountryToken(normalizedCountry)) {
               return countryTokenToQueryLabel(normalizedCountry)
             }
 
@@ -1216,6 +1259,7 @@ Deno.serve(async (req) => {
     const explicitCountryTokens = apolloLocations
       .filter((loc) => isLocationCountryOnly(loc))
       .map((loc) => normalizeCountry(loc))
+      .filter((token) => isKnownCountryToken(token))
       .filter(Boolean)
     const derivedCountryTokens = strictCityLocations
       .map((loc) => {
@@ -1230,11 +1274,16 @@ Deno.serve(async (req) => {
     const strictCountryLocations = Array.from(
       new Set(strictCountryTokens.map((token) => countryTokenToQueryLabel(token)).filter(Boolean))
     )
-    const primarySearchLocations = strictLocationEnabled && strictCityLocations.length > 0
-      ? strictCityLocations
+    const fallbackCityLocations = strictLocationEnabled && strictCityLocations.length === 0 && strictCountryTokens.length === 0
+      ? apolloLocations
+      : []
+    const primarySearchLocations = strictLocationEnabled
+      ? (strictCityLocations.length > 0 ? strictCityLocations : fallbackCityLocations)
       : apolloLocations
     const initialLocationMode: 'city' | 'country' =
-      strictLocationEnabled && strictCityLocations.length > 0 ? 'city' : 'country'
+      strictLocationEnabled
+        ? ((strictCityLocations.length > 0 || (strictCountryTokens.length === 0 && fallbackCityLocations.length > 0)) ? 'city' : 'country')
+        : 'country'
 
     const allowedCityTokens = new Set(
       primarySearchLocations
