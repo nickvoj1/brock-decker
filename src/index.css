@@ -208,14 +208,6 @@
     z-index: 1;
   }
 
-  .panel-shell-flat {
-    background-image: none;
-  }
-
-  .panel-shell-flat::before {
-    display: none;
-  }
-
   .meta-chip {
     @apply inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/45 px-2.5 py-1 text-xs text-muted-foreground;
     box-shadow:
