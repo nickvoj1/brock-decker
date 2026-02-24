@@ -1220,7 +1220,7 @@ export function FantasticJobsBoard() {
         </CardContent>
       </Card>
 
-      <Card className="panel-shell">
+      <Card className="panel-shell panel-shell-flat">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">{sortedJobs.length > 0 ? `${sortedJobs.length} Jobs Found` : "Job Results"}</CardTitle>

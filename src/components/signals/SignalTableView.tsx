@@ -341,7 +341,7 @@ export const SignalTableView = memo(function SignalTableView({
   onSignalUpdated,
 }: SignalTableViewProps) {
   return (
-    <div className="panel-shell overflow-auto">
+    <div className="panel-shell panel-shell-flat overflow-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border/40 bg-muted/40">
