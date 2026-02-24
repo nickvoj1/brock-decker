@@ -342,7 +342,7 @@ export const SignalTableView = memo(function SignalTableView({
 }: SignalTableViewProps) {
   return (
     <div className="overflow-auto rounded-xl border border-border/65 bg-card">
-      <table className="w-full text-sm bg-card">
+      <table className="signals-flat-table w-full text-sm bg-card">
         <thead>
           <tr className="border-b border-border/50 bg-card">
             <th className="py-3 px-3 w-8" />

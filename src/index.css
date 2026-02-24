@@ -258,6 +258,22 @@
       0 14px 20px -22px hsl(var(--foreground) / 0.55);
   }
 
+  /* Hard reset for Signals table surface so no gradient/tint can bleed in. */
+  .signals-flat-table,
+  .signals-flat-table thead,
+  .signals-flat-table tbody,
+  .signals-flat-table tr,
+  .signals-flat-table th,
+  .signals-flat-table td {
+    background-image: none !important;
+    background-color: hsl(var(--card)) !important;
+  }
+
+  .signals-flat-table tbody tr:hover,
+  .signals-flat-table tbody tr:hover td {
+    background-color: hsl(var(--muted) / 0.45) !important;
+  }
+
   .depth-header {
     @apply border-b border-border/70 bg-background/95;
     box-shadow:
