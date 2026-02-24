@@ -846,12 +846,14 @@ export default function SignalsDashboard() {
 
   return (
     <AppLayout title="Signals Dashboard" description="Recruitment Intel">
-      <div className="space-y-6">
+      <div className="space-y-6 signals-page">
         {/* Header */}
-        <div className="panel-shell p-4 md:p-6 space-y-4">
+        <div className="signals-hero space-y-4">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div className="space-y-2">
-              <p className="mono-label">Signals Command Center</p>
+              <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Signals Workspace
+              </p>
               <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground">
                 Signals
               </h1>
@@ -910,19 +912,15 @@ export default function SignalsDashboard() {
                 <button
                   key={key}
                   onClick={() => setActiveRegion(key)}
-                  className={`panel-shell interactive-lift relative p-4 rounded-xl text-left transition-all duration-200 ${
-                    isActive
-                      ? "border-primary/70 bg-primary/5 shadow-lg ring-1 ring-primary/30"
-                      : "border-border/50 hover:border-border/80 hover:shadow-sm bg-card"
-                  }`}
+                  className={`signals-region-card ${isActive ? "is-active" : ""}`}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <span className="text-2xl">{config.emoji}</span>
-                    <span className={`text-3xl font-semibold tabular-nums tracking-tight ${isActive ? "text-primary" : "text-foreground"}`}>
+                    <span className={`text-3xl font-semibold tabular-nums tracking-tight ${isActive ? "text-primary" : "text-foreground/85"}`}>
                       {count}
                     </span>
                   </div>
-                  <p className={`text-sm font-semibold ${isActive ? "text-primary" : "text-foreground"}`}>
+                  <p className={`text-sm font-semibold ${isActive ? "text-primary" : "text-foreground/90"}`}>
                     {config.label}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -935,27 +933,27 @@ export default function SignalsDashboard() {
         </div>
 
         {/* Tier summary */}
-        <div className="panel-shell flex flex-wrap items-center gap-4 p-3 text-sm text-muted-foreground">
+        <div className="signals-summary-strip flex flex-wrap items-center gap-4">
           <span className="font-semibold text-foreground tabular-nums">{signals.filter(s => !s.is_dismissed).length} signals</span>
           <div className="h-4 w-px bg-border" />
-          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-destructive" /> Tier 1: {tierCounts.tier_1 || 0}</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-warning" /> Tier 2: {tierCounts.tier_2 || 0}</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-success" /> Tier 3: {tierCounts.tier_3 || 0}</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-primary" /> Tier 1: {tierCounts.tier_1 || 0}</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-foreground/45" /> Tier 2: {tierCounts.tier_2 || 0}</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-foreground/25" /> Tier 3: {tierCounts.tier_3 || 0}</span>
         </div>
 
         {/* Tabs: Signals vs Jobs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabView)} className="w-full">
-          <TabsList className="control-surface grid h-12 w-full max-w-xl grid-cols-2 rounded-xl border border-primary/40 bg-primary/5 p-1.5 shadow-sm">
+          <TabsList className="signals-tab-list">
             <TabsTrigger
               value="signals"
-              className="interactive-lift gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+              className="gap-2 rounded-lg font-medium text-foreground/75 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm"
             >
               <Sparkles className="h-4 w-4" />
               Signals Feed
             </TabsTrigger>
             <TabsTrigger
               value="jobboard"
-              className="interactive-lift gap-2 rounded-lg font-semibold tracking-wide text-foreground/80 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+              className="gap-2 rounded-lg font-medium text-foreground/75 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm"
             >
               <Search className="h-4 w-4" />
               Job Board
@@ -964,9 +962,9 @@ export default function SignalsDashboard() {
           
           <TabsContent value="signals" className="mt-6 space-y-5">
             {/* Filters Row */}
-            <div className="rounded-xl border border-border/65 bg-card p-3 space-y-3 shadow-sm">
+            <div className="signals-filter-card">
               <div className="flex flex-wrap items-center gap-3">
-                <p className="mono-label">Filter Stack</p>
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Filters</p>
                 <span className="meta-chip">{REGION_CONFIG[activeRegion].label}</span>
                 {fitOnly ? <span className="meta-chip">Best-fit enabled</span> : null}
                 <span className="ml-auto text-sm text-muted-foreground flex items-center gap-1.5 font-medium">
