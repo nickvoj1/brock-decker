@@ -29,9 +29,9 @@ interface SignalTableViewProps {
 }
 
 const TIER_DOT: Record<string, string> = {
-  tier_1: "bg-red-500",
-  tier_2: "bg-amber-500",
-  tier_3: "bg-emerald-500",
+  tier_1: "bg-primary",
+  tier_2: "bg-foreground/45",
+  tier_3: "bg-foreground/25",
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -206,8 +206,8 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
 
   return (
     <>
-      <tr 
-        className="bg-white border-b border-[#d9d9dc] hover:bg-[#f7f7f8] transition-colors cursor-pointer group"
+      <tr
+        className="group cursor-pointer border-b border-border/55 bg-card transition-colors hover:bg-muted/40"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Tier Dot */}
@@ -215,38 +215,38 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
           <div className={`h-2.5 w-2.5 rounded-full ${tierDot}`} title={signal.tier || "Unknown"} />
         </td>
         {/* Date */}
-        <td className="py-3 px-3 text-xs text-[#4b5563] whitespace-nowrap tabular-nums font-mono-ui">
+        <td className="py-3 px-3 text-xs text-muted-foreground whitespace-nowrap tabular-nums font-mono-ui">
           {formatDate(signal.published_at)}
         </td>
         {/* Firm */}
         <td className="py-3 px-3">
-          <span className="text-sm font-semibold text-[#1f2937]">
+          <span className="text-sm font-semibold text-foreground">
             {firmName}
           </span>
         </td>
         {/* Type */}
         <td className="py-3 px-3">
-          <Badge variant="outline" className="text-xs font-medium text-[#374151] border-[#d9d9dc] bg-[#f8f8f9]">
+          <Badge variant="outline" className="text-[11px] font-medium border-border/60 bg-muted/40 text-foreground/80">
             {typeLabel}
           </Badge>
         </td>
         {/* Amount */}
-        <td className="py-3 px-3 text-sm font-semibold text-[#1f2937] whitespace-nowrap tabular-nums">
+        <td className="py-3 px-3 text-sm font-semibold text-foreground whitespace-nowrap tabular-nums">
           {formatAmount(signal.amount, signal.currency)}
         </td>
         {/* Fund / Key Detail */}
-        <td className="py-3 px-3 text-sm text-[#4b5563] max-w-[220px] truncate" title={signal.title}>
+        <td className="py-3 px-3 text-sm text-muted-foreground max-w-[220px] truncate" title={signal.title}>
           {extractFundName(signal)}
         </td>
         {/* Region */}
-        <td className="py-3 px-3 text-xs font-medium text-[#4b5563] whitespace-nowrap font-mono-ui">
+        <td className="py-3 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap font-mono-ui">
           {signal.region?.toUpperCase() || "—"}
         </td>
         {/* Source */}
-        <td className="py-3 px-3 text-xs text-[#4b5563] truncate max-w-[100px]">
+        <td className="py-3 px-3 text-xs text-muted-foreground truncate max-w-[100px]">
           {signal.source ? (
             signal.url ? (
-              <a href={signal.url} target="_blank" rel="noopener noreferrer" className="text-[#4b5563] hover:text-primary flex items-center gap-1 transition-colors" onClick={e => e.stopPropagation()}>
+              <a href={signal.url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors" onClick={e => e.stopPropagation()}>
                 {signal.source}
                 <ExternalLink className="h-3 w-3" />
               </a>
@@ -262,7 +262,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={copyRow} title="Copy row">
               {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
             </Button>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-[#6b7280] hover:text-destructive" onClick={() => onDismiss(signal.id)} title="Dismiss">
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={() => onDismiss(signal.id)} title="Dismiss">
               <Trash2 className="h-3 w-3" />
             </Button>
           </div>
@@ -270,7 +270,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
       </tr>
       {/* Expanded Detail Row */}
       {expanded && (
-        <tr className="bg-white">
+        <tr className="bg-card">
           <td colSpan={9} className="p-4">
             <div className="space-y-3 max-w-4xl">
               {/* Title / Headline */}
@@ -341,18 +341,18 @@ export const SignalTableView = memo(function SignalTableView({
   onSignalUpdated,
 }: SignalTableViewProps) {
   return (
-    <div className="overflow-auto rounded-xl border border-[#d5d7db] bg-white">
-      <table className="signals-flat-table w-full text-sm bg-white">
+    <div className="overflow-auto rounded-xl border border-border/60 bg-card shadow-sm">
+      <table className="signals-flat-table w-full text-sm">
         <thead>
-          <tr className="border-b border-[#d9d9dc] bg-white">
+          <tr className="border-b border-border/60 bg-muted/35">
             <th className="py-3 px-3 w-8" />
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Date</th>
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Firm</th>
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Type</th>
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Amount</th>
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Fund / Detail</th>
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Region</th>
-            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-[#4b5563]">Source</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Date</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Firm</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Type</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Amount</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Fund / Detail</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Region</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-medium tracking-[0.08em] uppercase text-muted-foreground">Source</th>
             <th className="py-3 px-3 w-32" />
           </tr>
         </thead>

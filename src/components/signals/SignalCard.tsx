@@ -47,18 +47,18 @@ interface SignalCardProps {
 const TIER_CONFIG = {
   tier_1: { 
     label: "Tier 1", 
-    color: "bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400",
-    dotColor: "bg-red-500",
+    color: "bg-primary/10 text-primary border-primary/30",
+    dotColor: "bg-primary",
   },
   tier_2: { 
     label: "Tier 2", 
-    color: "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400",
-    dotColor: "bg-amber-500",
+    color: "bg-muted/70 text-foreground/75 border-border/60",
+    dotColor: "bg-foreground/45",
   },
   tier_3: { 
     label: "Tier 3", 
-    color: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
-    dotColor: "bg-emerald-500",
+    color: "bg-muted/50 text-muted-foreground border-border/50",
+    dotColor: "bg-foreground/25",
   },
 };
 
@@ -83,17 +83,7 @@ const SECTOR_KEYWORDS: Record<string, string[]> = {
   "Hedge Fund": ["hedge fund", "macro fund", "quant fund", "multi-strategy"],
 };
 
-const SECTOR_COLORS: Record<string, string> = {
-  "PE": "bg-purple-500/10 text-purple-700 dark:text-purple-400",
-  "VC": "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  "Bank": "bg-slate-500/10 text-slate-700 dark:text-slate-400",
-  "FinTech": "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",
-  "Consultancy": "bg-orange-500/10 text-orange-700 dark:text-orange-400",
-  "Secondaries": "bg-pink-500/10 text-pink-700 dark:text-pink-400",
-  "Credit": "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400",
-  "Infra": "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  "Hedge Fund": "bg-violet-500/10 text-violet-700 dark:text-violet-400",
-};
+const SECTOR_BADGE_CLASS = "bg-muted/55 text-foreground/75 border border-border/60";
 
 function detectSector(signal: { title: string; description?: string | null; company?: string | null }): string | null {
   const text = `${signal.title} ${signal.description || ""} ${signal.company || ""}`.toLowerCase();
@@ -179,13 +169,11 @@ export const SignalCard = memo(function SignalCard({
   const signalIcon = SIGNAL_TYPE_ICONS[signal.signal_type || ""] || <Briefcase className="h-3.5 w-3.5" />;
   const hasAIInsight = Boolean(signal.ai_insight || signal.ai_pitch);
   const sector = detectSector(signal);
-  const sectorColor = sector ? SECTOR_COLORS[sector] : null;
   const firmName = resolveFirmName(signal);
   
   // Determine if signal needs validation
   const isPending = !signal.user_feedback && !signal.validated_region;
   const isValidated = signal.validated_region && signal.validated_region !== 'REJECTED';
-  const isRejected = signal.validated_region === 'REJECTED';
   
   // Extract location from details if available
   const location = (signal.details as Record<string, unknown>)?.location as string | undefined;
@@ -247,7 +235,7 @@ export const SignalCard = memo(function SignalCard({
   };
   
   return (
-    <Card className="group panel-shell border-border/40 hover:border-primary/30 transition-all duration-200 hover:shadow-md overflow-hidden rounded-xl">
+    <Card className="group overflow-hidden rounded-xl border border-border/60 bg-card/95 shadow-sm transition-all duration-200 hover:border-border/85 hover:shadow-md">
       <CardContent className="p-0">
         {/* Tier indicator bar */}
         <div className={`h-1 w-full ${tierConfig.dotColor}`} />
@@ -273,19 +261,19 @@ export const SignalCard = memo(function SignalCard({
               <div className="flex items-center gap-1.5 flex-wrap">
                 {/* Status Badge - Pending/Validated */}
                 {isPending && (
-                  <Badge variant="outline" className="bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400 text-xs">
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-600/35 text-xs">
                     <AlertCircle className="h-3 w-3 mr-1" />
                     Pending
                   </Badge>
                 )}
                 {isValidated && (
-                  <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400 text-xs">
+                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 border-emerald-600/35 text-xs">
                     <Check className="h-3 w-3 mr-1" />
                     Validated
                   </Badge>
                 )}
-                {sector && sectorColor && (
-                  <Badge variant="secondary" className={`${sectorColor} border-0 text-xs font-medium`}>
+                {sector && (
+                  <Badge variant="secondary" className={`${SECTOR_BADGE_CLASS} text-xs font-medium`}>
                     {sector}
                   </Badge>
                 )}
@@ -300,7 +288,7 @@ export const SignalCard = memo(function SignalCard({
                 )}
                 {/* AI Confidence */}
                 {signal.ai_confidence !== undefined && signal.ai_confidence > 0 && (
-                  <Badge variant="outline" className="text-xs text-muted-foreground font-mono-ui">
+                  <Badge variant="outline" className="text-xs text-muted-foreground border-border/60 font-mono-ui">
                     {signal.ai_confidence}% conf
                   </Badge>
                 )}
@@ -343,7 +331,7 @@ export const SignalCard = memo(function SignalCard({
           {/* AI Insight Toggle */}
           {hasAIInsight ? (
             <button
-              className="w-full flex items-center justify-between text-left py-2 px-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+              className="w-full flex items-center justify-between text-left py-2 px-3 rounded-lg border border-border/50 bg-muted/30 hover:bg-muted/50 transition-colors"
               onClick={() => setShowInsight(!showInsight)}
             >
               <span className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -358,7 +346,7 @@ export const SignalCard = memo(function SignalCard({
             </button>
           ) : (
             <button
-              className="w-full flex items-center justify-between text-left py-2 px-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors disabled:opacity-50"
+              className="w-full flex items-center justify-between text-left py-2 px-3 rounded-lg border border-border/50 bg-muted/30 hover:bg-muted/50 transition-colors disabled:opacity-50"
               onClick={handleEnrichAI}
               disabled={enriching}
             >
@@ -377,10 +365,10 @@ export const SignalCard = memo(function SignalCard({
           {showInsight && hasAIInsight && (
             <div className="space-y-2 animate-in slide-in-from-top-2 duration-200">
               {signal.ai_insight && (
-                <div className="bg-amber-50 dark:bg-amber-900/10 rounded-lg p-3 border border-amber-200/50 dark:border-amber-800/30">
+                <div className="rounded-lg border border-amber-300/45 bg-amber-50/70 p-3">
                   <div className="flex items-start gap-2">
-                    <Lightbulb className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-amber-900 dark:text-amber-100 leading-relaxed">
+                    <Lightbulb className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-foreground leading-relaxed">
                       {signal.ai_insight}
                     </p>
                   </div>
@@ -402,9 +390,9 @@ export const SignalCard = memo(function SignalCard({
           
           {/* Pending Signal Action Row - Simple Approve/Reject */}
           {isPending && (
-            <div className="flex items-center gap-2 p-2 bg-orange-50 dark:bg-orange-900/10 rounded-lg border border-orange-200/50 dark:border-orange-800/30">
-              <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
-              <span className="text-xs text-orange-800 dark:text-orange-200 flex-1">
+            <div className="flex items-center gap-2 p-2 rounded-lg border border-amber-300/40 bg-amber-50/55">
+              <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0" />
+              <span className="text-xs text-foreground/85 flex-1">
                 Is this a good signal for {signal.region?.toUpperCase()}?
               </span>
               <div className="flex items-center gap-1">
@@ -465,7 +453,7 @@ export const SignalCard = memo(function SignalCard({
           {/* Meta & Source */}
           <div className="flex items-center justify-between pt-2 border-t border-border/20">
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="mono-label text-[9px]">Signal</span>
+              <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Signal</span>
               {signal.source && (
                 <span className="truncate max-w-[120px]">{signal.source}</span>
               )}
