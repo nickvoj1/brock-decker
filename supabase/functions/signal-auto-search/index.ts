@@ -733,13 +733,13 @@ async function searchWithStrategy(
       strategy.locations.forEach(loc => params.append('person_locations[]', loc))
     }
     params.append('q_organization_name', strategy.company)
-    params.set('per_page', '25')
+    params.set('per_page', '50')
     params.set('page', String(page))
     return params
   }
 
   const runPageScan = async (includeRoleFilters: boolean): Promise<void> => {
-    for (let page = 1; page <= 3; page++) {
+    for (let page = 1; page <= 2; page++) {
       // CREDIT OPTIMIZATION: Stop if we already have enough contacts
       if (contacts.length >= maxContactsNeeded) {
         console.log(`  CREDIT SAVER: Already have ${contacts.length} contacts, skipping further pages`)
@@ -877,74 +877,78 @@ async function searchWithStrategy(
       console.log(`  Enriching ${limitedPendingReveals.length} contacts...`)
     }
     
-    for (const pending of limitedPendingReveals) {
+    const ENRICH_BATCH_SIZE = 8
+    for (let i = 0; i < limitedPendingReveals.length; i += ENRICH_BATCH_SIZE) {
       // Double-check we still need more contacts
       if (contacts.length >= maxContactsNeeded) {
         console.log(`  CREDIT SAVER: Stopping enrichment - reached ${contacts.length} contacts`)
         break
       }
-      
-      const person = pending.person
-      const personId = person.id as string
-      
-      try {
-        const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Api-Key': apolloApiKey,
-          },
-          body: JSON.stringify({ id: personId }),
-        })
-        globalCreditsUsed++ // Track credit usage
 
-        if (enrichResponse.ok) {
-          const enriched = await enrichResponse.json()
-          const enrichedPerson = enriched.person || {}
-          
-          const email = enrichedPerson.email?.toLowerCase()
-          if (!email || seenEmails.has(email)) continue
-          
-          const firstName = enrichedPerson.first_name || person.first_name || ''
-          const lastName = enrichedPerson.last_name || person.last_name || ''
-          const fullName = `${firstName} ${lastName}`.trim()
-          const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
-
-          const locationPasses = isPersonInAllowedLocation(
-            {
-              city: enrichedPerson.city || person.city,
-              state: enrichedPerson.state || person.state,
-              country: enrichedPerson.country || person.country,
+      const batch = limitedPendingReveals.slice(i, i + ENRICH_BATCH_SIZE)
+      const enrichResults = await Promise.allSettled(
+        batch.map(async (pending) => {
+          const person = pending.person
+          const personId = person.id as string
+          const enrichResponse = await fetch('https://api.apollo.io/api/v1/people/match', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Api-Key': apolloApiKey,
             },
-            strategy.locationMode,
-            strategy.allowedCityTokens,
-            strategy.allowedCountryTokens
-          )
-          if (!locationPasses) continue
-          
-          const locationParts = [
-            enrichedPerson.city || person.city,
-            enrichedPerson.state || person.state,
-            enrichedPerson.country || person.country
-          ].filter(Boolean)
-          const location = (locationParts as string[]).join(', ') || 'Unknown'
-
-          contacts.push({
-            name: fullName,
-            title: enrichedPerson.title || (person.title as string) || 'Unknown',
-            location,
-            email,
-            company: personCompany,
-            category: pending.categoryName,
+            body: JSON.stringify({ id: personId }),
           })
-          seenEmails.add(email)
-          console.log(`  [Enriched] ${fullName} at ${personCompany}`)
-        }
-        
-        // Small delay between calls
-        await new Promise(resolve => setTimeout(resolve, 40))
-      } catch (err) {
-        console.error('Enrichment failed:', err)
+          globalCreditsUsed++ // Track credit usage
+
+          if (!enrichResponse.ok) return null
+          const enriched = await enrichResponse.json()
+          return { pending, person: enriched.person || {} }
+        })
+      )
+
+      for (const result of enrichResults) {
+        if (contacts.length >= maxContactsNeeded) break
+        if (result.status !== 'fulfilled' || !result.value) continue
+
+        const { pending, person: enrichedPerson } = result.value
+        const person = pending.person
+        const email = enrichedPerson.email?.toLowerCase()
+        if (!email || seenEmails.has(email)) continue
+
+        const firstName = enrichedPerson.first_name || person.first_name || ''
+        const lastName = enrichedPerson.last_name || person.last_name || ''
+        const fullName = `${firstName} ${lastName}`.trim()
+        const personCompany = enrichedPerson.organization?.name || (person.organization as Record<string, unknown>)?.name as string || ''
+
+        const locationPasses = isPersonInAllowedLocation(
+          {
+            city: enrichedPerson.city || person.city,
+            state: enrichedPerson.state || person.state,
+            country: enrichedPerson.country || person.country,
+          },
+          strategy.locationMode,
+          strategy.allowedCityTokens,
+          strategy.allowedCountryTokens
+        )
+        if (!locationPasses) continue
+
+        const locationParts = [
+          enrichedPerson.city || person.city,
+          enrichedPerson.state || person.state,
+          enrichedPerson.country || person.country
+        ].filter(Boolean)
+        const location = (locationParts as string[]).join(', ') || 'Unknown'
+
+        contacts.push({
+          name: fullName,
+          title: enrichedPerson.title || (person.title as string) || 'Unknown',
+          location,
+          email,
+          company: personCompany,
+          category: pending.categoryName,
+        })
+        seenEmails.add(email)
+        console.log(`  [Enriched] ${fullName} at ${personCompany}`)
       }
     }
   }

@@ -1119,14 +1119,21 @@ Deno.serve(async (req) => {
     const targetCompanyGoalContacts = targetCompany
       ? (
           (isJobBoardSearch || isSpecialRequestSearch)
-            ? maxContacts
+            ? Math.min(maxContacts, 12)
             : Math.min(maxContacts, 10)
         )
       : 0
+    const searchTargetContacts = targetCompany ? targetCompanyGoalContacts : maxContacts
+    const searchStartedAt = Date.now()
+    const SEARCH_BUDGET_MS = targetCompany
+      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
+      : 60000
+    const hasTimeBudgetExceeded = () => (Date.now() - searchStartedAt) >= SEARCH_BUDGET_MS
     
     if (targetCompany) {
       console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
       console.log(`Location fallback goal: ${targetCompanyGoalContacts} contacts`)
+      console.log(`Search time budget: ${Math.round(SEARCH_BUDGET_MS / 1000)}s`)
       if (skipUsedContactsExclusion) {
         console.log('Used-contacts exclusion disabled for this run (jobboard/special request)')
       }
@@ -1397,7 +1404,11 @@ Deno.serve(async (req) => {
 
     // Search across each combination
     for (const combo of searchCombinations) {
-      if (allContacts.length >= maxContacts) break
+      if (allContacts.length >= searchTargetContacts) break
+      if (hasTimeBudgetExceeded()) {
+        console.log(`Time budget reached (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping primary search loops`)
+        break
+      }
       
       // For equal distribution: check if this industry's quota is already filled
       const comboIndustry = combo.industry
@@ -1418,7 +1429,7 @@ Deno.serve(async (req) => {
             targetRoles.forEach(title => params.append('person_titles[]', title))
           }
 
-          // Add locations (disabled for target-company mode; strict location enforced post-fetch)
+          // Add locations (generally disabled for target-company mode; strict location enforced post-fetch)
           if (useApolloLocationQuery && primarySearchLocations.length > 0) {
             primarySearchLocations.forEach(loc => params.append('person_locations[]', loc))
           }
@@ -1455,12 +1466,12 @@ Deno.serve(async (req) => {
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
         const maxPages = targetCompany
-          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4)
+          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
           : 2
         let currentPage = 1
         let hasMoreResults = true
         
-        while (hasMoreResults && currentPage <= maxPages && allContacts.length < maxContacts) {
+        while (hasMoreResults && currentPage <= maxPages && allContacts.length < searchTargetContacts && !hasTimeBudgetExceeded()) {
           const perPage = 100 // Always request max per page for efficiency
           
           const pageParams = new URLSearchParams(queryParams)
@@ -1514,6 +1525,38 @@ Deno.serve(async (req) => {
                     apolloApiErrorMessage = formatApolloApiError(relaxedResponse.status, errorText)
                   }
                   console.error('Apollo no-title fallback error:', relaxedResponse.status, errorText)
+                }
+
+                // If still empty in strict target-company mode, try country-scoped Apollo query
+                // to pull location-relevant people into early pages while still post-filtering.
+                if (
+                  people.length === 0 &&
+                  strictLocationEnabled &&
+                  strictCountryLocations.length > 0
+                ) {
+                  const countryScopedParams = buildComboParams(false)
+                  strictCountryLocations.forEach((loc) => countryScopedParams.append('person_locations[]', loc))
+                  countryScopedParams.set('per_page', String(perPage))
+                  countryScopedParams.set('page', String(currentPage))
+                  const countryScopedUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${countryScopedParams.toString()}`
+                  const countryScopedResponse = await fetch(countryScopedUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'x-api-key': apolloApiKey,
+                    },
+                  })
+                  if (countryScopedResponse.ok) {
+                    const countryScopedData = await countryScopedResponse.json()
+                    people = countryScopedData.people || []
+                    console.log(`Apollo people returned (country-scoped fallback): ${people.length}`)
+                  } else {
+                    const errorText = await countryScopedResponse.text()
+                    if (!apolloApiErrorMessage) {
+                      apolloApiErrorMessage = formatApolloApiError(countryScopedResponse.status, errorText)
+                    }
+                    console.error('Apollo country-scoped fallback error:', countryScopedResponse.status, errorText)
+                  }
                 }
               } catch (fallbackError) {
                 console.error('Apollo no-title fallback exception:', fallbackError)
@@ -1570,14 +1613,14 @@ Deno.serve(async (req) => {
             
             // Determine quota limit for this combination's industry
             const comboIndustryQuota = (useEqualDistribution && comboIndustry) 
-              ? (industryQuotas[comboIndustry] || maxContacts) 
-              : maxContacts
+              ? (industryQuotas[comboIndustry] || searchTargetContacts) 
+              : searchTargetContacts
             const currentIndustryCount = (useEqualDistribution && comboIndustry)
               ? (industryContacts[comboIndustry]?.length || 0)
               : 0
             
             for (const person of people) {
-              if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= maxContacts) break
+              if (allContacts.length + contactsWithEmail.length + peopleToEnrich.length >= searchTargetContacts) break
               
               // For equal distribution: check industry-specific quota
               if (useEqualDistribution && comboIndustry) {
@@ -1731,7 +1774,7 @@ Deno.serve(async (req) => {
               // Calculate how many more contacts we actually need
               const contactsStillNeeded = useEqualDistribution && comboIndustry
                 ? Math.max(0, (industryQuotas[comboIndustry] || 0) - (industryContacts[comboIndustry]?.length || 0))
-                : Math.max(0, maxContacts - allContacts.length)
+                : Math.max(0, searchTargetContacts - allContacts.length)
               
               // Only enrich up to what we need (saves credits!)
               const enrichLimit = Math.min(peopleToEnrich.length, contactsStillNeeded)
@@ -1745,8 +1788,12 @@ Deno.serve(async (req) => {
               
               for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
                 // Double-check we still need contacts before each batch
-                if (allContacts.length >= maxContacts) {
+                if (allContacts.length >= searchTargetContacts) {
                   console.log('CREDIT SAVER: Stopping enrichment - global quota reached')
+                  break
+                }
+                if (hasTimeBudgetExceeded()) {
+                  console.log(`Time budget reached during enrichment batches (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping`)
                   break
                 }
                 if (useEqualDistribution && comboIndustry) {
@@ -1783,7 +1830,7 @@ Deno.serve(async (req) => {
                 )
 
                 for (const result of enrichResults) {
-                  if (allContacts.length >= maxContacts) break
+                  if (allContacts.length >= searchTargetContacts) break
                   if (result.status !== 'fulfilled' || !result.value) continue
 
                   const { personData, person } = result.value
@@ -1887,7 +1934,7 @@ Deno.serve(async (req) => {
 
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
-    if (targetCompany && allContacts.length < targetCompanyGoalContacts) {
+    if (targetCompany && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
       console.log(`\n=== TARGET-COMPANY RETRY LOOP ===`)
       console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${targetCompanyGoalContacts}`)
       
@@ -1905,6 +1952,10 @@ Deno.serve(async (req) => {
       for (const strategy of retryStrategies) {
         if (allContacts.length >= targetCompanyGoalContacts) {
           console.log(`Target reached (${allContacts.length} contacts), stopping retries`)
+          break
+        }
+        if (hasTimeBudgetExceeded()) {
+          console.log(`Time budget reached (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping retry strategies`)
           break
         }
         
@@ -1929,8 +1980,10 @@ Deno.serve(async (req) => {
               targetRoles.forEach(title => params.append('person_titles[]', title))
             }
 
-            // Add locations (disabled for target-company mode; strict location enforced post-fetch)
-            if (useApolloLocationQuery && strategy.locations.length > 0) {
+            // Add locations:
+            // - normal mode: standard Apollo location query
+            // - target-company retry country mode: enable country query for better early-page recall
+            if ((useApolloLocationQuery || strategy.locationMode === 'country') && strategy.locations.length > 0) {
               strategy.locations.forEach(loc => params.append('person_locations[]', loc))
             }
 
@@ -1942,11 +1995,11 @@ Deno.serve(async (req) => {
           const retryParams = buildRetryParams(true)
           
           // Search more pages for retries
-          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 5 : 4
+          const maxRetryPages = (isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4
           let currentPage = 1
           let hasMoreResults = true
           
-          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < targetCompanyGoalContacts) {
+          while (hasMoreResults && currentPage <= maxRetryPages && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
             const pageParams = new URLSearchParams(retryParams)
             pageParams.set('per_page', '100')
             pageParams.set('page', String(currentPage))

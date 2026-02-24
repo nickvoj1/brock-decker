@@ -1130,7 +1130,7 @@ export function FantasticJobsBoard() {
     const industry = filters.industry !== "all"
       ? filters.industry
       : (filters.industryKeywords.trim() || "Private Equity");
-    const maxContacts = 30;
+    const maxContacts = 10;
     const effectiveProfile = profileName || "Unknown";
 
     setApolloLoadingByJob((prev) => ({ ...prev, [job.id]: true }));
