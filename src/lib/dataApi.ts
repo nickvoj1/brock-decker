@@ -128,8 +128,10 @@ export interface AdminActivityData {
     id: string;
     uploaded_by: string;
     status: string;
+    search_counter: number;
     candidates_count: number;
     processed_count: number;
+    error_message: string | null;
     created_at: string;
     updated_at: string;
     preferences_data: any;
