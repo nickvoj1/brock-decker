@@ -372,6 +372,84 @@
     @apply text-primary-foreground shadow-md hover:shadow-lg transition-all duration-200;
   }
 
+  /* Scoped 3D button treatment for selected workspace pages */
+  .buttons-3d [data-ui-button] {
+    position: relative;
+    border-color: hsl(var(--border) / 0.82);
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.92),
+      0 1px 0 hsl(var(--foreground) / 0.22),
+      0 8px 14px -10px hsl(var(--foreground) / 0.55);
+    transition:
+      transform 140ms ease,
+      box-shadow 160ms ease,
+      border-color 140ms ease,
+      filter 160ms ease;
+    will-change: transform;
+  }
+
+  .buttons-3d [data-ui-button][data-variant="default"] {
+    background-image: linear-gradient(
+      180deg,
+      hsl(var(--primary) / 0.94),
+      hsl(var(--primary) / 0.86)
+    );
+  }
+
+  .buttons-3d [data-ui-button][data-variant="outline"] {
+    background-image: linear-gradient(
+      180deg,
+      hsl(var(--background) / 0.98),
+      hsl(var(--secondary) / 0.9)
+    );
+  }
+
+  .buttons-3d [data-ui-button][data-variant="secondary"] {
+    background-image: linear-gradient(
+      180deg,
+      hsl(var(--secondary) / 0.98),
+      hsl(var(--secondary) / 0.88)
+    );
+  }
+
+  .buttons-3d [data-ui-button][data-variant="destructive"] {
+    background-image: linear-gradient(
+      180deg,
+      hsl(var(--destructive) / 0.95),
+      hsl(var(--destructive) / 0.86)
+    );
+  }
+
+  .buttons-3d [data-ui-button][data-variant="ghost"] {
+    border-color: hsl(var(--border) / 0.5);
+    background-image: linear-gradient(
+      180deg,
+      hsl(var(--background) / 0.95),
+      hsl(var(--background) / 0.86)
+    );
+  }
+
+  .buttons-3d [data-ui-button]:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: hsl(var(--border) / 0.95);
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.96),
+      0 2px 0 hsl(var(--foreground) / 0.2),
+      0 14px 18px -12px hsl(var(--foreground) / 0.58);
+  }
+
+  .buttons-3d [data-ui-button]:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.9),
+      0 0 0 hsl(var(--foreground) / 0.18),
+      0 5px 8px -6px hsl(var(--foreground) / 0.45);
+  }
+
+  .buttons-3d [data-ui-button]:disabled {
+    filter: saturate(0.82);
+  }
+
   /* Status badge utilities */
   .status-success {
     @apply bg-success/10 text-success border-success/20;

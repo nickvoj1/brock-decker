@@ -476,7 +476,7 @@ export default function UploadRun() {
       title={hasSignalContext ? "Signal-Based Contact Search" : "Find Hiring Contacts"}
       description={hasSignalContext ? `Finding contacts at ${signalContext.company || "target company"}` : "Upload a CV and find relevant hiring contacts on Apollo.io"}
     >
-      <Tabs defaultValue={hasSignalContext ? "search" : "search"} className="max-w-4xl">
+      <Tabs defaultValue={hasSignalContext ? "search" : "search"} className="max-w-4xl buttons-3d">
         <TabsList className="mb-6">
           <TabsTrigger value="search" className="gap-2">
             <FileText className="h-4 w-4" />
