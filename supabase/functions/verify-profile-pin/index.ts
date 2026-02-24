@@ -358,9 +358,16 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
     );
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Error:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
+    let message = "Unknown error";
+    if (error instanceof Error) {
+      message = error.message;
+    } else if (typeof error === "object" && error !== null) {
+      message = JSON.stringify(error);
+    } else if (typeof error === "string") {
+      message = error;
+    }
     return new Response(
       JSON.stringify({ success: false, error: message }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
