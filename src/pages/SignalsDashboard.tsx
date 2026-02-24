@@ -14,7 +14,8 @@ import {
   LayoutGrid,
   Table2,
   Target,
-  CalendarDays
+  CalendarDays,
+  CircleHelp
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -107,6 +108,30 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
   { value: "14d", label: "Last 14 days" },
   { value: "30d", label: "Last 30 days" },
   { value: "custom", label: "Custom Range" },
+];
+
+const TIER_GUIDE = [
+  {
+    key: "tier_1",
+    label: "Tier 1 - Immediate",
+    dotClass: "bg-primary",
+    summary: "Highest urgency. Strong evidence of immediate hiring intent.",
+    examples: "Fund close/raise, PE C-suite appointment, major acquisition/merger, rapid portfolio hiring.",
+  },
+  {
+    key: "tier_2",
+    label: "Tier 2 - Active",
+    dotClass: "bg-foreground/45",
+    summary: "Medium urgency. Strong expansion or team-shaping signals.",
+    examples: "Office expansion, recruiter/team buildout, senior churn, product/service launch.",
+  },
+  {
+    key: "tier_3",
+    label: "Tier 3 - Watchlist",
+    dotClass: "bg-foreground/25",
+    summary: "Early indicators. Useful to monitor until stronger evidence appears.",
+    examples: "General hiring posts, careers-page activity, broader industry/event signals.",
+  },
 ];
 
 const SIGNALS_PAGE_SIZE = 25;
@@ -1006,6 +1031,39 @@ export default function SignalsDashboard() {
           <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-primary" /> Tier 1: {tierCounts.tier_1 || 0}</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-foreground/45" /> Tier 2: {tierCounts.tier_2 || 0}</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-full bg-foreground/25" /> Tier 3: {tierCounts.tier_3 || 0}</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs font-medium gap-1.5">
+                <CircleHelp className="h-3.5 w-3.5" />
+                Tier Guide
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[380px] p-4">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Signal Tier Definitions</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Tiers show urgency and hiring likelihood based on your signal rules.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {TIER_GUIDE.map((tier) => (
+                    <div key={tier.key} className="rounded-md border border-border/60 bg-background/80 p-2.5">
+                      <p className="text-sm font-semibold flex items-center gap-2">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${tier.dotClass}`} />
+                        {tier.label}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">{tier.summary}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <span className="font-medium text-foreground/80">Examples:</span> {tier.examples}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Tabs: Signals vs Jobs */}
