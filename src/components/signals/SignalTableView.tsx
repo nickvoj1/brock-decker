@@ -207,7 +207,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   return (
     <>
       <tr 
-        className="border-b border-border/20 hover:bg-primary/5 transition-colors cursor-pointer group"
+        className="bg-card border-b border-border/25 hover:bg-muted/35 transition-colors cursor-pointer group"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Tier Dot */}
@@ -270,7 +270,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
       </tr>
       {/* Expanded Detail Row */}
       {expanded && (
-        <tr className="bg-muted/20">
+        <tr className="bg-card">
           <td colSpan={9} className="p-4">
             <div className="space-y-3 max-w-4xl">
               {/* Title / Headline */}
@@ -341,10 +341,10 @@ export const SignalTableView = memo(function SignalTableView({
   onSignalUpdated,
 }: SignalTableViewProps) {
   return (
-    <div className="overflow-auto rounded-xl border border-border/65 bg-card shadow-sm">
-      <table className="w-full text-sm">
+    <div className="overflow-auto rounded-xl border border-border/65 bg-card">
+      <table className="w-full text-sm bg-card">
         <thead>
-          <tr className="border-b border-border/40 bg-muted/40">
+          <tr className="border-b border-border/50 bg-card">
             <th className="py-3 px-3 w-8" />
             <th className="py-3 px-3 text-left mono-label">Date</th>
             <th className="py-3 px-3 text-left mono-label">Firm</th>
