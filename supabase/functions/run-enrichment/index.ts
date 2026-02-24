@@ -349,6 +349,75 @@ function companiesMatch(target: string, candidate: string): boolean {
   return false
 }
 
+function isDecisionMakerTitle(title: string): boolean {
+  const t = String(title || '').toLowerCase()
+  if (!t) return false
+  return /\b(ceo|cfo|coo|cio|cto|chief|president|managing partner|managing director|senior partner|partner|principal|founder|co-founder|owner|head of|director|investment director|operating partner)\b/i.test(t)
+}
+
+function isHrOrRecruitingTitle(title: string): boolean {
+  const t = String(title || '').toLowerCase()
+  if (!t) return false
+  return /\b(recruiter|recruiting|talent|human resources|hr|people partner|people operations|head of talent|head of people)\b/i.test(t)
+}
+
+function prioritizeDecisionMakerContacts(contacts: ApolloContact[]): ApolloContact[] {
+  if (!Array.isArray(contacts) || contacts.length <= 1) return contacts
+
+  const decision: ApolloContact[] = []
+  const nonHr: ApolloContact[] = []
+  const hr: ApolloContact[] = []
+
+  for (const c of contacts) {
+    const title = String(c?.title || '')
+    if (isDecisionMakerTitle(title)) {
+      decision.push(c)
+      continue
+    }
+    if (isHrOrRecruitingTitle(title)) {
+      hr.push(c)
+      continue
+    }
+    nonHr.push(c)
+  }
+
+  return [...decision, ...nonHr, ...hr]
+}
+
+function prioritizeDecisionMakerRoles(roles: string[]): string[] {
+  if (!Array.isArray(roles) || roles.length <= 1) return roles
+
+  const seen = new Set<string>()
+  const unique: string[] = []
+
+  for (const raw of roles) {
+    const role = String(raw || '').trim()
+    if (!role) continue
+    const key = role.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(role)
+  }
+
+  const decision: string[] = []
+  const nonHr: string[] = []
+  const hr: string[] = []
+
+  for (const role of unique) {
+    if (isDecisionMakerTitle(role)) {
+      decision.push(role)
+      continue
+    }
+    if (isHrOrRecruitingTitle(role)) {
+      hr.push(role)
+      continue
+    }
+    nonHr.push(role)
+  }
+
+  return [...decision, ...nonHr, ...hr]
+}
+
 // ============ Law Firm Detection ============
 // Law firms often get mixed into PE/Buy Side results because they advise on deals
 // They're typically named after founding partners (multiple surnames)
@@ -1099,14 +1168,35 @@ Deno.serve(async (req) => {
     let processedCount = 0
     let creditsUsed = 0 // Track people/match calls for logging
 
-    // Get target roles from preferences (all prefs share the same roles)
-    // Fall back to default HR/Recruiting roles if not specified
+    // Get target roles from preferences (all prefs share the same roles).
+    // Default to decision-makers first, then HR/recruiting fallback.
     const defaultRoles = [
-      'Recruiter', 'Talent Acquisition', 'HR Manager', 'Human Resources',
-      'Hiring Manager', 'Head of Talent', 'People Operations', 'HR Director',
-      'Talent Partner', 'HR Business Partner'
+      'Managing Partner',
+      'Partner',
+      'Principal',
+      'Managing Director',
+      'Investment Director',
+      'Head of Investments',
+      'Operating Partner',
+      'Portfolio Manager',
+      'CEO',
+      'CFO',
+      'COO',
+      'Founder',
+      'Owner',
+      'Director',
+      'Head of Strategy',
+      'Head of Talent',
+      'HR Director',
+      'Talent Acquisition',
+      'People Partner',
+      'People Operations',
+      'Hiring Manager',
+      'Recruiter',
     ]
-    const baseTargetRoles = preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
+    const baseTargetRoles = prioritizeDecisionMakerRoles(
+      preferences[0]?.targetRoles?.length ? preferences[0].targetRoles : defaultRoles
+    )
 
     // Get locations from preferences (all prefs share the same locations)
     const rawSearchLocations = preferences[0]?.locations || []
@@ -2217,16 +2307,18 @@ Deno.serve(async (req) => {
     }
     // ============ END TARGET-COMPANY RETRY LOOP ============
 
+    const finalContacts = prioritizeDecisionMakerContacts(allContacts)
+
     // Log Bullhorn ratio summary
-    const newContactCount = allContacts.length - bullhornContactCount
+    const newContactCount = finalContacts.length - bullhornContactCount
     console.log(`\n=== SEARCH SUMMARY ===`)
-    console.log(`Total contacts: ${allContacts.length}`)
-    console.log(`New contacts: ${newContactCount} (${allContacts.length > 0 ? Math.round(newContactCount / allContacts.length * 100) : 0}%)`)
-    console.log(`Bullhorn contacts: ${bullhornContactCount} (${allContacts.length > 0 ? Math.round(bullhornContactCount / allContacts.length * 100) : 0}%)`)
+    console.log(`Total contacts: ${finalContacts.length}`)
+    console.log(`New contacts: ${newContactCount} (${finalContacts.length > 0 ? Math.round(newContactCount / finalContacts.length * 100) : 0}%)`)
+    console.log(`Bullhorn contacts: ${bullhornContactCount} (${finalContacts.length > 0 ? Math.round(bullhornContactCount / finalContacts.length * 100) : 0}%)`)
     console.log(`======================\n`)
 
-    if (allContacts.length > 0) {
-      const contactsToSave = allContacts.map(c => ({
+    if (finalContacts.length > 0) {
+      const contactsToSave = finalContacts.map(c => ({
         email: c.email.toLowerCase(),
         name: c.name,
         company: c.company,
@@ -2243,20 +2335,20 @@ Deno.serve(async (req) => {
       if (saveError) {
         console.error('Error saving used contacts:', saveError)
       } else {
-        console.log(`Saved ${allContacts.length} contacts to used_contacts table`)
+        console.log(`Saved ${finalContacts.length} contacts to used_contacts table`)
       }
     }
 
     // Generate CSV content
     const csvHeader = 'Name,Title,Location,Email,Company'
-    const csvRows = allContacts.map(c => 
+    const csvRows = finalContacts.map(c => 
       `"${escapeCSV(c.name)}","${escapeCSV(c.title)}","${escapeCSV(c.location)}","${escapeCSV(c.email)}","${escapeCSV(c.company)}"`
     )
     const csvContent = [csvHeader, ...csvRows].join('\n')
 
     // Determine status
-    const status = allContacts.length === 0 ? 'failed' : 
-                   allContacts.length < maxContacts ? 'partial' : 'success'
+    const status = finalContacts.length === 0 ? 'failed' : 
+                   finalContacts.length < maxContacts ? 'partial' : 'success'
     const zeroContactsErrorMessage = apolloApiErrorMessage || 'No contacts found matching criteria'
 
     // Update run with results
@@ -2265,15 +2357,15 @@ Deno.serve(async (req) => {
       .update({
         status,
         processed_count: preferences.length,
-        enriched_data: allContacts,
+        enriched_data: finalContacts,
         enriched_csv_url: csvContent, // Store CSV content directly for now
-        error_message: allContacts.length === 0 ? zeroContactsErrorMessage : null,
+        error_message: finalContacts.length === 0 ? zeroContactsErrorMessage : null,
       })
       .eq('id', runId)
 
     // Auto-export to Bullhorn if enabled and contacts found
     let bullhornResult = null
-    if (run.bullhorn_enabled && allContacts.length > 0) {
+    if (run.bullhorn_enabled && finalContacts.length > 0) {
       try {
         console.log('Auto-exporting to Bullhorn...')
         const bullhornUrl = `${supabaseUrl}/functions/v1/export-to-bullhorn`
@@ -2299,23 +2391,23 @@ Deno.serve(async (req) => {
     }
 
     // Log credit usage summary
-    const directContacts = allContacts.length - creditsUsed
+    const directContacts = finalContacts.length - creditsUsed
     console.log(`\n=== CREDIT USAGE SUMMARY ===`)
-    console.log(`Total contacts saved: ${allContacts.length}`)
+    console.log(`Total contacts saved: ${finalContacts.length}`)
     console.log(`Direct (free): ${Math.max(0, directContacts)} contacts`)
     console.log(`Enriched (paid): ${creditsUsed} credits used`)
-    console.log(`Efficiency: ${allContacts.length > 0 ? ((directContacts / allContacts.length) * 100).toFixed(1) : 0}% free`)
+    console.log(`Efficiency: ${finalContacts.length > 0 ? ((directContacts / finalContacts.length) * 100).toFixed(1) : 0}% free`)
     console.log(`============================\n`)
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        contactsFound: allContacts.length,
-        contacts: allContacts, // Return actual contacts for immediate use
+        contactsFound: finalContacts.length,
+        contacts: finalContacts, // Return actual contacts for immediate use
         status,
         bullhornExport: bullhornResult,
         creditUsage: {
-          totalContacts: allContacts.length,
+          totalContacts: finalContacts.length,
           directContacts: Math.max(0, directContacts),
           enrichedContacts: creditsUsed,
           creditsUsed: creditsUsed,

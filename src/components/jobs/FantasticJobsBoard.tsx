@@ -571,21 +571,38 @@ function inferSignalRegionFromLocation(location: string, fallbackLocation = ""):
 }
 
 function inferTargetRolesForJob(jobTitle: string): string[] {
-  const base = [
-    "Recruiter",
-    "Talent Acquisition",
-    "HR Manager",
-    "Head of Talent",
-    "People Operations",
-    "HR Director",
-    "Hiring Manager",
-    "People Partner",
-    "Talent Partner",
+  // Decision-makers first, HR/recruiting as fallback.
+  const decisionMakerBase = [
+    "Managing Partner",
+    "Partner",
+    "Principal",
+    "Managing Director",
+    "Investment Director",
+    "Head of Investments",
+    "Operating Partner",
+    "Portfolio Manager",
+    "CEO",
+    "CFO",
+    "COO",
+    "Founder",
+    "Owner",
+    "Director",
+    "Head of Strategy",
   ];
+  const hrFallback = [
+    "Head of Talent",
+    "HR Director",
+    "Talent Acquisition",
+    "People Partner",
+    "People Operations",
+    "Hiring Manager",
+    "Recruiter",
+  ];
+  const base = [...decisionMakerBase];
   const t = (jobTitle || "").toLowerCase();
 
   if (/(partner|principal|director|vp|vice president|managing director|head of|lead)/i.test(t)) {
-    base.push("Partner", "Principal", "Managing Director", "Director", "Vice President");
+    base.push("Senior Partner", "Partner", "Principal", "Managing Director", "Director", "Vice President");
   }
   if (/(invest|private equity|buyout|deal|portfolio|capital|fund|m&a|acquisition)/i.test(t)) {
     base.push(
@@ -612,6 +629,14 @@ function inferTargetRolesForJob(jobTitle: string): string[] {
   if (/(sales|commercial|business development|growth)/i.test(t)) {
     base.push("Chief Commercial Officer", "VP Sales", "Head of Business Development");
   }
+  if (/(recruit|talent|human resources|people ops|people operations|hr)/i.test(t)) {
+    base.push("Chief People Officer", "Head of People", "Head of Talent");
+  }
+  if (/(founder|owner|entrepreneur)/i.test(t)) {
+    base.push("Founder", "Co-Founder", "Owner");
+  }
+
+  base.push(...hrFallback);
 
   return Array.from(new Set(base)).slice(0, 30);
 }
