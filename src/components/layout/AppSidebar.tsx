@@ -44,7 +44,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar className="depth-sidebar border-r border-sidebar-border bg-sidebar/95 backdrop-blur-sm" collapsible="icon">
+    <Sidebar className="depth-sidebar border-r border-sidebar-border bg-sidebar/95" collapsible="icon">
       <SidebarHeader className="px-2 py-2 border-b border-sidebar-border/70">
         <div className="flex items-center justify-start">
           <img
