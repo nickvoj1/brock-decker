@@ -192,7 +192,7 @@ export default function GenerateMail() {
         is_default: isFirst,
       });
 
-      if (!response.success) throw new Error(response.error);
+      if (!response.success || !response.data) throw new Error(response.error || "No data returned");
       
       const data = response.data;
       setTemplates(prev => [data, ...prev]);
