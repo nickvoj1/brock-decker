@@ -946,14 +946,14 @@ export default function SignalsDashboard() {
           <TabsList className="signals-tab-list">
             <TabsTrigger
               value="signals"
-              className="gap-2 rounded-lg font-medium text-foreground/75 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+              className="gap-2 rounded-lg font-medium text-foreground/75 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
             >
               <Sparkles className="h-4 w-4" />
               Signals Feed
             </TabsTrigger>
             <TabsTrigger
               value="jobboard"
-              className="gap-2 rounded-lg font-medium text-foreground/75 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+              className="gap-2 rounded-lg font-medium text-foreground/75 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
             >
               <Search className="h-4 w-4" />
               Job Board
