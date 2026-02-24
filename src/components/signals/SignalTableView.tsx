@@ -207,7 +207,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
   return (
     <>
       <tr 
-        className="bg-card border-b border-border/25 hover:bg-muted/35 transition-colors cursor-pointer group"
+        className="bg-card border-b border-border/35 hover:bg-muted/35 transition-colors cursor-pointer group"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Tier Dot */}
@@ -215,7 +215,7 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
           <div className={`h-2.5 w-2.5 rounded-full ${tierDot}`} title={signal.tier || "Unknown"} />
         </td>
         {/* Date */}
-        <td className="py-3 px-3 text-xs text-muted-foreground whitespace-nowrap tabular-nums font-mono-ui">
+        <td className="py-3 px-3 text-xs text-foreground/75 whitespace-nowrap tabular-nums font-mono-ui">
           {formatDate(signal.published_at)}
         </td>
         {/* Firm */}
@@ -235,18 +235,18 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
           {formatAmount(signal.amount, signal.currency)}
         </td>
         {/* Fund / Key Detail */}
-        <td className="py-3 px-3 text-sm text-muted-foreground max-w-[220px] truncate" title={signal.title}>
+        <td className="py-3 px-3 text-sm text-foreground/80 max-w-[220px] truncate" title={signal.title}>
           {extractFundName(signal)}
         </td>
         {/* Region */}
-        <td className="py-3 px-3 text-xs font-medium text-muted-foreground whitespace-nowrap font-mono-ui">
+        <td className="py-3 px-3 text-xs font-medium text-foreground/75 whitespace-nowrap font-mono-ui">
           {signal.region?.toUpperCase() || "—"}
         </td>
         {/* Source */}
-        <td className="py-3 px-3 text-xs text-muted-foreground truncate max-w-[100px]">
+        <td className="py-3 px-3 text-xs text-foreground/75 truncate max-w-[100px]">
           {signal.source ? (
             signal.url ? (
-              <a href={signal.url} target="_blank" rel="noopener noreferrer" className="hover:text-primary flex items-center gap-1 transition-colors" onClick={e => e.stopPropagation()}>
+              <a href={signal.url} target="_blank" rel="noopener noreferrer" className="text-foreground/75 hover:text-primary flex items-center gap-1 transition-colors" onClick={e => e.stopPropagation()}>
                 {signal.source}
                 <ExternalLink className="h-3 w-3" />
               </a>
@@ -344,15 +344,15 @@ export const SignalTableView = memo(function SignalTableView({
     <div className="overflow-auto rounded-xl border border-border/65 bg-card">
       <table className="signals-flat-table w-full text-sm bg-card">
         <thead>
-          <tr className="border-b border-border/50 bg-card">
+          <tr className="border-b border-border/45 bg-card">
             <th className="py-3 px-3 w-8" />
-            <th className="py-3 px-3 text-left mono-label">Date</th>
-            <th className="py-3 px-3 text-left mono-label">Firm</th>
-            <th className="py-3 px-3 text-left mono-label">Type</th>
-            <th className="py-3 px-3 text-left mono-label">Amount</th>
-            <th className="py-3 px-3 text-left mono-label">Fund / Detail</th>
-            <th className="py-3 px-3 text-left mono-label">Region</th>
-            <th className="py-3 px-3 text-left mono-label">Source</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Date</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Firm</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Type</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Amount</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Fund / Detail</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Region</th>
+            <th className="py-3 px-3 text-left text-[11px] font-mono-ui font-semibold tracking-[0.08em] uppercase text-foreground/75">Source</th>
             <th className="py-3 px-3 w-32" />
           </tr>
         </thead>
