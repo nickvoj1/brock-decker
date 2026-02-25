@@ -3,14 +3,23 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getAdminActivity, AdminActivityData } from "@/lib/dataApi";
+import {
+  BullhornSyncJob,
+  getBullhornMirrorStats,
+  listBullhornSyncJobs,
+  startBullhornClientContactSync,
+} from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock, Database, RefreshCw } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
@@ -20,6 +29,11 @@ export default function AdminPanel() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AdminActivityData | null>(null);
+  const [requestStatusFilter, setRequestStatusFilter] = useState<string>("all");
+  const [syncJobs, setSyncJobs] = useState<BullhornSyncJob[]>([]);
+  const [syncJobLoading, setSyncJobLoading] = useState(false);
+  const [syncActionLoading, setSyncActionLoading] = useState(false);
+  const [mirrorCount, setMirrorCount] = useState(0);
 
   useEffect(() => {
     // Redirect non-admin users
@@ -31,8 +45,20 @@ export default function AdminPanel() {
 
     if (profileName === ADMIN_PROFILE) {
       loadData();
+      loadBullhornSyncData();
     }
   }, [profileName, navigate]);
+
+  useEffect(() => {
+    const activeJob = syncJobs.find((job) => job.status === "queued" || job.status === "running");
+    if (!activeJob || profileName !== ADMIN_PROFILE) return;
+
+    const interval = setInterval(() => {
+      loadBullhornSyncData({ silent: true });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [syncJobs, profileName]);
 
   const loadData = async () => {
     setLoading(true);
@@ -47,6 +73,51 @@ export default function AdminPanel() {
       toast.error("Failed to load admin data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBullhornSyncData = async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setSyncJobLoading(true);
+    try {
+      const [jobsResult, statsResult] = await Promise.all([
+        listBullhornSyncJobs(ADMIN_PROFILE, 10),
+        getBullhornMirrorStats(ADMIN_PROFILE),
+      ]);
+
+      if (jobsResult.success && Array.isArray(jobsResult.data)) {
+        setSyncJobs(jobsResult.data);
+      }
+
+      if (statsResult.success && statsResult.data) {
+        setMirrorCount(statsResult.data.totalMirroredContacts || 0);
+      }
+    } catch (err) {
+      console.error("Failed to load Bullhorn sync state", err);
+    } finally {
+      if (!options.silent) setSyncJobLoading(false);
+    }
+  };
+
+  const startSync = async () => {
+    setSyncActionLoading(true);
+    try {
+      const result = await startBullhornClientContactSync(ADMIN_PROFILE, {
+        batchSize: 500,
+        includeDeleted: false,
+        maxBatchesPerInvocation: 8,
+      });
+
+      if (!result.success || !result.data) {
+        toast.error(result.error || "Failed to start Bullhorn sync");
+        return;
+      }
+
+      toast.success(result.message || "Bullhorn ClientContact sync started");
+      await loadBullhornSyncData();
+    } catch (err) {
+      toast.error("Failed to start Bullhorn sync");
+    } finally {
+      setSyncActionLoading(false);
     }
   };
 
@@ -67,6 +138,79 @@ export default function AdminPanel() {
   const userStatsArray = data?.userStats 
     ? Object.entries(data.userStats).map(([name, stats]) => ({ name, ...stats }))
     : [];
+
+  const toArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean);
+    }
+    if (typeof value === "string") {
+      return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const getRunPreferences = (value: unknown): Record<string, unknown> => {
+    if (Array.isArray(value)) {
+      const first = value[0];
+      return first && typeof first === "object" ? (first as Record<string, unknown>) : {};
+    }
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  };
+
+  const getRequestTypeLabel = (rawType: unknown): string => {
+    const type = String(rawType || "");
+    if (type === "special_request") return "Special Request";
+    if (type === "signal_ta") return "Signal TA";
+    if (type === "jobboard_contact_search") return "Job Board Apollo";
+    return "Contact Search";
+  };
+
+  const requestRows = (data?.runs || []).map((run) => {
+    const prefs = getRunPreferences(run.preferences_data);
+    const locations = toArray(prefs.locations).slice(0, 2).join(", ");
+    const targetRoles = toArray(prefs.targetRoles).slice(0, 2).join(", ");
+    const sectors = toArray(prefs.sectors).slice(0, 2).join(", ");
+    const keywords = toArray(prefs.keywords).slice(0, 2).join(", ");
+    const queryParts = [
+      locations ? `Loc: ${locations}` : "",
+      targetRoles ? `Roles: ${targetRoles}` : "",
+      sectors ? `Industry: ${sectors}` : "",
+      keywords ? `Keywords: ${keywords}` : "",
+    ].filter(Boolean);
+
+    const target =
+      String(
+        prefs.company ||
+        prefs.targetCompany ||
+        prefs.companies ||
+        prefs.candidateName ||
+        prefs.query ||
+        "",
+      ).trim() || "-";
+
+    return {
+      run,
+      requestType: getRequestTypeLabel(prefs.type),
+      target,
+      querySummary: queryParts.join(" | ") || "-",
+    };
+  });
+
+  const filteredRequestRows =
+    requestStatusFilter === "all"
+      ? requestRows
+      : requestRows.filter(({ run }) => run.status === requestStatusFilter);
+
+  const latestSyncJob = syncJobs[0] || null;
+  const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
+  const progressPercent = latestSyncJob?.total_expected
+    ? Math.min(100, Math.round((latestSyncJob.total_synced / latestSyncJob.total_expected) * 100))
+    : 0;
 
   return (
     <AppLayout title="Admin Panel" description="Monitor team activity and usage">
@@ -190,11 +334,108 @@ export default function AdminPanel() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5" />
+                  Bullhorn ClientContact Mirror
+                </CardTitle>
+                <CardDescription>
+                  Full read-only mirror sync from Bullhorn (no write/delete operations against Bullhorn).
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadBullhornSyncData()}
+                  disabled={syncJobLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+                <Button size="sm" onClick={startSync} disabled={syncActionLoading || !!activeSyncJob}>
+                  {syncActionLoading ? "Starting..." : activeSyncJob ? "Sync Running" : "Start Full Sync"}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Mirrored Contacts</p>
+                <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Job</p>
+                <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
+                {latestSyncJob && (
+                  <Badge variant="outline" className={`mt-2 ${getStatusColor(latestSyncJob.status)}`}>
+                    {latestSyncJob.status}
+                  </Badge>
+                )}
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
+                <p className="font-medium">
+                  {latestSyncJob
+                    ? `${latestSyncJob.total_synced.toLocaleString()} / ${(latestSyncJob.total_expected || 0).toLocaleString()}`
+                    : "-"}
+                </p>
+                <Progress value={progressPercent} className="mt-2 h-2" />
+              </div>
+            </div>
+
+            <ScrollArea className="h-[200px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Job</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Synced</TableHead>
+                    <TableHead className="text-right">Expected</TableHead>
+                    <TableHead className="text-right">Started</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {syncJobs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                        No sync jobs yet
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    syncJobs.map((job) => (
+                      <TableRow key={job.id}>
+                        <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={getStatusColor(job.status)}>
+                            {job.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{(job.total_expected || 0).toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {job.started_at
+                            ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
+                            : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+
         {/* Activity Tabs */}
         <Tabs defaultValue="runs" className="space-y-4">
           <TabsList>
             <TabsTrigger value="runs" className="gap-2">
-              <Play className="h-4 w-4" /> Recent Runs
+              <Play className="h-4 w-4" /> User Requests
             </TabsTrigger>
             <TabsTrigger value="pitches" className="gap-2">
               <Mail className="h-4 w-4" /> Recent Pitches
@@ -207,8 +448,25 @@ export default function AdminPanel() {
           <TabsContent value="runs">
             <Card>
               <CardHeader>
-                <CardTitle>Enrichment Runs</CardTitle>
-                <CardDescription>All team search activity</CardDescription>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle>User Requests</CardTitle>
+                    <CardDescription>All request activity across users and statuses</CardDescription>
+                  </div>
+                  <Select value={requestStatusFilter} onValueChange={setRequestStatusFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filter status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="success">Success</SelectItem>
+                      <SelectItem value="partial">Partial</SelectItem>
+                      <SelectItem value="failed">Failed</SelectItem>
+                      <SelectItem value="running">Running</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 {loading ? (
@@ -223,27 +481,37 @@ export default function AdminPanel() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>User</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Target</TableHead>
+                          <TableHead>Query</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Results</TableHead>
-                          <TableHead>Industries</TableHead>
                           <TableHead className="text-right">Time</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {data?.runs.map((run) => {
-                          const prefs = run.preferences_data as any;
-                          const industries = prefs?.industries?.slice(0, 2)?.join(", ") || "-";
-                          return (
+                        {filteredRequestRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                              No requests found for this filter
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          filteredRequestRows.map(({ run, requestType, target, querySummary }) => (
                             <TableRow key={run.id}>
                               <TableCell className="font-medium">{run.uploaded_by}</TableCell>
+                              <TableCell className="text-xs">{requestType}</TableCell>
+                              <TableCell className="max-w-[180px] truncate text-xs">{target}</TableCell>
+                              <TableCell className="max-w-[260px] truncate text-xs text-muted-foreground">
+                                {querySummary}
+                              </TableCell>
                               <TableCell>
                                 <Badge variant="outline" className={getStatusColor(run.status)}>
                                   {run.status}
                                 </Badge>
                               </TableCell>
-                              <TableCell>{run.processed_count}/{run.candidates_count}</TableCell>
-                              <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
-                                {industries}
+                              <TableCell>
+                                {run.processed_count}/{run.search_counter || run.candidates_count || 0}
                               </TableCell>
                               <TableCell className="text-right text-xs text-muted-foreground">
                                 <div className="flex items-center justify-end gap-1">
@@ -252,8 +520,8 @@ export default function AdminPanel() {
                                 </div>
                               </TableCell>
                             </TableRow>
-                          );
-                        })}
+                          ))
+                        )}
                       </TableBody>
                     </Table>
                   </ScrollArea>
