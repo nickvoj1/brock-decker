@@ -53,7 +53,6 @@ export default function AdminPanel() {
     : 0;
 
   useEffect(() => {
-    // Redirect non-admin users
     if (profileName && profileName !== ADMIN_PROFILE) {
       toast.error("Access denied. Admin only.");
       navigate("/");
@@ -86,7 +85,7 @@ export default function AdminPanel() {
       } else {
         toast.error(result.error || "Failed to load admin data");
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to load admin data");
     } finally {
       setLoading(false);
@@ -131,7 +130,7 @@ export default function AdminPanel() {
 
       toast.success(result.message || "Bullhorn ClientContact sync started");
       await loadBullhornSyncData();
-    } catch (err) {
+    } catch {
       toast.error("Failed to start Bullhorn sync");
     } finally {
       setSyncActionLoading(false);
@@ -142,6 +141,99 @@ export default function AdminPanel() {
     return null;
   }
 
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "success":
+      case "completed":
+        return "bg-green-500/10 text-green-600 border-green-500/20";
+      case "partial":
+        return "bg-amber-500/10 text-amber-600 border-amber-500/20";
+      case "failed":
+        return "bg-red-500/10 text-red-600 border-red-500/20";
+      case "running":
+      case "queued":
+        return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+      default:
+        return "bg-muted text-muted-foreground";
+    }
+  };
+
+  const userStatsArray = data?.userStats
+    ? Object.entries(data.userStats).map(([name, stats]) => ({ name, ...stats }))
+    : [];
+
+  const toArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean);
+    }
+    if (typeof value === "string") {
+      return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
+
+  const getRunPreferences = (value: unknown): Record<string, unknown> => {
+    if (Array.isArray(value)) {
+      const first = value[0];
+      return first && typeof first === "object" ? (first as Record<string, unknown>) : {};
+    }
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  };
+
+  const getRequestTypeLabel = (rawType: unknown): string => {
+    const type = String(rawType || "");
+    if (type === "special_request") return "Special Request";
+    if (type === "signal_ta") return "Signal TA";
+    if (type === "jobboard_contact_search") return "Job Board Apollo";
+    return "Contact Search";
+  };
+
+  const requestRows = (data?.runs || []).map((run) => {
+    const prefs = getRunPreferences(run.preferences_data);
+    const locations = toArray(prefs.locations).slice(0, 2).join(", ");
+    const targetRoles = toArray(prefs.targetRoles).slice(0, 2).join(", ");
+    const sectors = toArray(prefs.sectors).slice(0, 2).join(", ");
+    const keywords = toArray(prefs.keywords).slice(0, 2).join(", ");
+    const queryParts = [
+      locations ? `Loc: ${locations}` : "",
+      targetRoles ? `Roles: ${targetRoles}` : "",
+      sectors ? `Industry: ${sectors}` : "",
+      keywords ? `Keywords: ${keywords}` : "",
+    ].filter(Boolean);
+
+    const target =
+      String(
+        prefs.company ||
+          prefs.targetCompany ||
+          prefs.companies ||
+          prefs.candidateName ||
+          prefs.query ||
+          "",
+      ).trim() || "-";
+
+    return {
+      run,
+      requestType: getRequestTypeLabel(prefs.type),
+      target,
+      querySummary: queryParts.join(" | ") || "-",
+    };
+  });
+
+  const filteredRequestRows =
+    requestStatusFilter === "all"
+      ? requestRows
+      : requestRows.filter(({ run }) => run.status === requestStatusFilter);
+
+  const latestSyncJob = syncJobs[0] || null;
+  const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
+  const progressPercent = latestSyncJob?.total_expected
+    ? Math.min(100, Math.round((latestSyncJob.total_synced / latestSyncJob.total_expected) * 100))
+    : 0;
 
   return (
     <AppLayout title="Admin Panel" description="Monitor team activity and usage">
@@ -154,7 +246,6 @@ export default function AdminPanel() {
           </div>
         </div>
 
-        {/* Stats Overview */}
         {loading ? (
           <div className="grid gap-4 md:grid-cols-4">
             {[1, 2, 3, 4].map((i) => (
@@ -213,7 +304,6 @@ export default function AdminPanel() {
           </div>
         )}
 
-        {/* User Breakdown */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -248,7 +338,9 @@ export default function AdminPanel() {
                         <TableCell className="font-medium">
                           {user.name}
                           {user.name === ADMIN_PROFILE && (
-                            <Badge variant="outline" className="ml-2 text-xs">Admin</Badge>
+                            <Badge variant="outline" className="ml-2 text-xs">
+                              Admin
+                            </Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-center">{user.runs}</TableCell>
@@ -265,102 +357,6 @@ export default function AdminPanel() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Database className="h-5 w-5" />
-                  Bullhorn ClientContact Mirror
-                </CardTitle>
-                <CardDescription>
-                  Full read-only mirror sync from Bullhorn (no write/delete operations against Bullhorn).
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => loadBullhornSyncData()}
-                  disabled={syncJobLoading}
-                >
-                  <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
-                  Refresh
-                </Button>
-                <Button size="sm" onClick={startSync} disabled={syncActionLoading || !!activeSyncJob}>
-                  {syncActionLoading ? "Starting..." : activeSyncJob ? "Sync Running" : "Start Full Sync"}
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-md border p-3">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Mirrored Contacts</p>
-                <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
-              </div>
-              <div className="rounded-md border p-3">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Job</p>
-                <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
-                {latestSyncJob && (
-                  <Badge variant="outline" className="mt-2">
-                    {latestSyncJob.status}
-                  </Badge>
-                )}
-              </div>
-              <div className="rounded-md border p-3">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
-                <p className="font-medium">
-                  {latestSyncJob
-                    ? `${latestSyncJob.total_synced.toLocaleString()} / ${(latestSyncJob.total_expected || 0).toLocaleString()}`
-                    : "-"}
-                </p>
-                <Progress value={progressPercent} className="mt-2 h-2" />
-              </div>
-            </div>
-
-            <ScrollArea className="h-[200px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Job</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Synced</TableHead>
-                    <TableHead className="text-right">Expected</TableHead>
-                    <TableHead className="text-right">Started</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {syncJobs.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                        No sync jobs yet
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    syncJobs.map((job) => (
-                      <TableRow key={job.id}>
-                        <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{job.status}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{(job.total_expected || 0).toLocaleString()}</TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground">
-                          {job.started_at
-                            ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
-                            : "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Activity Tabs */}
         <Tabs defaultValue="runs" className="space-y-4">
           <TabsList>
             <TabsTrigger value="runs" className="gap-2">
@@ -371,6 +367,9 @@ export default function AdminPanel() {
             </TabsTrigger>
             <TabsTrigger value="cvs" className="gap-2">
               <FileText className="h-4 w-4" /> Recent CVs
+            </TabsTrigger>
+            <TabsTrigger value="bullhorn" className="gap-2">
+              <Database className="h-4 w-4" /> Bullhorn Sync
             </TabsTrigger>
           </TabsList>
 
@@ -544,6 +543,105 @@ export default function AdminPanel() {
                     </Table>
                   </ScrollArea>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="bullhorn">
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Database className="h-5 w-5" />
+                      Bullhorn ClientContact Mirror
+                    </CardTitle>
+                    <CardDescription>
+                      Full read-only mirror sync from Bullhorn (no write/delete operations against Bullhorn).
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => loadBullhornSyncData()}
+                      disabled={syncJobLoading}
+                    >
+                      <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
+                      Refresh
+                    </Button>
+                    <Button size="sm" onClick={startSync} disabled={syncActionLoading || !!activeSyncJob}>
+                      {syncActionLoading ? "Starting..." : activeSyncJob ? "Sync Running" : "Start Full Sync"}
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Mirrored Contacts</p>
+                    <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Job</p>
+                    <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
+                    {latestSyncJob && (
+                      <Badge variant="outline" className={`mt-2 ${getStatusColor(latestSyncJob.status)}`}>
+                        {latestSyncJob.status}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
+                    <p className="font-medium">
+                      {latestSyncJob
+                        ? `${latestSyncJob.total_synced.toLocaleString()} / ${(latestSyncJob.total_expected || 0).toLocaleString()}`
+                        : "-"}
+                    </p>
+                    <Progress value={progressPercent} className="mt-2 h-2" />
+                  </div>
+                </div>
+
+                <ScrollArea className="h-[240px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Job</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Synced</TableHead>
+                        <TableHead className="text-right">Expected</TableHead>
+                        <TableHead className="text-right">Started</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {syncJobs.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                            No sync jobs yet
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        syncJobs.map((job) => (
+                          <TableRow key={job.id}>
+                            <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={getStatusColor(job.status)}>
+                                {job.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{(job.total_expected || 0).toLocaleString()}</TableCell>
+                            <TableCell className="text-right text-xs text-muted-foreground">
+                              {job.started_at
+                                ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
+                                : "-"}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
               </CardContent>
             </Card>
           </TabsContent>
