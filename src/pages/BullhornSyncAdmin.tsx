@@ -23,6 +23,21 @@ import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
 const CONTACTS_PAGE_SIZE = 25;
+const CORE_RAW_COLUMN_KEYS = new Set([
+  "id",
+  "name",
+  "occupation",
+  "clientCorporation",
+  "email",
+  "status",
+  "phone",
+  "owner",
+  "address",
+  "lastVisit",
+  "dateAdded",
+  "dateLastModified",
+  "skills",
+]);
 
 function formatMirrorValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "-";
@@ -45,6 +60,32 @@ function formatMirrorValue(value: unknown): string {
     }
   }
   return String(value);
+}
+
+function formatMirrorDate(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (Number.isFinite(numeric)) {
+    const millis = numeric > 1e11 ? numeric : numeric * 1000;
+    const date = new Date(millis);
+    if (!Number.isNaN(date.getTime())) return date.toLocaleDateString();
+  }
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString();
+}
+
+function formatMirrorAddress(value: unknown, fallbackCity?: string | null, fallbackState?: string | null): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const address = value as Record<string, unknown>;
+    const city = String(address.city || "").trim();
+    const state = String(address.state || "").trim();
+    const countryName = String(address.countryName || "").trim();
+    const formatted = [city, state, countryName].filter(Boolean).join(", ");
+    if (formatted) return formatted;
+  }
+  const fallback = [fallbackCity || "", fallbackState || ""].filter(Boolean).join(", ");
+  return fallback || "-";
 }
 
 export default function BullhornSyncAdmin() {
@@ -190,6 +231,10 @@ export default function BullhornSyncAdmin() {
     });
     return Array.from(columns).sort((a, b) => a.localeCompare(b));
   }, [contacts]);
+  const extraRawColumns = useMemo(
+    () => rawColumns.filter((column) => !CORE_RAW_COLUMN_KEYS.has(column)),
+    [rawColumns],
+  );
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -324,7 +369,7 @@ export default function BullhornSyncAdmin() {
             <div>
               <CardTitle>Synced Contacts</CardTitle>
               <CardDescription>
-                Full Bullhorn ClientContact payload with all mirrored columns ({rawColumns.length} dynamic columns)
+                Bullhorn-style grid with core CRM columns + all additional mirrored fields ({extraRawColumns.length} extra columns)
               </CardDescription>
             </div>
             <div className="flex w-full max-w-[680px] items-center gap-2">
@@ -364,8 +409,20 @@ export default function BullhornSyncAdmin() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="whitespace-nowrap">Synced At</TableHead>
-                  <TableHead className="whitespace-nowrap">Bullhorn ID</TableHead>
-                  {rawColumns.map((column) => (
+                  <TableHead className="whitespace-nowrap">ID</TableHead>
+                  <TableHead className="whitespace-nowrap">Name</TableHead>
+                  <TableHead className="whitespace-nowrap">Job Title</TableHead>
+                  <TableHead className="whitespace-nowrap">Company</TableHead>
+                  <TableHead className="whitespace-nowrap">Work Email</TableHead>
+                  <TableHead className="whitespace-nowrap">Status</TableHead>
+                  <TableHead className="whitespace-nowrap">Work Phone</TableHead>
+                  <TableHead className="whitespace-nowrap">Consultant</TableHead>
+                  <TableHead className="whitespace-nowrap">Address</TableHead>
+                  <TableHead className="whitespace-nowrap">Last Visit</TableHead>
+                  <TableHead className="whitespace-nowrap">Date Added</TableHead>
+                  <TableHead className="whitespace-nowrap">Last Modified</TableHead>
+                  <TableHead className="whitespace-nowrap">Skills</TableHead>
+                  {extraRawColumns.map((column) => (
                     <TableHead key={column} className="whitespace-nowrap">
                       {column}
                     </TableHead>
@@ -375,7 +432,10 @@ export default function BullhornSyncAdmin() {
               <TableBody>
                 {contacts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={Math.max(2, rawColumns.length + 2)} className="text-center text-sm text-muted-foreground">
+                    <TableCell
+                      colSpan={Math.max(14, extraRawColumns.length + 14)}
+                      className="text-center text-sm text-muted-foreground"
+                    >
                       {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
                     </TableCell>
                   </TableRow>
@@ -385,20 +445,63 @@ export default function BullhornSyncAdmin() {
                       contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
                         ? (contact.raw as Record<string, unknown>)
                         : {};
+                    const workEmail = formatMirrorValue(rawRecord.email ?? contact.email);
+                    const fullName = formatMirrorValue(
+                      rawRecord.name ??
+                        contact.name ??
+                        `${contact.first_name || ""} ${contact.last_name || ""}`.trim(),
+                    );
+                    const jobTitle = formatMirrorValue(rawRecord.occupation ?? contact.occupation);
+                    const company = formatMirrorValue(
+                      (rawRecord.clientCorporation as Record<string, unknown> | undefined)?.name ??
+                        contact.client_corporation_name,
+                    );
+                    const status = formatMirrorValue(rawRecord.status ?? contact.status);
+                    const workPhone = formatMirrorValue(rawRecord.phone);
+                    const consultant = formatMirrorValue(
+                      (rawRecord.owner as Record<string, unknown> | undefined)?.name ?? contact.owner_name,
+                    );
+                    const address = formatMirrorAddress(rawRecord.address, contact.address_city, contact.address_state);
+                    const lastVisit = formatMirrorDate(rawRecord.lastVisit);
+                    const dateAdded = formatMirrorDate(rawRecord.dateAdded);
+                    const dateLastModified = formatMirrorDate(rawRecord.dateLastModified ?? contact.date_last_modified);
+                    const skills = formatMirrorValue(rawRecord.skills);
                     return (
                       <TableRow key={contact.bullhorn_id}>
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground py-2">
                           {new Date(contact.synced_at).toLocaleString()}
                         </TableCell>
-                        <TableCell className="font-mono text-xs whitespace-nowrap">{contact.bullhorn_id}</TableCell>
-                        {rawColumns.map((column) => {
+                        <TableCell className="font-mono text-xs whitespace-nowrap py-2">{contact.bullhorn_id}</TableCell>
+                        <TableCell className="max-w-[200px] text-xs py-2">{fullName}</TableCell>
+                        <TableCell className="max-w-[240px] text-xs py-2">{jobTitle}</TableCell>
+                        <TableCell className="max-w-[220px] text-xs py-2">{company}</TableCell>
+                        <TableCell className="max-w-[230px] text-xs py-2">
+                          {workEmail !== "-" ? (
+                            <a href={`mailto:${workEmail}`} className="text-primary hover:underline">
+                              {workEmail}
+                            </a>
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-[120px] text-xs py-2">{status}</TableCell>
+                        <TableCell className="max-w-[160px] text-xs py-2">{workPhone}</TableCell>
+                        <TableCell className="max-w-[180px] text-xs py-2">{consultant}</TableCell>
+                        <TableCell className="max-w-[260px] text-xs py-2">{address}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs py-2">{lastVisit}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs py-2">{dateAdded}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs py-2">{dateLastModified}</TableCell>
+                        <TableCell className="max-w-[260px] text-xs py-2" title={skills}>
+                          {skills.length > 120 ? `${skills.slice(0, 117)}...` : skills}
+                        </TableCell>
+                        {extraRawColumns.map((column) => {
                           const rawValue = formatMirrorValue(rawRecord[column]);
                           const displayValue = rawValue.length > 140 ? `${rawValue.slice(0, 137)}...` : rawValue;
                           const isEmailColumn = column.toLowerCase() === "email" && rawValue.includes("@");
                           return (
                             <TableCell
                               key={`${contact.bullhorn_id}-${column}`}
-                              className="max-w-[320px] text-xs align-top"
+                              className="max-w-[300px] text-xs align-top py-2"
                               title={rawValue}
                             >
                               {isEmailColumn ? (
