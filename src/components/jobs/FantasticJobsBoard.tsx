@@ -935,11 +935,11 @@ export function FantasticJobsBoard() {
             title: "No PE matches in current result set",
             description: `Fetched ${incoming.length}, PE matches ${peMatches}. Disable PE-only to see all jobs.`,
           });
-        } else if (pageVisibleRows.length === 0 && diagnostics) {
+        } else if (pageVisibleRows.length === 0) {
           toast({
-            title: "0 results from provider",
-            description: `Apify rows: ${diagnostics.raw ?? incoming.length}, normalized: ${diagnostics.normalized ?? incoming.length}, returned: ${diagnostics.returned ?? incoming.length}.`,
-            variant: "destructive",
+            title: "No results found",
+            description:
+              "No jobs matched your current filters. Try broadening location, title, or keywords.",
           });
         } else {
           toast({

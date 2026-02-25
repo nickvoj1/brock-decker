@@ -469,12 +469,14 @@ Deno.serve(async (req) => {
     if (apifyToken && apifyActorIds.length > 0) {
       const providerParts: string[] = [];
       let collected: Record<string, unknown>[] = [];
+      let successfulActorRuns = 0;
       for (const actorId of apifyActorIds) {
         try {
           const actorJobs = await fetchViaApify(apifyToken, actorId, body, url);
+          successfulActorRuns += 1;
+          providerParts.push(`apify:${actorId}`);
           if (actorJobs.length > 0) {
             collected = collected.concat(actorJobs);
-            providerParts.push(`apify:${actorId}`);
           }
         } catch (error) {
           const err = error instanceof Error ? error.message : `Apify failed for ${actorId}`;
@@ -482,17 +484,24 @@ Deno.serve(async (req) => {
           console.error("[fantastic-jobs] Apify error:", err);
         }
       }
+      provider = providerParts.join(",");
       if (collected.length > 0) {
         rawJobs = collected;
-        provider = providerParts.join(",");
+      } else if (successfulActorRuns > 0) {
+        rawJobs = [];
       }
     }
 
-    if (rawJobs.length === 0 && !provider) {
+    const hasConfiguredProvider = apifyToken && apifyActorIds.length > 0;
+    if (!hasConfiguredProvider) {
       throw new Error(
         providerError ||
           "No jobs provider available. Configure Apify token + actor IDs in Settings.",
       );
+    }
+
+    if (rawJobs.length === 0 && providerError && !provider) {
+      throw new Error(providerError);
     }
 
     const normalizedJobs = normalizeJobs(rawJobs, normalizeLocationExpression(getParam(body, url, "location")));
