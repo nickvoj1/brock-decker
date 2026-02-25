@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { supabase } from "@/integrations/supabase/client";
-import { createEnrichmentRun } from "@/lib/dataApi";
+import { createEnrichmentRun, startEnrichmentRun, waitForEnrichmentRunCompletion } from "@/lib/dataApi";
 import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users, ChevronDown } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 
@@ -1199,7 +1199,7 @@ export function FantasticJobsBoard() {
         search_counter: maxContacts,
         candidates_count: 1,
         preferences_count: 1,
-        status: "running",
+        status: "pending",
         bullhorn_enabled: false,
         candidates_data: JSON.parse(JSON.stringify([candidateData])),
         preferences_data: JSON.parse(JSON.stringify(preferencesData)),
@@ -1209,21 +1209,45 @@ export function FantasticJobsBoard() {
         throw new Error(runResult.error || "Failed to create enrichment run");
       }
 
-      const { data, error } = await supabase.functions.invoke("run-enrichment", {
-        body: { runId: runResult.data.id, bullhornEmails },
+      const kickOffResult = await startEnrichmentRun(effectiveProfile, runResult.data.id, bullhornEmails);
+      if (!kickOffResult.success) {
+        throw new Error(kickOffResult.error || "Failed to start enrichment run");
+      }
+
+      const completion = await waitForEnrichmentRunCompletion(effectiveProfile, runResult.data.id, {
+        timeoutMs: 180000,
+        intervalMs: 2000,
       });
+      if (!completion.success) {
+        throw new Error(completion.error || "Failed while waiting for enrichment run");
+      }
+      if (completion.timedOut) {
+        toast({
+          title: "Apollo search is running in background",
+          description: "You can leave this tab. Final contacts will appear in Runs History.",
+        });
+        return;
+      }
 
-      if (error) throw error;
-
-      const contacts = Array.isArray(data.contacts) ? (data.contacts as ApolloJobContact[]) : [];
+      const finalRun = completion.data || {};
+      const contacts = Array.isArray(finalRun.enriched_data) ? (finalRun.enriched_data as ApolloJobContact[]) : [];
       const emailContacts = contacts.filter((c) => (c.email || "").trim().length > 0);
       setApolloTargetJob(job);
       setApolloContacts(emailContacts);
       setApolloModalOpen(true);
-      toast({
-        title: "Apollo search complete",
-        description: `Found ${emailContacts.length} contacts with email for ${company}.`,
-      });
+      if (emailContacts.length > 0) {
+        toast({
+          title: "Apollo search complete",
+          description: `Found ${emailContacts.length} contacts with email for ${company}.`,
+        });
+      } else {
+        const finalStatus = String(finalRun.status || "").toLowerCase();
+        toast({
+          title: finalStatus === "failed" ? "Apollo search failed" : "No contacts found",
+          description: finalRun.error_message || `No contacts with email found for ${company}.`,
+          variant: "destructive",
+        });
+      }
     } catch (err) {
       toast({
         title: "Apollo search failed",

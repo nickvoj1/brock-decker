@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
-import { createEnrichmentRun } from "@/lib/dataApi";
+import { createEnrichmentRun, startEnrichmentRun, waitForEnrichmentRunCompletion } from "@/lib/dataApi";
 
 const DEPARTMENTS = [
   'HR / Talent Acquisition',
@@ -112,7 +112,7 @@ export function SpecialRequestTab() {
         search_counter: maxContacts,
         candidates_count: 1,
         preferences_count: 1,
-        status: 'running',
+        status: 'pending',
         bullhorn_enabled: false,
         candidates_data: [{
           candidate_id: `SR-${Date.now()}`,
@@ -144,12 +144,28 @@ export function SpecialRequestTab() {
         throw new Error(runResult.error || 'Failed to create enrichment run');
       }
 
-      const { data, error } = await supabase.functions.invoke('run-enrichment', {
-        body: { runId: runResult.data.id, bullhornEmails }
-      });
-      if (error) throw error;
+      const kickOffResult = await startEnrichmentRun(profileName, runResult.data.id, bullhornEmails);
+      if (!kickOffResult.success) {
+        throw new Error(kickOffResult.error || "Failed to start enrichment run");
+      }
 
-      const rawContacts = Array.isArray(data?.contacts) ? data.contacts : [];
+      const completion = await waitForEnrichmentRunCompletion(profileName, runResult.data.id, {
+        timeoutMs: 180000,
+        intervalMs: 2000,
+      });
+      if (!completion.success) {
+        throw new Error(completion.error || "Failed while waiting for enrichment run");
+      }
+      if (completion.timedOut) {
+        toast({
+          title: "Search continues in background",
+          description: "You can leave this page. Open Runs History to view final contacts.",
+        });
+        return;
+      }
+
+      const finalRun = completion.data || {};
+      const rawContacts = Array.isArray(finalRun?.enriched_data) ? finalRun.enriched_data : [];
       const normalizedContacts: SpecialRequestContact[] = rawContacts.map((c: any) => ({
         name: String(c?.name || ''),
         title: String(c?.title || ''),
@@ -160,10 +176,19 @@ export function SpecialRequestTab() {
       const completeContacts = normalizedContacts.filter(isCompleteContact);
 
       setContacts(completeContacts);
-      toast({
-        title: `Found ${completeContacts.length} contacts`,
-        description: `At ${company} in ${country}`,
-      });
+      if (completeContacts.length > 0) {
+        toast({
+          title: `Found ${completeContacts.length} contacts`,
+          description: `At ${company} in ${country}`,
+        });
+      } else {
+        const finalStatus = String(finalRun.status || "").toLowerCase();
+        toast({
+          title: finalStatus === "failed" ? "Search failed" : "No contacts found",
+          description: finalRun.error_message || `No complete contacts found at ${company} in ${country}`,
+          variant: "destructive",
+        });
+      }
     } catch (err: any) {
       toast({
         title: "Search failed",

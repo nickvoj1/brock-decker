@@ -9,6 +9,12 @@ const corsHeaders = {
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const MAX_REQUESTS = 100;
 const WINDOW_MS = 60 * 1000; // 1 minute
+const EXCLUDED_PROFILE_NAMES = new Set(["test"]);
+
+function isExcludedProfileName(value?: string | null): boolean {
+  const normalized = String(value || "").trim().toLowerCase();
+  return EXCLUDED_PROFILE_NAMES.has(normalized);
+}
 
 // ============================================================================
 // SIGNAL DISPLAY QUALITY FILTERS (used when returning signals to the UI)
@@ -418,6 +424,95 @@ Deno.serve(async (req) => {
       if (error) throw error;
       return new Response(
         JSON.stringify({ success: true, data: newRun }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (action === "start-enrichment-run") {
+      const { runId, bullhornEmails = [] } = data || {};
+      if (!runId) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Run ID required" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+        );
+      }
+
+      const { data: run, error: runError } = await supabase
+        .from("enrichment_runs")
+        .select("id, uploaded_by, status")
+        .eq("id", runId)
+        .single();
+
+      if (runError || !run) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Run not found" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 }
+        );
+      }
+
+      if (run.uploaded_by !== profileName) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Access denied for this run" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+
+      const normalizedStatus = String(run.status || "").toLowerCase();
+      const terminalStatuses = new Set(["success", "partial", "failed"]);
+      if (terminalStatuses.has(normalizedStatus)) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            data: { runId, queued: false, alreadyCompleted: true, status: normalizedStatus },
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Mark as running before dispatch to avoid duplicate triggers from rapid retries.
+      await supabase
+        .from("enrichment_runs")
+        .update({ status: "running", error_message: null })
+        .eq("id", runId)
+        .eq("uploaded_by", profileName);
+
+      const triggerUrl = `${supabaseUrl}/functions/v1/run-enrichment`;
+      const backgroundJob = fetch(triggerUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({
+          runId,
+          bullhornEmails: Array.isArray(bullhornEmails) ? bullhornEmails : [],
+        }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errorBody = await res.text().catch(() => "");
+            console.error(
+              `[data-api] Failed to dispatch run-enrichment for ${runId}: ${res.status} ${errorBody.slice(0, 400)}`
+            );
+          }
+        })
+        .catch((err) => {
+          console.error(`[data-api] Background dispatch exception for ${runId}:`, err);
+        });
+
+      // Keep dispatch alive after response when runtime supports waitUntil.
+      const edgeRuntime = (globalThis as any).EdgeRuntime;
+      if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
+        edgeRuntime.waitUntil(backgroundJob);
+      } else {
+        void backgroundJob;
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: { runId, queued: true, status: "running" },
+        }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -1152,9 +1247,9 @@ Deno.serve(async (req) => {
       // Get all enrichment runs from all users
       const { data: runs, error: runsError } = await supabase
         .from("enrichment_runs")
-        .select("id, uploaded_by, status, candidates_count, processed_count, created_at, updated_at, preferences_data")
+        .select("id, uploaded_by, status, search_counter, candidates_count, processed_count, error_message, created_at, updated_at, preferences_data")
         .order("created_at", { ascending: false })
-        .limit(100);
+        .limit(300);
 
       if (runsError) throw runsError;
 
@@ -1176,22 +1271,26 @@ Deno.serve(async (req) => {
 
       if (candidatesError) throw candidatesError;
 
+      const filteredRuns = (runs || []).filter((r: any) => !isExcludedProfileName(r?.uploaded_by));
+      const filteredPitches = (pitches || []).filter((p: any) => !isExcludedProfileName(p?.profile_name));
+      const filteredCandidates = (candidates || []).filter((c: any) => !isExcludedProfileName(c?.profile_name));
+
       // Calculate stats per user
       const userStats: Record<string, { runs: number; pitches: number; candidates: number }> = {};
       
-      runs?.forEach((r: any) => {
+      filteredRuns.forEach((r: any) => {
         const user = r.uploaded_by || "Unknown";
         if (!userStats[user]) userStats[user] = { runs: 0, pitches: 0, candidates: 0 };
         userStats[user].runs++;
       });
 
-      pitches?.forEach((p: any) => {
+      filteredPitches.forEach((p: any) => {
         const user = p.profile_name || "Unknown";
         if (!userStats[user]) userStats[user] = { runs: 0, pitches: 0, candidates: 0 };
         userStats[user].pitches++;
       });
 
-      candidates?.forEach((c: any) => {
+      filteredCandidates.forEach((c: any) => {
         const user = c.profile_name || "Unknown";
         if (!userStats[user]) userStats[user] = { runs: 0, pitches: 0, candidates: 0 };
         userStats[user].candidates++;
@@ -1201,9 +1300,9 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           success: true, 
           data: { 
-            runs: runs || [], 
-            pitches: pitches || [], 
-            candidates: candidates || [],
+            runs: filteredRuns, 
+            pitches: filteredPitches, 
+            candidates: filteredCandidates,
             userStats 
           } 
         }),
@@ -1246,6 +1345,7 @@ Deno.serve(async (req) => {
 
       (runs || []).forEach((r: any) => {
         const pn = r.uploaded_by || "Unknown";
+        if (isExcludedProfileName(pn)) return;
         if (!statsMap[pn]) {
           statsMap[pn] = {
             profile_name: pn,
