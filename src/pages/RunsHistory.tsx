@@ -439,6 +439,21 @@ export default function RunsHistory() {
     toast({ title: "Copied!", description: `${contacts.length} emails copied` });
   };
 
+  const copyContactEmail = async (email: string | null | undefined) => {
+    const value = (email || "").trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast({ title: "Copied", description: value });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not copy email to clipboard",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <AppLayout 
       title="Runs History" 
@@ -1017,7 +1032,20 @@ export default function RunsHistory() {
                                 <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground" title={skills}>
                                   {skills || '-'}
                                 </TableCell>
-                                <TableCell className="text-primary text-sm">{contact.email || '-'}</TableCell>
+                                <TableCell className="text-sm">
+                                  {contact.email ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => copyContactEmail(contact.email)}
+                                      className="text-primary hover:underline"
+                                      title="Copy email"
+                                    >
+                                      {contact.email}
+                                    </button>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </TableCell>
                               </TableRow>
                             );
                           })}
