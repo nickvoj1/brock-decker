@@ -227,7 +227,7 @@ export default function Dashboard() {
       <div className="buttons-3d space-y-6">
         {/* Stats Overview */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="animate-slide-up" style={{ animationDelay: '0ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '0ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Searches</CardTitle>
               <Search className="h-4 w-4 text-muted-foreground" />
@@ -240,7 +240,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="animate-slide-up" style={{ animationDelay: '50ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '50ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">New Contacts</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
@@ -253,7 +253,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="animate-slide-up" style={{ animationDelay: '100ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '100ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Saved CVs</CardTitle>
               <FileText className="h-4 w-4 text-muted-foreground" />
@@ -266,7 +266,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="animate-slide-up" style={{ animationDelay: '150ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '150ms' }}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Success Rate</CardTitle>
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
@@ -282,7 +282,7 @@ export default function Dashboard() {
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Quick Actions */}
-          <Card className="lg:col-span-1 animate-slide-up" style={{ animationDelay: '200ms' }}>
+          <Card className="panel-shell interactive-lift lg:col-span-1 animate-slide-up" style={{ animationDelay: '200ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Play className="h-4 w-4" />
@@ -290,35 +290,37 @@ export default function Dashboard() {
               </CardTitle>
               <CardDescription>Jump right into your workflow</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <Button 
-                className="w-full justify-start gap-2" 
-                onClick={() => navigate('/')}
-              >
-                <Search className="h-4 w-4" />
-                New Contact Search
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={() => navigate('/previous-cvs')}
-              >
-                <FileText className="h-4 w-4" />
-                Browse CVs
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={() => navigate('/history')}
-              >
-                <Clock className="h-4 w-4" />
-                View Search History
-              </Button>
+            <CardContent>
+              <div className="control-surface space-y-3 p-3">
+                <Button 
+                  className="w-full justify-start gap-2" 
+                  onClick={() => navigate('/')}
+                >
+                  <Search className="h-4 w-4" />
+                  New Contact Search
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => navigate('/previous-cvs')}
+                >
+                  <FileText className="h-4 w-4" />
+                  Browse CVs
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start gap-2"
+                  onClick={() => navigate('/history')}
+                >
+                  <Clock className="h-4 w-4" />
+                  View Search History
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
           {/* Activity Timeline */}
-          <Card className="lg:col-span-2 animate-slide-up" style={{ animationDelay: '250ms' }}>
+          <Card className="panel-shell interactive-lift lg:col-span-2 animate-slide-up" style={{ animationDelay: '250ms' }}>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2">
@@ -346,7 +348,7 @@ export default function Dashboard() {
                   {recentActivity.map((activity) => (
                     <div 
                       key={activity.id} 
-                      className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                      className="control-surface interactive-lift flex items-start gap-3 p-3 rounded-lg transition-colors cursor-pointer"
                       onClick={() => {
                         if (activity.type === 'search') navigate('/history');
                         else navigate('/previous-cvs');
@@ -372,7 +374,7 @@ export default function Dashboard() {
 
         {/* Top Industries */}
         {stats.topIndustries.length > 0 && (
-          <Card className="animate-slide-up" style={{ animationDelay: '300ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '300ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" />
@@ -383,7 +385,7 @@ export default function Dashboard() {
             <CardContent>
               <div className="space-y-3">
                 {stats.topIndustries.map((industry, index) => (
-                  <div key={industry.name} className="flex items-center gap-3">
+                  <div key={industry.name} className="control-surface interactive-lift flex items-center gap-3 p-3 rounded-lg">
                     <span className="text-xs text-muted-foreground w-4">{index + 1}</span>
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-1">
