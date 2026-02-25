@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getAdminActivity, AdminActivityData } from "@/lib/dataApi";
+import {
+  BullhornSyncJob,
+  getBullhornMirrorStats,
+  listBullhornSyncJobs,
+  startBullhornClientContactSync,
+} from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,8 +17,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock, Filter } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock, Filter, Database, RefreshCw } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
@@ -23,6 +31,10 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AdminActivityData | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [syncJobs, setSyncJobs] = useState<BullhornSyncJob[]>([]);
+  const [syncJobLoading, setSyncJobLoading] = useState(false);
+  const [syncActionLoading, setSyncActionLoading] = useState(false);
+  const [mirrorCount, setMirrorCount] = useState(0);
 
   const userStatsArray = data?.userStats 
     ? Object.entries(data.userStats).map(([name, stats]) => ({ name, ...stats }))
@@ -34,6 +46,12 @@ export default function AdminPanel() {
     return data.runs.filter(r => r.status === statusFilter);
   }, [data?.runs, statusFilter]);
 
+  const latestSyncJob = syncJobs[0] || null;
+  const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
+  const progressPercent = latestSyncJob?.total_expected
+    ? Math.min(100, Math.round((latestSyncJob.total_synced / latestSyncJob.total_expected) * 100))
+    : 0;
+
   useEffect(() => {
     // Redirect non-admin users
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -44,8 +62,20 @@ export default function AdminPanel() {
 
     if (profileName === ADMIN_PROFILE) {
       loadData();
+      loadBullhornSyncData();
     }
   }, [profileName, navigate]);
+
+  useEffect(() => {
+    const activeJob = syncJobs.find((job) => job.status === "queued" || job.status === "running");
+    if (!activeJob || profileName !== ADMIN_PROFILE) return;
+
+    const interval = setInterval(() => {
+      loadBullhornSyncData({ silent: true });
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [syncJobs, profileName]);
 
   const loadData = async () => {
     setLoading(true);
@@ -60,6 +90,51 @@ export default function AdminPanel() {
       toast.error("Failed to load admin data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBullhornSyncData = async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setSyncJobLoading(true);
+    try {
+      const [jobsResult, statsResult] = await Promise.all([
+        listBullhornSyncJobs(ADMIN_PROFILE, 10),
+        getBullhornMirrorStats(ADMIN_PROFILE),
+      ]);
+
+      if (jobsResult.success && Array.isArray(jobsResult.data)) {
+        setSyncJobs(jobsResult.data);
+      }
+
+      if (statsResult.success && statsResult.data) {
+        setMirrorCount(statsResult.data.totalMirroredContacts || 0);
+      }
+    } catch (err) {
+      console.error("Failed to load Bullhorn sync state", err);
+    } finally {
+      if (!options.silent) setSyncJobLoading(false);
+    }
+  };
+
+  const startSync = async () => {
+    setSyncActionLoading(true);
+    try {
+      const result = await startBullhornClientContactSync(ADMIN_PROFILE, {
+        batchSize: 500,
+        includeDeleted: false,
+        maxBatchesPerInvocation: 8,
+      });
+
+      if (!result.success || !result.data) {
+        toast.error(result.error || "Failed to start Bullhorn sync");
+        return;
+      }
+
+      toast.success(result.message || "Bullhorn ClientContact sync started");
+      await loadBullhornSyncData();
+    } catch (err) {
+      toast.error("Failed to start Bullhorn sync");
+    } finally {
+      setSyncActionLoading(false);
     }
   };
 
@@ -187,6 +262,101 @@ export default function AdminPanel() {
                 </TableBody>
               </Table>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5" />
+                  Bullhorn ClientContact Mirror
+                </CardTitle>
+                <CardDescription>
+                  Full read-only mirror sync from Bullhorn (no write/delete operations against Bullhorn).
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadBullhornSyncData()}
+                  disabled={syncJobLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+                <Button size="sm" onClick={startSync} disabled={syncActionLoading || !!activeSyncJob}>
+                  {syncActionLoading ? "Starting..." : activeSyncJob ? "Sync Running" : "Start Full Sync"}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Mirrored Contacts</p>
+                <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Job</p>
+                <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
+                {latestSyncJob && (
+                  <Badge variant="outline" className="mt-2">
+                    {latestSyncJob.status}
+                  </Badge>
+                )}
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
+                <p className="font-medium">
+                  {latestSyncJob
+                    ? `${latestSyncJob.total_synced.toLocaleString()} / ${(latestSyncJob.total_expected || 0).toLocaleString()}`
+                    : "-"}
+                </p>
+                <Progress value={progressPercent} className="mt-2 h-2" />
+              </div>
+            </div>
+
+            <ScrollArea className="h-[200px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Job</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Synced</TableHead>
+                    <TableHead className="text-right">Expected</TableHead>
+                    <TableHead className="text-right">Started</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {syncJobs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                        No sync jobs yet
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    syncJobs.map((job) => (
+                      <TableRow key={job.id}>
+                        <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{job.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{(job.total_expected || 0).toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {job.started_at
+                            ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
+                            : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
           </CardContent>
         </Card>
 

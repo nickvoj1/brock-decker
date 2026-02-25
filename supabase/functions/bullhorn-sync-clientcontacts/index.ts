@@ -1,0 +1,593 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+const ADMIN_PROFILE = "Nikita Vojevoda";
+const DEFAULT_BATCH_SIZE = 500;
+const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
+
+type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+type BullhornTokens = {
+  access_token: string;
+  refresh_token: string | null;
+  bh_rest_token: string;
+  rest_url: string;
+  expires_at: string | null;
+};
+
+type SyncJob = {
+  id: string;
+  requested_by: string;
+  status: SyncStatus;
+  batch_size: number;
+  include_deleted: boolean;
+  next_start: number;
+  total_expected: number | null;
+  total_synced: number;
+  batches_processed: number;
+  last_batch_size: number;
+  metadata: Record<string, unknown> | null;
+};
+
+function jsonResponse(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function normalizeBatchSize(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return DEFAULT_BATCH_SIZE;
+  return Math.max(50, Math.min(2000, Math.floor(n)));
+}
+
+function normalizeMaxBatches(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_BATCHES_PER_INVOCATION;
+  return Math.max(1, Math.min(40, Math.floor(n)));
+}
+
+function normalizeBullhornDate(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const date = new Date(trimmed);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+    const asNum = Number(trimmed);
+    if (!Number.isFinite(asNum)) return null;
+    const millis = asNum > 1e11 ? asNum : asNum * 1000;
+    const numericDate = new Date(millis);
+    return Number.isNaN(numericDate.getTime()) ? null : numericDate.toISOString();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const millis = value > 1e11 ? value : value * 1000;
+    const date = new Date(millis);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  return null;
+}
+
+function normalizeEmail(email: unknown): string | null {
+  const value = String(email || "").trim().toLowerCase();
+  return value && value.includes("@") ? value : null;
+}
+
+async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | null> {
+  const { data, error } = await supabase
+    .from("bullhorn_tokens")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  if (data.expires_at && new Date(data.expires_at) < new Date()) {
+    console.log("[bullhorn-sync-clientcontacts] Token expired, attempting refresh");
+    return await refreshBullhornTokens(supabase, data.refresh_token);
+  }
+
+  return data;
+}
+
+async function refreshBullhornTokens(supabase: any, refreshToken: string): Promise<BullhornTokens | null> {
+  const { data: settings } = await supabase
+    .from("api_settings")
+    .select("setting_key, setting_value")
+    .in("setting_key", ["bullhorn_client_id", "bullhorn_client_secret", "bullhorn_username", "bullhorn_password"]);
+
+  const clientId = settings?.find((s: any) => s.setting_key === "bullhorn_client_id")?.setting_value;
+  const clientSecret = settings?.find((s: any) => s.setting_key === "bullhorn_client_secret")?.setting_value;
+  const username = settings?.find((s: any) => s.setting_key === "bullhorn_username")?.setting_value;
+  const password = settings?.find((s: any) => s.setting_key === "bullhorn_password")?.setting_value;
+
+  if (!clientId || !clientSecret) return null;
+
+  let tokenData: any = null;
+
+  if (refreshToken) {
+    const tokenUrl = `https://auth.bullhornstaffing.com/oauth/token?grant_type=refresh_token&refresh_token=${refreshToken}&client_id=${clientId}&client_secret=${clientSecret}`;
+    const tokenResponse = await fetch(tokenUrl, { method: "POST" });
+    if (tokenResponse.ok) {
+      tokenData = await tokenResponse.json();
+      if (!tokenData?.access_token) tokenData = null;
+    }
+  }
+
+  if (!tokenData?.access_token && username && password) {
+    const authUrl = `https://auth.bullhornstaffing.com/oauth/authorize?client_id=${clientId}&response_type=code&username=${encodeURIComponent(
+      username,
+    )}&password=${encodeURIComponent(password)}&action=Login`;
+    const authResponse = await fetch(authUrl, { redirect: "manual" });
+    const location = authResponse.headers.get("location");
+    const codeMatch = location?.match(/code=([^&]+)/);
+    if (codeMatch) {
+      const code = codeMatch[1];
+      const tokenUrl = `https://auth.bullhornstaffing.com/oauth/token?grant_type=authorization_code&code=${code}&client_id=${clientId}&client_secret=${clientSecret}`;
+      const tokenResponse = await fetch(tokenUrl, { method: "POST" });
+      if (tokenResponse.ok) tokenData = await tokenResponse.json();
+    }
+  }
+
+  if (!tokenData?.access_token) return null;
+
+  const loginUrl = `https://rest.bullhornstaffing.com/rest-services/login?version=*&access_token=${tokenData.access_token}`;
+  const loginResponse = await fetch(loginUrl);
+  if (!loginResponse.ok) return null;
+
+  const loginData = await loginResponse.json();
+  if (!loginData?.BhRestToken || !loginData?.restUrl) return null;
+
+  const expiresAt = new Date(Date.now() + (tokenData.expires_in || 600) * 1000).toISOString();
+
+  await supabase.from("bullhorn_tokens").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("bullhorn_tokens").insert({
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || refreshToken,
+    bh_rest_token: loginData.BhRestToken,
+    rest_url: loginData.restUrl,
+    expires_at: expiresAt,
+  });
+
+  return {
+    access_token: tokenData.access_token,
+    refresh_token: tokenData.refresh_token || refreshToken,
+    bh_rest_token: loginData.BhRestToken,
+    rest_url: loginData.restUrl,
+    expires_at: expiresAt,
+  };
+}
+
+async function fetchClientContactsBatch(
+  restUrl: string,
+  bhRestToken: string,
+  start: number,
+  count: number,
+  includeDeleted: boolean,
+): Promise<{ rows: any[]; total: number | null }> {
+  const fields = [
+    "id",
+    "name",
+    "firstName",
+    "lastName",
+    "email",
+    "occupation",
+    "status",
+    "phone",
+    "mobile",
+    "address(city,state,countryID)",
+    "clientCorporation(id,name)",
+    "owner(id,name)",
+    "dateAdded",
+    "dateLastModified",
+    "isDeleted",
+  ].join(",");
+
+  const whereClause = includeDeleted ? "id>0" : "isDeleted=false";
+  const queryUrl = `${restUrl}query/ClientContact?BhRestToken=${encodeURIComponent(
+    bhRestToken,
+  )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
+
+  let lastError: string | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(queryUrl);
+    if (response.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 700 + attempt * 500));
+      continue;
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      lastError = `Bullhorn query failed (${response.status}): ${body.slice(0, 300)}`;
+      await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 400));
+      continue;
+    }
+
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    const totalRaw = payload?.total;
+    const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
+    return { rows, total };
+  }
+
+  throw new Error(lastError || "Bullhorn query failed after retries");
+}
+
+function mapMirrorRow(contact: any, jobId: string) {
+  const email = normalizeEmail(contact?.email);
+  return {
+    bullhorn_id: Number(contact?.id),
+    synced_at: new Date().toISOString(),
+    last_synced_job_id: jobId,
+    name: contact?.name || null,
+    first_name: contact?.firstName || null,
+    last_name: contact?.lastName || null,
+    email,
+    email_normalized: email,
+    occupation: contact?.occupation || null,
+    status: contact?.status || null,
+    phone: contact?.phone || null,
+    mobile: contact?.mobile || null,
+    address_city: contact?.address?.city || null,
+    address_state: contact?.address?.state || null,
+    address_country_id: Number.isFinite(Number(contact?.address?.countryID))
+      ? Number(contact.address.countryID)
+      : null,
+    client_corporation_id: Number.isFinite(Number(contact?.clientCorporation?.id))
+      ? Number(contact.clientCorporation.id)
+      : null,
+    client_corporation_name: contact?.clientCorporation?.name || null,
+    owner_id: Number.isFinite(Number(contact?.owner?.id)) ? Number(contact.owner.id) : null,
+    owner_name: contact?.owner?.name || null,
+    date_added: normalizeBullhornDate(contact?.dateAdded),
+    date_last_modified: normalizeBullhornDate(contact?.dateLastModified),
+    is_deleted: Boolean(contact?.isDeleted),
+    raw: contact,
+  };
+}
+
+async function markJobFailed(supabase: any, jobId: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  await supabase
+    .from("bullhorn_sync_jobs")
+    .update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      heartbeat_at: new Date().toISOString(),
+      last_error: message.slice(0, 4000),
+    })
+    .eq("id", jobId);
+}
+
+async function queueContinuation(
+  supabaseUrl: string,
+  serviceKey: string,
+  jobId: string,
+  batchSize: number,
+  maxBatchesPerInvocation: number,
+) {
+  const invokeUrl = `${supabaseUrl}/functions/v1/bullhorn-sync-clientcontacts`;
+  const payload = {
+    action: "continue-sync",
+    profileName: ADMIN_PROFILE,
+    data: { jobId, batchSize, maxBatchesPerInvocation },
+  };
+
+  const continuation = fetch(invokeUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${serviceKey}`,
+      apikey: serviceKey,
+    },
+    body: JSON.stringify(payload),
+  }).catch((err) => {
+    console.error("[bullhorn-sync-clientcontacts] Failed to queue continuation:", err);
+  });
+
+  const edgeRuntime = (globalThis as any).EdgeRuntime;
+  if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
+    edgeRuntime.waitUntil(continuation);
+  } else {
+    void continuation;
+  }
+}
+
+async function processSyncJob(
+  supabase: any,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  job: SyncJob,
+  maxBatchesPerInvocation: number,
+) {
+  const tokens = await getStoredBullhornTokens(supabase);
+  if (!tokens) {
+    throw new Error("Bullhorn is not connected or token refresh failed");
+  }
+
+  let nextStart = Number(job.next_start || 0);
+  let totalSynced = Number(job.total_synced || 0);
+  let batchesProcessed = Number(job.batches_processed || 0);
+  let totalExpected = Number.isFinite(Number(job.total_expected)) ? Number(job.total_expected) : null;
+  let lastBatchSize = 0;
+  let completed = false;
+
+  await supabase
+    .from("bullhorn_sync_jobs")
+    .update({
+      status: "running",
+      started_at: new Date().toISOString(),
+      heartbeat_at: new Date().toISOString(),
+      last_error: null,
+    })
+    .eq("id", job.id);
+
+  for (let i = 0; i < maxBatchesPerInvocation; i++) {
+    const { rows, total } = await fetchClientContactsBatch(
+      tokens.rest_url,
+      tokens.bh_rest_token,
+      nextStart,
+      job.batch_size,
+      Boolean(job.include_deleted),
+    );
+
+    if (totalExpected === null && Number.isFinite(Number(total))) {
+      totalExpected = Number(total);
+    }
+
+    if (!rows.length) {
+      completed = true;
+      break;
+    }
+
+    const mapped = rows
+      .map((c) => mapMirrorRow(c, job.id))
+      .filter((row) => Number.isFinite(Number(row.bullhorn_id)));
+
+    if (mapped.length) {
+      const { error: upsertError } = await supabase
+        .from("bullhorn_client_contacts_mirror")
+        .upsert(mapped, { onConflict: "bullhorn_id" });
+
+      if (upsertError) {
+        throw new Error(`Mirror upsert failed: ${upsertError.message}`);
+      }
+    }
+
+    nextStart += rows.length;
+    totalSynced += rows.length;
+    batchesProcessed += 1;
+    lastBatchSize = rows.length;
+
+    await supabase
+      .from("bullhorn_sync_jobs")
+      .update({
+        next_start: nextStart,
+        total_synced: totalSynced,
+        batches_processed: batchesProcessed,
+        last_batch_size: lastBatchSize,
+        total_expected: totalExpected,
+        heartbeat_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+
+    if (rows.length < job.batch_size) {
+      completed = true;
+      break;
+    }
+  }
+
+  if (completed) {
+    await supabase
+      .from("bullhorn_sync_jobs")
+      .update({
+        status: "completed",
+        finished_at: new Date().toISOString(),
+        heartbeat_at: new Date().toISOString(),
+        total_synced: totalSynced,
+        batches_processed: batchesProcessed,
+        next_start: nextStart,
+        last_batch_size: lastBatchSize,
+        total_expected: totalExpected,
+      })
+      .eq("id", job.id);
+    return;
+  }
+
+  await supabase
+    .from("bullhorn_sync_jobs")
+    .update({
+      status: "running",
+      total_synced: totalSynced,
+      batches_processed: batchesProcessed,
+      next_start: nextStart,
+      last_batch_size: lastBatchSize,
+      total_expected: totalExpected,
+      heartbeat_at: new Date().toISOString(),
+    })
+    .eq("id", job.id);
+
+  await queueContinuation(supabaseUrl, supabaseServiceKey, job.id, job.batch_size, maxBatchesPerInvocation);
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const body = await req.json().catch(() => ({}));
+    const action = String(body?.action || "");
+    const profileName = String(body?.profileName || "").trim();
+    const data = body?.data || {};
+
+    if (!profileName) {
+      return jsonResponse({ success: false, error: "Profile name is required" }, 400);
+    }
+    if (profileName !== ADMIN_PROFILE) {
+      return jsonResponse({ success: false, error: "Access denied. Admin only." }, 403);
+    }
+
+    if (action === "start-sync") {
+      const batchSize = normalizeBatchSize(data?.batchSize);
+      const includeDeleted = Boolean(data?.includeDeleted);
+      const maxBatchesPerInvocation = normalizeMaxBatches(data?.maxBatchesPerInvocation);
+
+      const { data: runningJob } = await supabase
+        .from("bullhorn_sync_jobs")
+        .select("*")
+        .in("status", ["queued", "running"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (runningJob) {
+        return jsonResponse({ success: true, data: runningJob, message: "Existing sync job is already running." });
+      }
+
+      const { data: createdJob, error: createError } = await supabase
+        .from("bullhorn_sync_jobs")
+        .insert({
+          requested_by: profileName,
+          status: "queued",
+          batch_size: batchSize,
+          include_deleted: includeDeleted,
+          metadata: { source: "manual_start" },
+        })
+        .select("*")
+        .single();
+
+      if (createError || !createdJob) {
+        throw new Error(createError?.message || "Failed to create sync job");
+      }
+
+      const promise = processSyncJob(
+        supabase,
+        supabaseUrl,
+        supabaseServiceKey,
+        createdJob as SyncJob,
+        maxBatchesPerInvocation,
+      ).catch(async (err) => {
+        console.error("[bullhorn-sync-clientcontacts] Sync failed:", err);
+        await markJobFailed(supabase, createdJob.id, err);
+      });
+
+      const edgeRuntime = (globalThis as any).EdgeRuntime;
+      if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
+        edgeRuntime.waitUntil(promise);
+      } else {
+        void promise;
+      }
+
+      return jsonResponse({
+        success: true,
+        data: createdJob,
+        message: "Sync job started in background.",
+      });
+    }
+
+    if (action === "continue-sync") {
+      const jobId = String(data?.jobId || "").trim();
+      if (!jobId) return jsonResponse({ success: false, error: "jobId is required" }, 400);
+
+      const maxBatchesPerInvocation = normalizeMaxBatches(data?.maxBatchesPerInvocation);
+
+      const { data: job, error } = await supabase
+        .from("bullhorn_sync_jobs")
+        .select("*")
+        .eq("id", jobId)
+        .maybeSingle();
+
+      if (error || !job) return jsonResponse({ success: false, error: "Sync job not found" }, 404);
+      if (job.status === "completed" || job.status === "cancelled") {
+        return jsonResponse({ success: true, data: job, message: "Sync job already finished." });
+      }
+
+      const promise = processSyncJob(
+        supabase,
+        supabaseUrl,
+        supabaseServiceKey,
+        job as SyncJob,
+        maxBatchesPerInvocation,
+      ).catch(async (err) => {
+        console.error("[bullhorn-sync-clientcontacts] Continuation failed:", err);
+        await markJobFailed(supabase, job.id, err);
+      });
+
+      const edgeRuntime = (globalThis as any).EdgeRuntime;
+      if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
+        edgeRuntime.waitUntil(promise);
+      } else {
+        void promise;
+      }
+
+      return jsonResponse({
+        success: true,
+        data: { jobId, queued: true },
+        message: "Continuation queued.",
+      });
+    }
+
+    if (action === "get-sync-job") {
+      const jobId = String(data?.jobId || "").trim();
+      if (!jobId) return jsonResponse({ success: false, error: "jobId is required" }, 400);
+
+      const { data: job, error } = await supabase
+        .from("bullhorn_sync_jobs")
+        .select("*")
+        .eq("id", jobId)
+        .maybeSingle();
+      if (error || !job) return jsonResponse({ success: false, error: "Sync job not found" }, 404);
+
+      return jsonResponse({ success: true, data: job });
+    }
+
+    if (action === "list-sync-jobs") {
+      const limit = Math.max(1, Math.min(30, Number(data?.limit) || 10));
+      const { data: jobs, error } = await supabase
+        .from("bullhorn_sync_jobs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      return jsonResponse({ success: true, data: jobs || [] });
+    }
+
+    if (action === "get-mirror-stats") {
+      const { count, error } = await supabase
+        .from("bullhorn_client_contacts_mirror")
+        .select("*", { count: "exact", head: true });
+
+      if (error) throw error;
+
+      const { data: latestJob } = await supabase
+        .from("bullhorn_sync_jobs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      return jsonResponse({
+        success: true,
+        data: {
+          totalMirroredContacts: count || 0,
+          latestJob: latestJob || null,
+        },
+      });
+    }
+
+    return jsonResponse({ success: false, error: "Unknown action" }, 400);
+  } catch (error: any) {
+    console.error("[bullhorn-sync-clientcontacts] Fatal error:", error);
+    return jsonResponse({ success: false, error: error?.message || "Unknown error" }, 500);
+  }
+});

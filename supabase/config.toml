@@ -74,3 +74,6 @@ verify_jwt = false
 
 [functions.hunt-pe-funds]
 verify_jwt = false
+
+[functions.bullhorn-sync-clientcontacts]
+verify_jwt = false
