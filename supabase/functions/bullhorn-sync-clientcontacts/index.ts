@@ -11,6 +11,7 @@ const ADMIN_PROFILE = "Nikita Vojevoda";
 const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
 const DEFAULT_TEST_BATCH_SIZE = 5;
+const DEFAULT_CONTACT_LIST_LIMIT = 25;
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -61,6 +62,26 @@ function normalizeMaxContacts(input: unknown): number | null {
   const normalized = Math.floor(n);
   if (normalized <= 0) return null;
   return Math.min(200000, normalized);
+}
+
+function normalizeListLimit(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return DEFAULT_CONTACT_LIST_LIMIT;
+  return Math.max(5, Math.min(200, Math.floor(n)));
+}
+
+function normalizeListOffset(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+
+function normalizeSearchTerm(input: unknown): string {
+  return String(input || "")
+    .replace(/[,%]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
 }
 
 function normalizeBullhornDate(value: unknown): string | null {
@@ -604,6 +625,37 @@ serve(async (req) => {
 
       if (error) throw error;
       return jsonResponse({ success: true, data: jobs || [] });
+    }
+
+    if (action === "list-mirror-contacts") {
+      const limit = normalizeListLimit(data?.limit);
+      const offset = normalizeListOffset(data?.offset);
+      const searchTerm = normalizeSearchTerm(data?.search);
+
+      let query = supabase
+        .from("bullhorn_client_contacts_mirror")
+        .select("*", { count: "exact" })
+        .order("synced_at", { ascending: false });
+
+      if (searchTerm) {
+        const like = `%${searchTerm}%`;
+        query = query.or(
+          `name.ilike.${like},email.ilike.${like},client_corporation_name.ilike.${like},occupation.ilike.${like},address_city.ilike.${like}`,
+        );
+      }
+
+      const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
+
+      if (error) throw error;
+      return jsonResponse({
+        success: true,
+        data: {
+          contacts: contacts || [],
+          total: count || 0,
+          limit,
+          offset,
+        },
+      });
     }
 
     if (action === "get-mirror-stats") {

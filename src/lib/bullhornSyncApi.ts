@@ -20,6 +20,23 @@ export interface BullhornSyncJob {
   metadata: Record<string, unknown> | null;
 }
 
+export interface BullhornMirrorContact {
+  bullhorn_id: number;
+  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  occupation: string | null;
+  status: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  client_corporation_name: string | null;
+  owner_name: string | null;
+  synced_at: string;
+  date_last_modified: string | null;
+  raw: Record<string, unknown> | null;
+}
+
 interface BullhornSyncResponse<T = unknown> {
   success: boolean;
   data?: T;
@@ -75,4 +92,20 @@ export async function getBullhornMirrorStats(profileName: string) {
     totalMirroredContacts: number;
     latestJob: BullhornSyncJob | null;
   }>("get-mirror-stats", profileName);
+}
+
+export async function listBullhornMirrorContacts(
+  profileName: string,
+  options: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+  } = {},
+) {
+  return callBullhornSync<{
+    contacts: BullhornMirrorContact[];
+    total: number;
+    limit: number;
+    offset: number;
+  }>("list-mirror-contacts", profileName, options);
 }
