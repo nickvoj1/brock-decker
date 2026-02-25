@@ -197,6 +197,30 @@ function computeFitScore(signal: Signal, includeTerms: string[]): number {
   return Math.min(100, Math.max(0, blendedScore));
 }
 
+function normalizeSignalType(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function formatSignalTypeLabel(value: string): string {
+  const normalized = normalizeSignalType(value);
+  const explicit: Record<string, string> = {
+    funding: "Funding",
+    hiring: "Hiring",
+    expansion: "Expansion",
+    c_suite: "C-Suite",
+    team_growth: "Team Growth",
+  };
+  if (explicit[normalized]) return explicit[normalized];
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export default function SignalsDashboard() {
   const navigate = useNavigate();
   const profileName = useProfileName();
@@ -208,6 +232,7 @@ export default function SignalsDashboard() {
   const [isScraping, setIsScraping] = useState(false);
   const [activeRegion, setActiveRegion] = useState<Region>("london");
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortOption>("newest");
   const [minScore, setMinScore] = useState<number>(0);
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
@@ -298,6 +323,7 @@ export default function SignalsDashboard() {
       const prefs = JSON.parse(rawPrefs) as {
         activeRegion?: Region;
         tierFilter?: TierFilter;
+        typeFilter?: string;
         sortBy?: SortOption;
         minScore?: number;
         activeTab?: TabView;
@@ -312,6 +338,7 @@ export default function SignalsDashboard() {
 
       if (prefs.activeRegion && prefs.activeRegion in REGION_CONFIG) setActiveRegion(prefs.activeRegion);
       if (prefs.tierFilter && TIER_FILTERS.some((f) => f.value === prefs.tierFilter)) setTierFilter(prefs.tierFilter);
+      if (typeof prefs.typeFilter === "string" && prefs.typeFilter.trim().length > 0) setTypeFilter(prefs.typeFilter);
       if (prefs.sortBy && SORT_OPTIONS.some((s) => s.value === prefs.sortBy)) setSortBy(prefs.sortBy);
       if (typeof prefs.minScore === "number" && prefs.minScore >= 0 && prefs.minScore <= 100) setMinScore(prefs.minScore);
       if (prefs.activeTab && ["signals", "jobboard"].includes(prefs.activeTab)) setActiveTab(prefs.activeTab);
@@ -336,6 +363,7 @@ export default function SignalsDashboard() {
     const prefs = {
       activeRegion,
       tierFilter,
+      typeFilter,
       sortBy,
       minScore,
       activeTab,
@@ -351,7 +379,7 @@ export default function SignalsDashboard() {
       },
     };
     localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
-  }, [activeRegion, tierFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
+  }, [activeRegion, tierFilter, typeFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
   const fetchSignals = useCallback(async (options?: { silent?: boolean; withLoading?: boolean }) => {
     if (!profileName) return;
@@ -844,6 +872,14 @@ export default function SignalsDashboard() {
     setRetrainModalOpen(true);
   };
 
+  const signalTypeOptions = useMemo(() => {
+    const known = ["funding", "hiring", "expansion", "c_suite", "team_growth"];
+    const dynamic = signals
+      .map((s) => normalizeSignalType(s.signal_type))
+      .filter((type) => type.length > 0);
+    return Array.from(new Set([...known, ...dynamic]));
+  }, [signals]);
+
   const filteredSignals = useMemo(() => {
     let filtered = signals.filter((s) => s.region === activeRegion && !s.is_dismissed);
     const includeTerms = tokenizeQuery(searchQuery);
@@ -887,6 +923,10 @@ export default function SignalsDashboard() {
     if (tierFilter !== "all") {
       filtered = filtered.filter((s) => s.tier === tierFilter);
     }
+
+    if (typeFilter !== "all") {
+      filtered = filtered.filter((s) => normalizeSignalType(s.signal_type) === typeFilter);
+    }
     
     if (minScore > 0) {
       filtered = filtered.filter((s) => (s.score || 0) >= minScore);
@@ -909,7 +949,7 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
+  }, [signals, activeRegion, tierFilter, typeFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
   const visibleSignals = useMemo(
     () => filteredSignals.slice(0, visibleSignalsCount),
@@ -920,7 +960,7 @@ export default function SignalsDashboard() {
 
   useEffect(() => {
     setVisibleSignalsCount(SIGNALS_PAGE_SIZE);
-  }, [activeRegion, tierFilter, sortBy, minScore, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange, activeTab]);
+  }, [activeRegion, tierFilter, typeFilter, sortBy, minScore, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange, activeTab]);
 
   if (!profileName) {
     return (
@@ -1128,6 +1168,20 @@ export default function SignalsDashboard() {
                   {TIER_FILTERS.map((filter) => (
                     <SelectItem key={filter.value} value={filter.value}>
                       {filter.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="w-[170px] h-9 control-surface">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent className="bg-background border">
+                  <SelectItem value="all">All Types</SelectItem>
+                  {signalTypeOptions.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {formatSignalTypeLabel(type)}
                     </SelectItem>
                   ))}
                 </SelectContent>
