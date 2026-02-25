@@ -158,7 +158,7 @@ export default function AdminPanel() {
     }
   };
 
-  const userStatsArray = data?.userStats
+  const teamStatsRows = data?.userStats
     ? Object.entries(data.userStats).map(([name, stats]) => ({ name, ...stats }))
     : [];
 
@@ -267,7 +267,7 @@ export default function AdminPanel() {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{userStatsArray.length}</div>
+                <div className="text-2xl font-bold">{teamStatsRows.length}</div>
                 <p className="text-xs text-muted-foreground">Active team members</p>
               </CardContent>
             </Card>
@@ -331,7 +331,7 @@ export default function AdminPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {userStatsArray
+                  {teamStatsRows
                     .sort((a, b) => (b.runs + b.pitches + b.candidates) - (a.runs + a.pitches + a.candidates))
                     .map((user) => (
                       <TableRow key={user.name}>
