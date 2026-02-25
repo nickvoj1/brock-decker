@@ -341,7 +341,7 @@ export default function AdminPanel() {
         </Card>
 
         <Tabs defaultValue="runs" className="space-y-4">
-          <TabsList>
+          <TabsList className="h-auto flex-wrap justify-start gap-1">
             <TabsTrigger value="runs" className="gap-2">
               <Play className="h-4 w-4" /> User Requests
             </TabsTrigger>
