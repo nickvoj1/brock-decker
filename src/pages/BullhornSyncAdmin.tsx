@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
+  BullhornMirrorContact,
   BullhornSyncJob,
   getBullhornMirrorStats,
+  listBullhornMirrorContacts,
   listBullhornSyncJobs,
   startBullhornClientContactSync,
 } from "@/lib/bullhornSyncApi";
@@ -14,11 +16,36 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import { Database, RefreshCw, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
+const CONTACTS_PAGE_SIZE = 25;
+
+function formatMirrorValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (Array.isArray(value)) {
+    if (!value.length) return "-";
+    return value.map((item) => formatMirrorValue(item)).join("; ");
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if ("id" in record || "name" in record) {
+      const name = record.name ? String(record.name) : "";
+      const id = record.id !== undefined && record.id !== null ? String(record.id) : "";
+      const combined = `${name}${id ? ` (${id})` : ""}`.trim();
+      if (combined) return combined;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
 
 export default function BullhornSyncAdmin() {
   const profileName = useProfileName();
@@ -27,6 +54,12 @@ export default function BullhornSyncAdmin() {
   const [syncJobLoading, setSyncJobLoading] = useState(false);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
   const [mirrorCount, setMirrorCount] = useState(0);
+  const [contacts, setContacts] = useState<BullhornMirrorContact[]>([]);
+  const [contactsTotal, setContactsTotal] = useState(0);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsPage, setContactsPage] = useState(1);
+  const [contactsSearchDraft, setContactsSearchDraft] = useState("");
+  const [contactsSearch, setContactsSearch] = useState("");
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -45,6 +78,7 @@ export default function BullhornSyncAdmin() {
 
     const interval = setInterval(() => {
       loadBullhornSyncData({ silent: true });
+      loadBullhornMirrorContacts({ silent: true });
     }, 3000);
 
     return () => clearInterval(interval);
@@ -72,6 +106,39 @@ export default function BullhornSyncAdmin() {
     }
   };
 
+  const loadBullhornMirrorContacts = async (
+    options: { silent?: boolean; page?: number; search?: string } = {},
+  ) => {
+    if (!options.silent) setContactsLoading(true);
+    try {
+      const page = options.page ?? contactsPage;
+      const search = options.search ?? contactsSearch;
+      const offset = (page - 1) * CONTACTS_PAGE_SIZE;
+      const result = await listBullhornMirrorContacts(ADMIN_PROFILE, {
+        limit: CONTACTS_PAGE_SIZE,
+        offset,
+        search,
+      });
+
+      if (result.success && result.data) {
+        setContacts(result.data.contacts || []);
+        setContactsTotal(result.data.total || 0);
+      } else if (!options.silent) {
+        toast.error(result.error || "Failed to load synced contacts");
+      }
+    } catch {
+      if (!options.silent) toast.error("Failed to load synced contacts");
+    } finally {
+      if (!options.silent) setContactsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (profileName === ADMIN_PROFILE) {
+      loadBullhornMirrorContacts();
+    }
+  }, [profileName, contactsPage, contactsSearch]);
+
   const startSync = async (mode: "test" | "full") => {
     setSyncActionLoading(true);
     try {
@@ -91,7 +158,10 @@ export default function BullhornSyncAdmin() {
       toast.success(
         result.message || (isTestMode ? "Bullhorn 5-contact test sync started" : "Bullhorn full contact sync started"),
       );
-      await loadBullhornSyncData();
+      await Promise.all([
+        loadBullhornSyncData(),
+        loadBullhornMirrorContacts({ silent: true, page: 1 }),
+      ]);
     } catch {
       toast.error("Failed to start Bullhorn contact sync");
     } finally {
@@ -108,6 +178,18 @@ export default function BullhornSyncAdmin() {
   const progressPercent = latestSyncJob?.total_expected
     ? Math.min(100, Math.round((latestSyncJob.total_synced / latestSyncJob.total_expected) * 100))
     : 0;
+  const totalContactPages = Math.max(1, Math.ceil(contactsTotal / CONTACTS_PAGE_SIZE));
+  const pageStart = contactsTotal === 0 ? 0 : (contactsPage - 1) * CONTACTS_PAGE_SIZE + 1;
+  const pageEnd = Math.min(contactsPage * CONTACTS_PAGE_SIZE, contactsTotal);
+  const rawColumns = useMemo(() => {
+    const columns = new Set<string>();
+    contacts.forEach((contact) => {
+      if (contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)) {
+        Object.keys(contact.raw).forEach((key) => columns.add(key));
+      }
+    });
+    return Array.from(columns).sort((a, b) => a.localeCompare(b));
+  }, [contacts]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -233,6 +315,136 @@ export default function BullhornSyncAdmin() {
               </TableBody>
             </Table>
           </ScrollArea>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <CardTitle>Synced Contacts</CardTitle>
+              <CardDescription>
+                Full Bullhorn ClientContact payload with all mirrored columns ({rawColumns.length} dynamic columns)
+              </CardDescription>
+            </div>
+            <div className="flex w-full max-w-[680px] items-center gap-2">
+              <Input
+                value={contactsSearchDraft}
+                onChange={(e) => setContactsSearchDraft(e.target.value)}
+                placeholder="Search by name, email, company, title, city"
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setContactsPage(1);
+                  setContactsSearch(contactsSearchDraft.trim());
+                }}
+              >
+                Search
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setContactsSearchDraft("");
+                  setContactsSearch("");
+                  setContactsPage(1);
+                }}
+              >
+                Clear
+              </Button>
+              <Button variant="outline" onClick={() => loadBullhornMirrorContacts()} disabled={contactsLoading}>
+                <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ScrollArea className="h-[420px] w-full">
+            <Table className="min-w-full w-max">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="whitespace-nowrap">Synced At</TableHead>
+                  <TableHead className="whitespace-nowrap">Bullhorn ID</TableHead>
+                  {rawColumns.map((column) => (
+                    <TableHead key={column} className="whitespace-nowrap">
+                      {column}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {contacts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={Math.max(2, rawColumns.length + 2)} className="text-center text-sm text-muted-foreground">
+                      {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  contacts.map((contact) => {
+                    const rawRecord =
+                      contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
+                        ? (contact.raw as Record<string, unknown>)
+                        : {};
+                    return (
+                      <TableRow key={contact.bullhorn_id}>
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {new Date(contact.synced_at).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs whitespace-nowrap">{contact.bullhorn_id}</TableCell>
+                        {rawColumns.map((column) => {
+                          const rawValue = formatMirrorValue(rawRecord[column]);
+                          const displayValue = rawValue.length > 140 ? `${rawValue.slice(0, 137)}...` : rawValue;
+                          const isEmailColumn = column.toLowerCase() === "email" && rawValue.includes("@");
+                          return (
+                            <TableCell
+                              key={`${contact.bullhorn_id}-${column}`}
+                              className="max-w-[320px] text-xs align-top"
+                              title={rawValue}
+                            >
+                              {isEmailColumn ? (
+                                <a href={`mailto:${rawValue}`} className="text-primary hover:underline">
+                                  {displayValue}
+                                </a>
+                              ) : (
+                                displayValue
+                              )}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing {pageStart}-{pageEnd} of {contactsTotal.toLocaleString()}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setContactsPage((p) => Math.max(1, p - 1))}
+                disabled={contactsPage <= 1 || contactsLoading}
+              >
+                Previous
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {contactsPage} / {totalContactPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setContactsPage((p) => Math.min(totalContactPages, p + 1))}
+                disabled={contactsPage >= totalContactPages || contactsLoading}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </AppLayout>
