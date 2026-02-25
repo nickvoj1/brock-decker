@@ -12,6 +12,23 @@ const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
 const DEFAULT_TEST_BATCH_SIZE = 5;
 const DEFAULT_CONTACT_LIST_LIMIT = 25;
+const DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS = [
+  "id",
+  "name",
+  "firstName",
+  "lastName",
+  "email",
+  "occupation",
+  "status",
+  "phone",
+  "mobile",
+  "address(city,state,countryID,countryName)",
+  "clientCorporation(id,name)",
+  "owner(id,name)",
+  "dateAdded",
+  "dateLastModified",
+  "isDeleted",
+];
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -82,6 +99,101 @@ function normalizeSearchTerm(input: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+function buildCustomFieldNames(prefix: string, max: number): string[] {
+  return Array.from({ length: max }, (_, idx) => `${prefix}${idx + 1}`);
+}
+
+function extractMetaFieldNames(metaPayload: any): Set<string> {
+  const names = new Set<string>();
+  const candidates = [
+    metaPayload?.fields,
+    metaPayload?.data?.fields,
+    metaPayload?.entity?.fields,
+    metaPayload?.data?.entity?.fields,
+  ];
+
+  for (const source of candidates) {
+    if (!source) continue;
+    if (Array.isArray(source)) {
+      for (const field of source) {
+        const name = field?.name || field?.dataName || field?.fieldName;
+        if (name) names.add(String(name));
+      }
+      continue;
+    }
+    if (typeof source === "object") {
+      Object.keys(source).forEach((key) => names.add(String(key)));
+    }
+  }
+
+  return names;
+}
+
+async function getClientContactMetaFields(restUrl: string, bhRestToken: string): Promise<Set<string> | null> {
+  const metaUrl = `${restUrl}meta/ClientContact?BhRestToken=${encodeURIComponent(bhRestToken)}`;
+  try {
+    const response = await fetch(metaUrl);
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const fieldNames = extractMetaFieldNames(payload);
+    return fieldNames.size ? fieldNames : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildClientContactFieldSelector(supportedFields: Set<string> | null): string {
+  const result: string[] = [];
+  const hasField = (field: string) => !supportedFields || supportedFields.has(field);
+  const add = (field: string) => {
+    if (!field) return;
+    result.push(field);
+  };
+  const addSimple = (field: string) => {
+    if (hasField(field)) result.push(field);
+  };
+
+  [
+    "id",
+    "name",
+    "firstName",
+    "lastName",
+    "email",
+    "occupation",
+    "status",
+    "phone",
+    "mobile",
+    "dateAdded",
+    "dateLastModified",
+    "isDeleted",
+    "lastVisit",
+  ].forEach(addSimple);
+
+  if (hasField("address")) add("address(city,state,countryID,countryName)");
+  else {
+    ["city", "state", "countryID", "countryName", "address"].forEach(addSimple);
+  }
+
+  if (hasField("clientCorporation")) add("clientCorporation(id,name)");
+  else ["clientCorporationName", "clientCorporationID", "clientCorporation"].forEach(addSimple);
+
+  if (hasField("owner")) add("owner(id,name)");
+  else ["ownerName", "ownerID", "owner"].forEach(addSimple);
+
+  if (hasField("categories")) add("categories(id,name)");
+  if (hasField("specialties")) add("specialties(id,name)");
+
+  ["skills", "skillList", "skillIDList", "skill", "specialty", "specialities", "expertise"].forEach(addSimple);
+
+  buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
+  buildCustomFieldNames("customText", 40).forEach(addSimple);
+  buildCustomFieldNames("customObject", 20).forEach(addSimple);
+  buildCustomFieldNames("customInt", 20).forEach(addSimple);
+  buildCustomFieldNames("customDate", 20).forEach(addSimple);
+
+  return Array.from(new Set(result)).join(",");
 }
 
 function normalizeBullhornDate(value: unknown): string | null {
@@ -201,24 +313,9 @@ async function fetchClientContactsBatch(
   start: number,
   count: number,
   includeDeleted: boolean,
+  preferredFields?: string,
 ): Promise<{ rows: any[]; total: number | null }> {
-  const fallbackFields = [
-    "id",
-    "name",
-    "firstName",
-    "lastName",
-    "email",
-    "occupation",
-    "status",
-    "phone",
-    "mobile",
-    "address(city,state,countryID)",
-    "clientCorporation(id,name)",
-    "owner(id,name)",
-    "dateAdded",
-    "dateLastModified",
-    "isDeleted",
-  ].join(",");
+  const fallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
 
   const whereClause = includeDeleted ? "id>0" : "isDeleted=false";
   const buildQueryUrl = (fields: string) =>
@@ -226,8 +323,8 @@ async function fetchClientContactsBatch(
       bhRestToken,
     )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
 
-  // Prefer full payload mirror. Fallback to explicit field list if this Bullhorn instance rejects "*".
-  let activeFields = "*";
+  // Prefer rich selector. Fallback to explicit safe list when unsupported fields are rejected.
+  let activeFields = preferredFields?.trim() || "*";
 
   let lastError: string | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -241,7 +338,7 @@ async function fetchClientContactsBatch(
       const body = await response.text().catch(() => "");
       const normalizedBody = body.toLowerCase();
       if (
-        activeFields === "*" &&
+        activeFields !== fallbackFields &&
         response.status >= 400 &&
         response.status < 500 &&
         (normalizedBody.includes("field") || normalizedBody.includes("invalid"))
@@ -363,6 +460,10 @@ async function processSyncJob(
   let lastBatchSize = 0;
   let completed = false;
   const maxContacts = normalizeMaxContacts(job?.metadata?.max_contacts);
+  const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
+  const preferredFieldSelector = supportedFields
+    ? buildClientContactFieldSelector(supportedFields)
+    : "*";
 
   await supabase
     .from("bullhorn_sync_jobs")
@@ -390,6 +491,7 @@ async function processSyncJob(
       nextStart,
       requestBatchSize,
       Boolean(job.include_deleted),
+      preferredFieldSelector,
     );
 
     if (totalExpected === null && Number.isFinite(Number(total))) {

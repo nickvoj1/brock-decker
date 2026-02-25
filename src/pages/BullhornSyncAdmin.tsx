@@ -38,6 +38,19 @@ const CORE_RAW_COLUMN_KEYS = new Set([
   "dateLastModified",
   "skills",
 ]);
+const SKILLS_CANDIDATE_KEYS = [
+  "skills",
+  "skill",
+  "skillList",
+  "skillIDList",
+  "categories",
+  "specialties",
+  "specialty",
+  "specialities",
+  "expertise",
+  ...Array.from({ length: 20 }, (_, idx) => `customTextBlock${idx + 1}`),
+  ...Array.from({ length: 40 }, (_, idx) => `customText${idx + 1}`),
+];
 
 function formatMirrorValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "-";
@@ -86,6 +99,25 @@ function formatMirrorAddress(value: unknown, fallbackCity?: string | null, fallb
   }
   const fallback = [fallbackCity || "", fallbackState || ""].filter(Boolean).join(", ");
   return fallback || "-";
+}
+
+function extractSkillsFromRaw(rawRecord: Record<string, unknown>): string {
+  for (const key of SKILLS_CANDIDATE_KEYS) {
+    if (!(key in rawRecord)) continue;
+    const value = formatMirrorValue(rawRecord[key]);
+    if (value !== "-") return value;
+  }
+
+  const fuzzyMatches = Object.keys(rawRecord)
+    .filter((key) => {
+      const lower = key.toLowerCase();
+      return lower.includes("skill") || lower.includes("special") || lower.includes("category");
+    })
+    .map((key) => formatMirrorValue(rawRecord[key]))
+    .filter((value) => value !== "-");
+
+  if (fuzzyMatches.length) return fuzzyMatches.join(" ; ");
+  return "-";
 }
 
 export default function BullhornSyncAdmin() {
@@ -465,7 +497,7 @@ export default function BullhornSyncAdmin() {
                     const lastVisit = formatMirrorDate(rawRecord.lastVisit);
                     const dateAdded = formatMirrorDate(rawRecord.dateAdded);
                     const dateLastModified = formatMirrorDate(rawRecord.dateLastModified ?? contact.date_last_modified);
-                    const skills = formatMirrorValue(rawRecord.skills);
+                    const skills = extractSkillsFromRaw(rawRecord);
                     return (
                       <TableRow key={contact.bullhorn_id}>
                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground py-2">
