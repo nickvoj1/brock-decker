@@ -172,7 +172,7 @@ async function fetchClientContactsBatch(
   count: number,
   includeDeleted: boolean,
 ): Promise<{ rows: any[]; total: number | null }> {
-  const fields = [
+  const fallbackFields = [
     "id",
     "name",
     "firstName",
@@ -191,12 +191,17 @@ async function fetchClientContactsBatch(
   ].join(",");
 
   const whereClause = includeDeleted ? "id>0" : "isDeleted=false";
-  const queryUrl = `${restUrl}query/ClientContact?BhRestToken=${encodeURIComponent(
-    bhRestToken,
-  )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
+  const buildQueryUrl = (fields: string) =>
+    `${restUrl}query/ClientContact?BhRestToken=${encodeURIComponent(
+      bhRestToken,
+    )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
+
+  // Prefer full payload mirror. Fallback to explicit field list if this Bullhorn instance rejects "*".
+  let activeFields = "*";
 
   let lastError: string | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
+    const queryUrl = buildQueryUrl(activeFields);
     const response = await fetch(queryUrl);
     if (response.status === 429) {
       await new Promise((resolve) => setTimeout(resolve, 700 + attempt * 500));
@@ -204,6 +209,16 @@ async function fetchClientContactsBatch(
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+      const normalizedBody = body.toLowerCase();
+      if (
+        activeFields === "*" &&
+        response.status >= 400 &&
+        response.status < 500 &&
+        (normalizedBody.includes("field") || normalizedBody.includes("invalid"))
+      ) {
+        activeFields = fallbackFields;
+        continue;
+      }
       lastError = `Bullhorn query failed (${response.status}): ${body.slice(0, 300)}`;
       await new Promise((resolve) => setTimeout(resolve, 400 + attempt * 400));
       continue;
