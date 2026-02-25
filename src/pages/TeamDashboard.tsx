@@ -224,7 +224,7 @@ export default function TeamDashboard() {
       <div className="buttons-3d space-y-6">
         {/* KPI Grid - Time-period responsive stats */}
         <div className="grid gap-4 md:grid-cols-4">
-          <Card className="bg-primary/5 border-primary/20 animate-slide-up" style={{ animationDelay: '0ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '0ms' }}>
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -240,7 +240,7 @@ export default function TeamDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="bg-success/5 border-success/20 animate-slide-up" style={{ animationDelay: '50ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '50ms' }}>
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -256,7 +256,7 @@ export default function TeamDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="animate-slide-up" style={{ animationDelay: '100ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '100ms' }}>
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -272,7 +272,7 @@ export default function TeamDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="animate-slide-up" style={{ animationDelay: '150ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '150ms' }}>
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -290,9 +290,9 @@ export default function TeamDashboard() {
         </div>
 
         {/* Filters */}
-        <Card className="animate-slide-up" style={{ animationDelay: '200ms' }}>
+        <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '200ms' }}>
           <CardContent className="pt-4">
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="control-surface flex flex-wrap items-center gap-3 p-3">
               <div className="flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
                 <Select value={timeFilter} onValueChange={(v) => setTimeFilter(v as TimeFilter)}>
@@ -325,7 +325,7 @@ export default function TeamDashboard() {
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Leaderboard Table */}
-          <Card className="lg:col-span-2 animate-slide-up" style={{ animationDelay: '250ms' }}>
+          <Card className="panel-shell interactive-lift lg:col-span-2 animate-slide-up" style={{ animationDelay: '250ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Trophy className="h-4 w-4 text-warning" />
@@ -343,7 +343,7 @@ export default function TeamDashboard() {
                   <p className="text-sm">No data available</p>
                 </div>
               ) : (
-                <div className="max-h-[400px] overflow-auto">
+                <div className="control-surface max-h-[400px] overflow-auto">
                   <Table>
                     <TableHeader className="sticky top-0 bg-background z-10">
                       <TableRow>
@@ -363,7 +363,7 @@ export default function TeamDashboard() {
                         return (
                           <TableRow 
                             key={stats.profile_name} 
-                            className={isCurrentUser ? 'bg-primary/5' : ''}
+                            className={`${isCurrentUser ? 'bg-primary/5' : ''} interactive-lift`}
                           >
                             <TableCell className="font-medium">
                               {index === 0 && <span className="text-warning">🥇</span>}
@@ -430,7 +430,7 @@ export default function TeamDashboard() {
           </Card>
 
           {/* Runs Chart - Changes based on time filter */}
-          <Card className="animate-slide-up" style={{ animationDelay: '300ms' }}>
+          <Card className="panel-shell interactive-lift animate-slide-up" style={{ animationDelay: '300ms' }}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
@@ -439,7 +439,7 @@ export default function TeamDashboard() {
               <CardDescription>{getChartDescription()}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-[300px]">
+              <div className="control-surface h-[300px] p-2">
                 {isLoading ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
@@ -501,19 +501,19 @@ export default function TeamDashboard() {
               <div className="space-y-4">
                 {/* Contact Stats */}
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="text-center p-3 rounded-lg bg-primary/5 border border-primary/20">
+                  <div className="control-surface text-center p-3 rounded-lg">
                     <p className="text-2xl font-bold text-primary">
                       {selectedRecruiter.total_contacts.toLocaleString()}
                     </p>
                     <p className="text-xs text-muted-foreground">Total Contacts</p>
                   </div>
-                  <div className="text-center p-3 rounded-lg bg-muted">
+                  <div className="control-surface text-center p-3 rounded-lg">
                     <p className="text-2xl font-bold">
                       {selectedRecruiter.contacts_today}
                     </p>
                     <p className="text-xs text-muted-foreground">Today</p>
                   </div>
-                  <div className="text-center p-3 rounded-lg bg-muted">
+                  <div className="control-surface text-center p-3 rounded-lg">
                     <p className="text-2xl font-bold">
                       {selectedRecruiter.contacts_week}
                     </p>
@@ -525,19 +525,19 @@ export default function TeamDashboard() {
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-muted-foreground">Search Runs</h4>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                    <div className="control-surface flex justify-between items-center p-2 rounded">
                       <span className="text-sm">Total Runs</span>
                       <span className="font-semibold">{selectedRecruiter.total_runs}</span>
                     </div>
-                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                    <div className="control-surface flex justify-between items-center p-2 rounded">
                       <span className="text-sm">Today</span>
                       <span className="font-semibold">{selectedRecruiter.runs_today}</span>
                     </div>
-                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                    <div className="control-surface flex justify-between items-center p-2 rounded">
                       <span className="text-sm">This Week</span>
                       <span className="font-semibold">{selectedRecruiter.runs_week}</span>
                     </div>
-                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                    <div className="control-surface flex justify-between items-center p-2 rounded">
                       <span className="text-sm">Avg/Run</span>
                       <span className="font-semibold">{selectedRecruiter.avg_contacts_per_run}</span>
                     </div>
@@ -548,7 +548,7 @@ export default function TeamDashboard() {
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-muted-foreground">Performance</h4>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                    <div className="control-surface flex justify-between items-center p-2 rounded">
                       <span className="text-sm" title="% of runs with 10+ contacts">Yield Rate</span>
                       <span className={`font-semibold ${
                         selectedRecruiter.success_rate >= 90 ? 'text-success' : 
@@ -557,7 +557,7 @@ export default function TeamDashboard() {
                         {selectedRecruiter.success_rate}%
                       </span>
                     </div>
-                    <div className="flex justify-between items-center p-2 rounded bg-muted/50">
+                    <div className="control-surface flex justify-between items-center p-2 rounded">
                       <span className="text-sm">Bullhorn Exports</span>
                       <Badge className={selectedRecruiter.bullhorn_exported > 0 
                         ? "bg-success/10 text-success border-success/20" 
