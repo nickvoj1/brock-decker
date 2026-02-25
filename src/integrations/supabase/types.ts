@@ -41,6 +41,158 @@ export type Database = {
         }
         Relationships: []
       }
+      bullhorn_client_contacts_mirror: {
+        Row: {
+          address_city: string | null
+          address_country_id: number | null
+          address_state: string | null
+          bullhorn_id: number
+          client_corporation_id: number | null
+          client_corporation_name: string | null
+          created_at: string
+          date_added: string | null
+          date_last_modified: string | null
+          email: string | null
+          email_normalized: string | null
+          first_name: string | null
+          is_deleted: boolean
+          last_name: string | null
+          last_synced_job_id: string | null
+          mobile: string | null
+          name: string | null
+          occupation: string | null
+          owner_id: number | null
+          owner_name: string | null
+          phone: string | null
+          raw: Json
+          status: string | null
+          synced_at: string
+          updated_at: string
+        }
+        Insert: {
+          address_city?: string | null
+          address_country_id?: number | null
+          address_state?: string | null
+          bullhorn_id: number
+          client_corporation_id?: number | null
+          client_corporation_name?: string | null
+          created_at?: string
+          date_added?: string | null
+          date_last_modified?: string | null
+          email?: string | null
+          email_normalized?: string | null
+          first_name?: string | null
+          is_deleted?: boolean
+          last_name?: string | null
+          last_synced_job_id?: string | null
+          mobile?: string | null
+          name?: string | null
+          occupation?: string | null
+          owner_id?: number | null
+          owner_name?: string | null
+          phone?: string | null
+          raw?: Json
+          status?: string | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Update: {
+          address_city?: string | null
+          address_country_id?: number | null
+          address_state?: string | null
+          bullhorn_id?: number
+          client_corporation_id?: number | null
+          client_corporation_name?: string | null
+          created_at?: string
+          date_added?: string | null
+          date_last_modified?: string | null
+          email?: string | null
+          email_normalized?: string | null
+          first_name?: string | null
+          is_deleted?: boolean
+          last_name?: string | null
+          last_synced_job_id?: string | null
+          mobile?: string | null
+          name?: string | null
+          occupation?: string | null
+          owner_id?: number | null
+          owner_name?: string | null
+          phone?: string | null
+          raw?: Json
+          status?: string | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_client_contacts_mirror_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bullhorn_sync_jobs: {
+        Row: {
+          batch_size: number
+          batches_processed: number
+          created_at: string
+          finished_at: string | null
+          heartbeat_at: string | null
+          id: string
+          include_deleted: boolean
+          last_batch_size: number
+          last_error: string | null
+          metadata: Json
+          next_start: number
+          requested_by: string
+          started_at: string | null
+          status: string
+          total_expected: number | null
+          total_synced: number
+          updated_at: string
+        }
+        Insert: {
+          batch_size?: number
+          batches_processed?: number
+          created_at?: string
+          finished_at?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          include_deleted?: boolean
+          last_batch_size?: number
+          last_error?: string | null
+          metadata?: Json
+          next_start?: number
+          requested_by: string
+          started_at?: string | null
+          status?: string
+          total_expected?: number | null
+          total_synced?: number
+          updated_at?: string
+        }
+        Update: {
+          batch_size?: number
+          batches_processed?: number
+          created_at?: string
+          finished_at?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          include_deleted?: boolean
+          last_batch_size?: number
+          last_error?: string | null
+          metadata?: Json
+          next_start?: number
+          requested_by?: string
+          started_at?: string | null
+          status?: string
+          total_expected?: number | null
+          total_synced?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bullhorn_tokens: {
         Row: {
           access_token: string
