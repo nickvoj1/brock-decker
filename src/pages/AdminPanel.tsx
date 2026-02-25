@@ -46,12 +46,6 @@ export default function AdminPanel() {
     return data.runs.filter(r => r.status === statusFilter);
   }, [data?.runs, statusFilter]);
 
-  const latestSyncJob = syncJobs[0] || null;
-  const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
-  const progressPercent = latestSyncJob?.total_expected
-    ? Math.min(100, Math.round((latestSyncJob.total_synced / latestSyncJob.total_expected) * 100))
-    : 0;
-
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
       toast.error("Access denied. Admin only.");
@@ -225,9 +219,9 @@ export default function AdminPanel() {
   });
 
   const filteredRequestRows =
-    requestStatusFilter === "all"
+    statusFilter === "all"
       ? requestRows
-      : requestRows.filter(({ run }) => run.status === requestStatusFilter);
+      : requestRows.filter(({ run }) => run.status === statusFilter);
 
   const latestSyncJob = syncJobs[0] || null;
   const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
