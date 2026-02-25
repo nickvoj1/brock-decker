@@ -43,15 +43,15 @@ RETURN:
   "companyName": "exact company name (no Ltd/Inc)",
   "companyVariants": ["abbreviations", "alt names"],
   "industry": "company industry",
-  "prioritizedCategories": ["HR & Recruiting", "Senior Leadership", "Finance & Investment", "Legal & Compliance", "Strategy & Operations"],
+  "prioritizedCategories": ["Senior Leadership", "Finance & Investment", "Strategy & Operations", "Legal & Compliance", "HR & Recruiting"],
   "searchKeywords": ["2-3 industry keywords"],
   "confidence": 0.0-1.0
 }
 
 Priority rules:
-- Fund/fundraise → Finance, Leadership, HR
-- Hiring/expansion → HR, Leadership, Strategy
-- M&A/acquisition → Legal, Leadership, Finance
+- Fund/fundraise → Leadership, Finance, Strategy, HR (HR last)
+- Hiring/expansion → Leadership, Strategy, Finance, HR (HR last)
+- M&A/acquisition → Leadership, Finance, Legal, HR (HR last)
 
 JSON only, no markdown.`
 
@@ -123,12 +123,54 @@ const ROLE_CATEGORIES: Record<string, string[]> = {
 
 // Default category priority (used if AI analysis fails)
 const DEFAULT_CATEGORY_PRIORITY = [
+  'Senior Leadership',
+  'Finance & Investment',
+  'Strategy & Operations',
+  'Legal & Compliance',
   'HR & Recruiting',
-  'Senior Leadership', 
+]
+
+const DECISION_MAKER_PRIORITY = [
+  'Senior Leadership',
   'Finance & Investment',
   'Legal & Compliance',
   'Strategy & Operations',
 ]
+
+function normalizeCategoryPriority(input: string[] | undefined | null): string[] {
+  const normalized = Array.from(
+    new Set(
+      (input || [])
+        .map((c) => String(c || '').trim())
+        .filter((c) => Boolean(ROLE_CATEGORIES[c]))
+    )
+  )
+
+  const output = normalized.length > 0 ? normalized : [...DEFAULT_CATEGORY_PRIORITY]
+
+  // Always keep decision-maker categories available, even if AI omitted them.
+  for (const must of DECISION_MAKER_PRIORITY) {
+    if (!output.includes(must)) output.unshift(must)
+  }
+
+  // HR should be fallback, not first-pass.
+  const noHr = output.filter((c) => c !== 'HR & Recruiting')
+  if (output.includes('HR & Recruiting')) noHr.push('HR & Recruiting')
+
+  // Apply stable weighting among non-HR categories.
+  const weighted = noHr.filter((c) => c !== 'HR & Recruiting')
+  weighted.sort((a, b) => {
+    const aiRankA = normalized.indexOf(a)
+    const aiRankB = normalized.indexOf(b)
+    const aiScoreA = aiRankA === -1 ? 999 : aiRankA
+    const aiScoreB = aiRankB === -1 ? 999 : aiRankB
+    if (aiScoreA !== aiScoreB) return aiScoreA - aiScoreB
+    return DECISION_MAKER_PRIORITY.indexOf(a) - DECISION_MAKER_PRIORITY.indexOf(b)
+  })
+
+  if (output.includes('HR & Recruiting')) weighted.push('HR & Recruiting')
+  return Array.from(new Set(weighted))
+}
 
 // Region to locations mapping
 const REGION_LOCATIONS: Record<string, string[]> = {
@@ -730,7 +772,7 @@ async function searchWithStrategy(
     if (includeRoleFilters) {
       roles.forEach(title => params.append('person_titles[]', title))
     }
-    if (ENFORCE_STRICT_LOCATION && strategy.locations.length > 0) {
+    if (strategy.locations.length > 0) {
       strategy.locations.forEach(loc => params.append('person_locations[]', loc))
     }
     params.append('q_organization_name', strategy.company)
@@ -1037,9 +1079,7 @@ Deno.serve(async (req) => {
     if (aiAnalysis && aiAnalysis.confidence >= 0.5) {
       targetCompany = aiAnalysis.companyName
       companyVariants = aiAnalysis.companyVariants || []
-      categoryPriority = aiAnalysis.prioritizedCategories?.length > 0 
-        ? aiAnalysis.prioritizedCategories 
-        : DEFAULT_CATEGORY_PRIORITY
+      categoryPriority = normalizeCategoryPriority(aiAnalysis.prioritizedCategories)
       searchKeywords = aiAnalysis.searchKeywords || []
       console.log(`AI identified company: "${targetCompany}" (confidence: ${aiAnalysis.confidence})`)
       console.log(`AI company variants: ${companyVariants.join(', ')}`)
@@ -1051,6 +1091,7 @@ Deno.serve(async (req) => {
       if (!targetCompany) {
         targetCompany = extractCompanyFromTitle(signal.title)
       }
+      categoryPriority = normalizeCategoryPriority(DEFAULT_CATEGORY_PRIORITY)
       console.log(`Regex extracted company: "${targetCompany}"`)
     }
     
@@ -1123,11 +1164,21 @@ Deno.serve(async (req) => {
     console.log(`All company variants to try: ${uniqueVariants.join(', ')}`)
 
     // Build search strategies:
-    // strict location mode -> company × location levels
-    // relaxed mode -> company only (faster and higher recall)
+    // strict location mode -> company x location levels with hard filtering
+    // relaxed mode -> country-first query hint, then broad company fallback
     const strategies: SearchStrategy[] = []
     for (const company of uniqueVariants) {
       if (!ENFORCE_STRICT_LOCATION) {
+        if (countryLocations.length > 0) {
+          strategies.push({
+            name: `${company}_countries_hint`,
+            company,
+            locations: countryLocations,
+            locationMode: 'country',
+            allowedCityTokens: cityLocationTokens,
+            allowedCountryTokens: countryLocationTokens,
+          })
+        }
         strategies.push({
           name: `${company}_broad`,
           company,
@@ -1161,7 +1212,7 @@ Deno.serve(async (req) => {
       }
     }
     if (!ENFORCE_STRICT_LOCATION) {
-      console.log('Strict location filtering disabled for signal auto-search')
+      console.log('Strict location filtering disabled for signal auto-search (country hints enabled)')
     }
 
     const TARGET_MIN_CONTACTS = 10

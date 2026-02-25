@@ -42,6 +42,7 @@ import { SkillsReviewModal } from "@/components/upload/SkillsReviewModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
+const RUNS_HISTORY_VIEWED_KEY_PREFIX = "runs-history-last-viewed-at";
 
 interface ApolloContact {
   name: string;
@@ -109,6 +110,20 @@ export default function RunsHistory() {
       return {};
     }
   });
+
+  useEffect(() => {
+    if (!profileName) return;
+    const key = `${RUNS_HISTORY_VIEWED_KEY_PREFIX}:${profileName}`;
+    const markViewed = () => {
+      localStorage.setItem(key, new Date().toISOString());
+      window.dispatchEvent(new Event("runs-history-viewed"));
+    };
+
+    // Mark immediately and keep it fresh while user is on the page.
+    markViewed();
+    const intervalId = window.setInterval(markViewed, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [profileName]);
   
 
   const selectedRunPreferences = selectedRun

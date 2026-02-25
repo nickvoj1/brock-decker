@@ -57,12 +57,47 @@ export async function createEnrichmentRun(profileName: string, runData: Record<s
   return callDataApi<any>("create-enrichment-run", profileName, { runData });
 }
 
+export async function startEnrichmentRun(profileName: string, runId: string, bullhornEmails: string[] = []) {
+  return callDataApi<{ runId: string; queued: boolean; status: string; alreadyCompleted?: boolean }>(
+    "start-enrichment-run",
+    profileName,
+    { runId, bullhornEmails },
+  );
+}
+
 export async function updateEnrichmentRun(profileName: string, runId: string, updates: Record<string, unknown>) {
   return callDataApi("update-enrichment-run", profileName, { runId, updates });
 }
 
 export async function deleteEnrichmentRun(profileName: string, runId: string) {
   return callDataApi("delete-enrichment-run", profileName, { runId });
+}
+
+export async function waitForEnrichmentRunCompletion(
+  profileName: string,
+  runId: string,
+  options: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<DataApiResponse<any> & { timedOut?: boolean }> {
+  const timeoutMs = Math.max(10_000, options.timeoutMs ?? 180_000);
+  const intervalMs = Math.max(800, options.intervalMs ?? 2_000);
+  const startTs = Date.now();
+
+  let lastRun: any = null;
+  while (Date.now() - startTs < timeoutMs) {
+    const result = await getEnrichmentRun(profileName, runId);
+    if (!result.success) return result;
+
+    const run = result.data;
+    lastRun = run;
+    const status = String(run?.status || "").toLowerCase();
+    if (status === "success" || status === "partial" || status === "failed") {
+      return { success: true, data: run, timedOut: false };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  return { success: true, data: lastRun, timedOut: true };
 }
 
 // === Pitch Templates ===

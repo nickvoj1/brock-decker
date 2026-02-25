@@ -23,7 +23,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCVAnalysis } from "@/hooks/useCVAnalysis";
 import { useProfileName } from "@/hooks/useProfileName";
-import { createEnrichmentRun, updateEnrichmentRun, saveCandidateProfile as saveProfileToApi } from "@/lib/dataApi";
+import {
+  createEnrichmentRun,
+  saveCandidateProfile as saveProfileToApi,
+  startEnrichmentRun,
+  waitForEnrichmentRunCompletion,
+} from "@/lib/dataApi";
 import type { Json } from "@/integrations/supabase/types";
 import { getBrandingForPreset, getStoredBrandingPreset } from "@/lib/cvBranding";
 import { normalizeCandidateName } from "@/lib/nameUtils";
@@ -388,7 +393,7 @@ export default function UploadRun() {
         search_counter: maxContacts,
         candidates_count: 1,
         preferences_count: selectedIndustries.length,
-        status: 'running' as const,
+        status: 'pending' as const,
         bullhorn_enabled: false,
         candidates_data: JSON.parse(JSON.stringify([candidateData])),
         preferences_data: JSON.parse(JSON.stringify(preferencesData)),
@@ -405,30 +410,40 @@ export default function UploadRun() {
         description: `Finding up to ${maxContacts} NEW hiring contacts${isQuickSearch ? ` for "${quickSearchName}"` : ` for ${candidateData.name}`}`,
       });
 
-      // Call the enrichment edge function with Bullhorn exclusion list
-      const { data: enrichResult, error: enrichError } = await supabase.functions.invoke('run-enrichment', {
-        body: { runId: run.id, bullhornEmails }
-      });
-
-      if (enrichError) {
-        await updateEnrichmentRun(profileName.trim(), run.id, { 
-          status: 'failed', 
-          error_message: enrichError.message 
-        });
-        throw enrichError;
+      const kickOffResult = await startEnrichmentRun(profileName.trim(), run.id, bullhornEmails);
+      if (!kickOffResult.success) {
+        throw new Error(kickOffResult.error || "Failed to start enrichment run");
       }
 
-      // Use contacts directly from edge function response (no extra DB fetch needed)
-      const contacts = (enrichResult?.contacts as Contact[]) || [];
+      const completion = await waitForEnrichmentRunCompletion(profileName.trim(), run.id, {
+        timeoutMs: 180000,
+        intervalMs: 2000,
+      });
+      if (!completion.success) {
+        throw new Error(completion.error || "Failed while waiting for enrichment run");
+      }
+      if (completion.timedOut) {
+        toast({
+          title: "Search continues in background",
+          description: "You can switch tabs safely. Check Runs History for completed results.",
+        });
+        setCurrentRunId(run.id);
+        navigate('/history');
+        return;
+      }
+
+      const finalRun = completion.data || {};
+      const contacts = (Array.isArray(finalRun.enriched_data) ? finalRun.enriched_data : []) as Contact[];
       
       if (contacts.length > 0) {
         setPreviewContacts(contacts);
         setCurrentRunId(run.id);
         setShowPreview(true);
       } else {
+        const finalStatus = String(finalRun.status || "").toLowerCase();
         toast({
-          title: "No contacts found",
-          description: "Try adjusting your search criteria",
+          title: finalStatus === "failed" ? "Search failed" : "No contacts found",
+          description: finalRun.error_message || "Try adjusting your search criteria",
           variant: "destructive",
         });
       }
