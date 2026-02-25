@@ -12,7 +12,7 @@ import {
 } from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -404,7 +404,7 @@ export default function BullhornSyncAdmin() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <ScrollArea className="h-[420px] w-full">
+          <ScrollArea className="h-[420px] w-full rounded-md border">
             <Table className="min-w-full w-max">
               <TableHeader>
                 <TableRow>
@@ -520,6 +520,7 @@ export default function BullhornSyncAdmin() {
                 )}
               </TableBody>
             </Table>
+            <ScrollBar orientation="horizontal" />
           </ScrollArea>
 
           <div className="flex items-center justify-between">
