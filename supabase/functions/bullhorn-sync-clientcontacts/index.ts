@@ -29,6 +29,17 @@ const DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS = [
   "dateLastModified",
   "isDeleted",
 ];
+const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
+  ...DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS,
+  "skills",
+  "skillsCount",
+  "dateLastVisit",
+  "dateLastComment",
+  "address1",
+  "address2",
+  "city",
+  "state",
+];
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -186,6 +197,10 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
   if (hasField("specialties")) add("specialties(id,name)");
 
   ["skills", "skillList", "skillIDList", "skill", "specialty", "specialities", "expertise"].forEach(addSimple);
+  // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
+  ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "address1", "address2", "city", "state"].forEach(
+    add,
+  );
 
   buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
   buildCustomFieldNames("customText", 40).forEach(addSimple);
@@ -315,7 +330,8 @@ async function fetchClientContactsBatch(
   includeDeleted: boolean,
   preferredFields?: string,
 ): Promise<{ rows: any[]; total: number | null }> {
-  const fallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
+  const strictFallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
+  const skillsFallbackFields = DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS.join(",");
 
   const whereClause = includeDeleted ? "id>0" : "isDeleted=false";
   const buildQueryUrl = (fields: string) =>
@@ -323,8 +339,8 @@ async function fetchClientContactsBatch(
       bhRestToken,
     )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
 
-  // Prefer rich selector. Fallback to explicit safe list when unsupported fields are rejected.
-  let activeFields = preferredFields?.trim() || "*";
+  // Prefer rich selector; then try skills-aware fallback; finally strict fallback.
+  let activeFields = preferredFields?.trim() || skillsFallbackFields;
 
   let lastError: string | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -338,12 +354,16 @@ async function fetchClientContactsBatch(
       const body = await response.text().catch(() => "");
       const normalizedBody = body.toLowerCase();
       if (
-        activeFields !== fallbackFields &&
+        activeFields !== strictFallbackFields &&
         response.status >= 400 &&
         response.status < 500 &&
         (normalizedBody.includes("field") || normalizedBody.includes("invalid"))
       ) {
-        activeFields = fallbackFields;
+        if (activeFields !== skillsFallbackFields) {
+          activeFields = skillsFallbackFields;
+          continue;
+        }
+        activeFields = strictFallbackFields;
         continue;
       }
       lastError = `Bullhorn query failed (${response.status}): ${body.slice(0, 300)}`;
@@ -461,9 +481,7 @@ async function processSyncJob(
   let completed = false;
   const maxContacts = normalizeMaxContacts(job?.metadata?.max_contacts);
   const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
-  const preferredFieldSelector = supportedFields
-    ? buildClientContactFieldSelector(supportedFields)
-    : "*";
+  const preferredFieldSelector = buildClientContactFieldSelector(supportedFields);
 
   await supabase
     .from("bullhorn_sync_jobs")
