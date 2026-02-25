@@ -1259,6 +1259,24 @@ export function FantasticJobsBoard() {
     }
   };
 
+  const handleCopyContactEmail = async (email: string | null | undefined) => {
+    const value = (email || "").trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast({
+        title: "Email copied",
+        description: value,
+      });
+    } catch {
+      toast({
+        title: "Copy failed",
+        description: "Could not copy email to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card className="panel-shell">
@@ -1856,7 +1874,18 @@ export function FantasticJobsBoard() {
                       <TableCell>{contact.name || "—"}</TableCell>
                       <TableCell>{contact.title || "—"}</TableCell>
                       <TableCell>{contact.company || "—"}</TableCell>
-                      <TableCell>{contact.email || "—"}</TableCell>
+                      <TableCell>
+                        {contact.email ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyContactEmail(contact.email)}
+                            className="text-primary hover:underline"
+                            title="Copy email"
+                          >
+                            {contact.email}
+                          </button>
+                        ) : "—"}
+                      </TableCell>
                       <TableCell>{contact.location || "—"}</TableCell>
                     </TableRow>
                   ))

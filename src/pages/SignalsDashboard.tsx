@@ -863,6 +863,17 @@ export default function SignalsDashboard() {
     toast.success("Contacts exported");
   };
 
+  const handleCopyContactEmail = async (email: string | null | undefined) => {
+    const value = (email || "").trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Email copied");
+    } catch {
+      toast.error("Failed to copy email");
+    }
+  };
+
   const handleRetrain = (signal: Signal) => {
     setSelectedSignalForRetrain(signal);
     setRetrainModalOpen(true);
@@ -1452,7 +1463,16 @@ export default function SignalsDashboard() {
                           </td>
                           <td className="px-3 py-2">{contact.company}</td>
                           <td className="px-3 py-2">
-                            {contact.email || (
+                            {contact.email ? (
+                              <button
+                                type="button"
+                                onClick={() => handleCopyContactEmail(contact.email)}
+                                className="text-primary hover:underline"
+                                title="Copy email"
+                              >
+                                {contact.email}
+                              </button>
+                            ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
