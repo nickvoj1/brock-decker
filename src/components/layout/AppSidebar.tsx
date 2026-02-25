@@ -33,7 +33,7 @@ const navItems = [
 const adminItems = [
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Admin Panel", url: "/admin", icon: ShieldCheck },
-  { title: "Bullhorn Sync", url: "/admin/bullhorn-sync", icon: Database },
+  { title: "Contact Sync", url: "/admin/bullhorn-sync", icon: Database },
 ];
 
 export function AppSidebar() {

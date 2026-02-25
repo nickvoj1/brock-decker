@@ -66,7 +66,7 @@ export default function BullhornSyncAdmin() {
         setMirrorCount(statsResult.data.totalMirroredContacts || 0);
       }
     } catch (err) {
-      console.error("Failed to load Bullhorn sync state", err);
+      console.error("Failed to load Bullhorn contact sync state", err);
     } finally {
       if (!options.silent) setSyncJobLoading(false);
     }
@@ -82,14 +82,14 @@ export default function BullhornSyncAdmin() {
       });
 
       if (!result.success || !result.data) {
-        toast.error(result.error || "Failed to start Bullhorn sync");
+        toast.error(result.error || "Failed to start Bullhorn contact sync");
         return;
       }
 
-      toast.success(result.message || "Bullhorn ClientContact sync started");
+      toast.success(result.message || "Bullhorn contact sync started");
       await loadBullhornSyncData();
     } catch {
-      toast.error("Failed to start Bullhorn sync");
+      toast.error("Failed to start Bullhorn contact sync");
     } finally {
       setSyncActionLoading(false);
     }
@@ -123,17 +123,17 @@ export default function BullhornSyncAdmin() {
   };
 
   return (
-    <AppLayout title="Bullhorn Sync" description="Background mirror of Bullhorn ClientContact (read-only)">
+    <AppLayout title="Contact Sync" description="Background read-only sync of Bullhorn contacts (ClientContact)">
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
                 <Database className="h-5 w-5" />
-                Bullhorn ClientContact Mirror
+                Bullhorn Contact Sync
               </CardTitle>
               <CardDescription>
-                Full read-only mirror sync from Bullhorn (no write/delete operations against Bullhorn).
+                Full read-only sync from Bullhorn ClientContact (no write/delete operations against Bullhorn).
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -147,7 +147,7 @@ export default function BullhornSyncAdmin() {
                 Refresh
               </Button>
               <Button size="sm" onClick={startSync} disabled={syncActionLoading || !!activeSyncJob}>
-                {syncActionLoading ? "Starting..." : activeSyncJob ? "Sync Running" : "Start Full Sync"}
+                {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start Contact Sync"}
               </Button>
             </div>
           </div>
@@ -159,7 +159,7 @@ export default function BullhornSyncAdmin() {
               <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
             </div>
             <div className="rounded-md border p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Job</p>
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Sync Run</p>
               <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
               {latestSyncJob && (
                 <Badge variant="outline" className={`mt-2 ${getStatusColor(latestSyncJob.status)}`}>
@@ -182,7 +182,7 @@ export default function BullhornSyncAdmin() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Job</TableHead>
+                  <TableHead>Run</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Synced</TableHead>
                   <TableHead className="text-right">Expected</TableHead>
@@ -193,7 +193,7 @@ export default function BullhornSyncAdmin() {
                 {syncJobs.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                      No sync jobs yet
+                      No sync runs yet
                     </TableCell>
                   </TableRow>
                 ) : (
