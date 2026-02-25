@@ -1,4 +1,4 @@
-import { Upload, History, Settings, Users, LayoutDashboard, Mail, ShieldCheck, UsersRound, Sparkles } from "lucide-react";
+import { Upload, History, Settings, Users, LayoutDashboard, Mail, ShieldCheck, UsersRound, Sparkles, Database } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -33,6 +33,7 @@ const navItems = [
 const adminItems = [
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Admin Panel", url: "/admin", icon: ShieldCheck },
+  { title: "Bullhorn Sync", url: "/admin/bullhorn-sync", icon: Database },
 ];
 
 export function AppSidebar() {

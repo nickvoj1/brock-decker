@@ -12,6 +12,7 @@ import CVEditor from "./pages/CVEditor";
 import GenerateMail from "./pages/GenerateMail";
 import SettingsPage from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
+import BullhornSyncAdmin from "./pages/BullhornSyncAdmin";
 import SignalsDashboard from "./pages/SignalsDashboard";
 import NotFound from "./pages/NotFound";
 
@@ -35,6 +36,7 @@ const App = () => (
           <Route path="/history" element={<RunsHistory />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/admin/bullhorn-sync" element={<BullhornSyncAdmin />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
