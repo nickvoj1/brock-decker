@@ -240,7 +240,6 @@ export default function SignalsDashboard() {
   const [activeTab, setActiveTab] = useState<TabView>("signals");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchQuery, setSearchQuery] = useState("");
-  const [excludeQuery, setExcludeQuery] = useState("");
   const [fitOnly, setFitOnly] = useState(true);
   const [minFitScore, setMinFitScore] = useState(50);
   const [datePreset, setDatePreset] = useState<DatePreset>("all");
@@ -329,7 +328,6 @@ export default function SignalsDashboard() {
         activeTab?: TabView;
         viewMode?: ViewMode;
         searchQuery?: string;
-        excludeQuery?: string;
         fitOnly?: boolean;
         minFitScore?: number;
         datePreset?: DatePreset;
@@ -344,7 +342,6 @@ export default function SignalsDashboard() {
       if (prefs.activeTab && ["signals", "jobboard"].includes(prefs.activeTab)) setActiveTab(prefs.activeTab);
       if (prefs.viewMode && ["table", "cards"].includes(prefs.viewMode)) setViewMode(prefs.viewMode);
       if (typeof prefs.searchQuery === "string") setSearchQuery(prefs.searchQuery);
-      if (typeof prefs.excludeQuery === "string") setExcludeQuery(prefs.excludeQuery);
       if (prefs.fitOnly === true) setFitOnly(true);
       if (typeof prefs.minFitScore === "number" && prefs.minFitScore >= 0 && prefs.minFitScore <= 100) setMinFitScore(prefs.minFitScore);
       if (prefs.datePreset && DATE_PRESETS.some((p) => p.value === prefs.datePreset)) setDatePreset(prefs.datePreset);
@@ -369,7 +366,6 @@ export default function SignalsDashboard() {
       activeTab,
       viewMode,
       searchQuery,
-      excludeQuery,
       fitOnly,
       minFitScore,
       datePreset,
@@ -379,7 +375,7 @@ export default function SignalsDashboard() {
       },
     };
     localStorage.setItem(SIGNALS_PREFS_KEY, JSON.stringify(prefs));
-  }, [activeRegion, tierFilter, typeFilter, sortBy, minScore, activeTab, viewMode, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
+  }, [activeRegion, tierFilter, typeFilter, sortBy, minScore, activeTab, viewMode, searchQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
   const fetchSignals = useCallback(async (options?: { silent?: boolean; withLoading?: boolean }) => {
     if (!profileName) return;
@@ -883,7 +879,6 @@ export default function SignalsDashboard() {
   const filteredSignals = useMemo(() => {
     let filtered = signals.filter((s) => s.region === activeRegion && !s.is_dismissed);
     const includeTerms = tokenizeQuery(searchQuery);
-    const excludeTerms = tokenizeQuery(excludeQuery);
     const fitById = new Map<string, number>();
 
     filtered = filtered.filter((s) => {
@@ -900,10 +895,6 @@ export default function SignalsDashboard() {
           if (customDateRange?.from && publishedAt < startOfDay(customDateRange.from)) return false;
           if (customDateRange?.to && publishedAt > endOfDay(customDateRange.to)) return false;
         }
-      }
-
-      if (excludeTerms.some((term) => searchText.includes(term))) {
-        return false;
       }
 
       if (includeTerms.length > 0 && !includeTerms.every((term) => searchText.includes(term))) {
@@ -949,7 +940,7 @@ export default function SignalsDashboard() {
     });
     
     return filtered;
-  }, [signals, activeRegion, tierFilter, typeFilter, minScore, sortBy, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange]);
+  }, [signals, activeRegion, tierFilter, typeFilter, minScore, sortBy, searchQuery, fitOnly, minFitScore, datePreset, customDateRange]);
 
   const visibleSignals = useMemo(
     () => filteredSignals.slice(0, visibleSignalsCount),
@@ -960,7 +951,7 @@ export default function SignalsDashboard() {
 
   useEffect(() => {
     setVisibleSignalsCount(SIGNALS_PAGE_SIZE);
-  }, [activeRegion, tierFilter, typeFilter, sortBy, minScore, searchQuery, excludeQuery, fitOnly, minFitScore, datePreset, customDateRange, activeTab]);
+  }, [activeRegion, tierFilter, typeFilter, sortBy, minScore, searchQuery, fitOnly, minFitScore, datePreset, customDateRange, activeTab]);
 
   if (!profileName) {
     return (
@@ -1251,13 +1242,6 @@ export default function SignalsDashboard() {
                   className="h-9 pl-8 control-surface"
                 />
               </div>
-
-              <Input
-                value={excludeQuery}
-                onChange={(e) => setExcludeQuery(e.target.value)}
-                placeholder="Exclude terms (e.g. nordic, intern)"
-                className="h-9 w-full sm:w-[260px] control-surface"
-              />
 
               <Button
                 variant={fitOnly ? "default" : "outline"}
