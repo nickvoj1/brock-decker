@@ -1351,7 +1351,7 @@ Deno.serve(async (req) => {
     // User-requested behavior: do not hard-reject contacts by location.
     // Keep location as informational output only.
     const strictLocationEnabled = false
-    const useApolloLocationQuery = !targetCompany
+    const useApolloLocationQuery = true
     const strictCityLocations = Array.from(
       new Set(apolloLocations.filter((loc) => !isLocationCountryOnly(loc)))
     )
@@ -1373,12 +1373,21 @@ Deno.serve(async (req) => {
     const strictCountryLocations = Array.from(
       new Set(strictCountryTokens.map((token) => countryTokenToQueryLabel(token)).filter(Boolean))
     )
+    const countryPreferredApolloLocations = Array.from(
+      new Set([
+        ...strictCountryLocations,
+        ...apolloLocations,
+      ].filter(Boolean))
+    )
+    const targetCompanyApolloLocations = strictCountryLocations.length > 0
+      ? strictCountryLocations
+      : []
     const fallbackCityLocations = strictLocationEnabled && strictCityLocations.length === 0 && strictCountryTokens.length === 0
       ? apolloLocations
       : []
     const primarySearchLocations = strictLocationEnabled
       ? (strictCityLocations.length > 0 ? strictCityLocations : fallbackCityLocations)
-      : apolloLocations
+      : (targetCompany ? targetCompanyApolloLocations : countryPreferredApolloLocations)
     const initialLocationMode: 'city' | 'country' =
       strictLocationEnabled
         ? ((strictCityLocations.length > 0 || (strictCountryTokens.length === 0 && fallbackCityLocations.length > 0)) ? 'city' : 'country')
@@ -1394,7 +1403,13 @@ Deno.serve(async (req) => {
     )
 
     if (targetCompany) {
-      console.log('Strict location filtering disabled for target-company search')
+      console.log(
+        `Target-company location mode: ${
+          primarySearchLocations.length > 0
+            ? `country-preferred (${primarySearchLocations.join(', ')})`
+            : 'no-location-filter'
+        }`
+      )
     }
 
     // Build all search combinations: industries × sectors (OR logic for maximum coverage)
@@ -1518,7 +1533,7 @@ Deno.serve(async (req) => {
             targetRoles.forEach(title => params.append('person_titles[]', title))
           }
 
-          // Add locations (generally disabled for target-company mode; strict location enforced post-fetch)
+          // Add locations as query hints. Strict city/country rejection remains disabled.
           if (useApolloLocationQuery && primarySearchLocations.length > 0) {
             primarySearchLocations.forEach(loc => params.append('person_locations[]', loc))
           }
