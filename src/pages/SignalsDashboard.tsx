@@ -242,7 +242,7 @@ export default function SignalsDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [fitOnly, setFitOnly] = useState(true);
   const [minFitScore, setMinFitScore] = useState(50);
-  const [datePreset, setDatePreset] = useState<DatePreset>("all");
+  const [datePreset, setDatePreset] = useState<DatePreset>("7d");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
   const [visibleSignalsCount, setVisibleSignalsCount] = useState(SIGNALS_PAGE_SIZE);
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
