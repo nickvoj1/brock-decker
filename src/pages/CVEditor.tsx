@@ -117,7 +117,7 @@ export default function CVEditor() {
 
   return (
     <AppLayout title="CV Editor" description="Upload, edit, and download CVs without running search">
-      <div className="max-w-4xl space-y-6">
+      <div className="buttons-3d max-w-4xl space-y-6">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => navigate("/previous-cvs")}>
             <ArrowLeft className="mr-2 h-4 w-4" />

@@ -162,7 +162,7 @@ export function CVUploadZone({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="buttons-3d space-y-2">
       <label className="text-sm font-medium text-foreground">Candidate CV</label>
       <div
         onDrop={handleDrop}
@@ -215,12 +215,15 @@ export function CVUploadZone({
                 </div>
               </div>
               {!isProcessing && (
-                <button
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
                   onClick={onClear}
-                  className="rounded-full p-1 hover:bg-muted transition-colors"
+                  className="h-7 w-7 rounded-full"
                 >
                   <X className="h-4 w-4 text-muted-foreground" />
-                </button>
+                </Button>
               )}
             </div>
 
@@ -250,10 +253,12 @@ export function CVUploadZone({
                           </div>
                         ))}
                         {parsedData.work_history.length > 2 && (
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="sm"
                             onClick={() => setExpandedWorkHistory(!expandedWorkHistory)}
-                            className="text-xs text-primary hover:text-primary/80 flex items-center gap-1 transition-colors"
+                            className="h-auto p-0 text-xs text-primary hover:text-primary/80 flex items-center gap-1 transition-colors"
                           >
                             {expandedWorkHistory ? (
                               <>
@@ -266,7 +271,7 @@ export function CVUploadZone({
                                 +{parsedData.work_history.length - 2} more
                               </>
                             )}
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -326,7 +331,7 @@ export function CVUploadZone({
       />
 
       <Dialog open={showEditor} onOpenChange={setShowEditor}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="buttons-3d max-w-md">
           <DialogHeader>
             <DialogTitle>Edit CV</DialogTitle>
           </DialogHeader>
