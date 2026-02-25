@@ -52,7 +52,12 @@ async function callBullhornSync<T>(
 
 export async function startBullhornClientContactSync(
   profileName: string,
-  options: { batchSize?: number; includeDeleted?: boolean; maxBatchesPerInvocation?: number } = {},
+  options: {
+    batchSize?: number;
+    includeDeleted?: boolean;
+    maxBatchesPerInvocation?: number;
+    maxContacts?: number;
+  } = {},
 ) {
   return callBullhornSync<BullhornSyncJob>("start-sync", profileName, options);
 }

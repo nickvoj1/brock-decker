@@ -72,13 +72,15 @@ export default function BullhornSyncAdmin() {
     }
   };
 
-  const startSync = async () => {
+  const startSync = async (mode: "test" | "full") => {
     setSyncActionLoading(true);
     try {
+      const isTestMode = mode === "test";
       const result = await startBullhornClientContactSync(ADMIN_PROFILE, {
-        batchSize: 500,
+        batchSize: isTestMode ? 5 : 500,
         includeDeleted: false,
-        maxBatchesPerInvocation: 8,
+        maxBatchesPerInvocation: isTestMode ? 1 : 8,
+        maxContacts: isTestMode ? 5 : undefined,
       });
 
       if (!result.success || !result.data) {
@@ -86,7 +88,9 @@ export default function BullhornSyncAdmin() {
         return;
       }
 
-      toast.success(result.message || "Bullhorn contact sync started");
+      toast.success(
+        result.message || (isTestMode ? "Bullhorn 5-contact test sync started" : "Bullhorn full contact sync started"),
+      );
       await loadBullhornSyncData();
     } catch {
       toast.error("Failed to start Bullhorn contact sync");
@@ -146,8 +150,16 @@ export default function BullhornSyncAdmin() {
                 <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
-              <Button size="sm" onClick={startSync} disabled={syncActionLoading || !!activeSyncJob}>
-                {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start Contact Sync"}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => startSync("test")}
+                disabled={syncActionLoading || !!activeSyncJob}
+              >
+                {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start 5-Contact Test"}
+              </Button>
+              <Button size="sm" onClick={() => startSync("full")} disabled={syncActionLoading || !!activeSyncJob}>
+                {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start Full Contact Sync"}
               </Button>
             </div>
           </div>

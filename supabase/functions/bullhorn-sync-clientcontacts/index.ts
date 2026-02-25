@@ -10,6 +10,7 @@ const corsHeaders = {
 const ADMIN_PROFILE = "Nikita Vojevoda";
 const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
+const DEFAULT_TEST_BATCH_SIZE = 5;
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -45,13 +46,21 @@ function jsonResponse(payload: unknown, status = 200) {
 function normalizeBatchSize(input: unknown): number {
   const n = Number(input);
   if (!Number.isFinite(n)) return DEFAULT_BATCH_SIZE;
-  return Math.max(50, Math.min(2000, Math.floor(n)));
+  return Math.max(1, Math.min(2000, Math.floor(n)));
 }
 
 function normalizeMaxBatches(input: unknown): number {
   const n = Number(input);
   if (!Number.isFinite(n)) return DEFAULT_MAX_BATCHES_PER_INVOCATION;
   return Math.max(1, Math.min(40, Math.floor(n)));
+}
+
+function normalizeMaxContacts(input: unknown): number | null {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return null;
+  const normalized = Math.floor(n);
+  if (normalized <= 0) return null;
+  return Math.min(200000, normalized);
 }
 
 function normalizeBullhornDate(value: unknown): string | null {
@@ -332,6 +341,7 @@ async function processSyncJob(
   let totalExpected = Number.isFinite(Number(job.total_expected)) ? Number(job.total_expected) : null;
   let lastBatchSize = 0;
   let completed = false;
+  const maxContacts = normalizeMaxContacts(job?.metadata?.max_contacts);
 
   await supabase
     .from("bullhorn_sync_jobs")
@@ -344,11 +354,20 @@ async function processSyncJob(
     .eq("id", job.id);
 
   for (let i = 0; i < maxBatchesPerInvocation; i++) {
+    const remainingContacts = maxContacts ? Math.max(0, maxContacts - totalSynced) : null;
+    if (remainingContacts !== null && remainingContacts <= 0) {
+      completed = true;
+      break;
+    }
+
+    const requestBatchSize =
+      remainingContacts !== null ? Math.max(1, Math.min(job.batch_size, remainingContacts)) : job.batch_size;
+
     const { rows, total } = await fetchClientContactsBatch(
       tokens.rest_url,
       tokens.bh_rest_token,
       nextStart,
-      job.batch_size,
+      requestBatchSize,
       Boolean(job.include_deleted),
     );
 
@@ -393,6 +412,11 @@ async function processSyncJob(
       .eq("id", job.id);
 
     if (rows.length < job.batch_size) {
+      completed = true;
+      break;
+    }
+
+    if (maxContacts !== null && totalSynced >= maxContacts) {
       completed = true;
       break;
     }
@@ -455,6 +479,7 @@ serve(async (req) => {
       const batchSize = normalizeBatchSize(data?.batchSize);
       const includeDeleted = Boolean(data?.includeDeleted);
       const maxBatchesPerInvocation = normalizeMaxBatches(data?.maxBatchesPerInvocation);
+      const maxContacts = normalizeMaxContacts(data?.maxContacts);
 
       const { data: runningJob } = await supabase
         .from("bullhorn_sync_jobs")
@@ -473,9 +498,13 @@ serve(async (req) => {
         .insert({
           requested_by: profileName,
           status: "queued",
-          batch_size: batchSize,
+          batch_size: maxContacts ? Math.min(batchSize, maxContacts) : batchSize,
           include_deleted: includeDeleted,
-          metadata: { source: "manual_start" },
+          metadata: {
+            source: "manual_start",
+            max_contacts: maxContacts,
+            mode: maxContacts === DEFAULT_TEST_BATCH_SIZE ? "test_5_contacts" : "full_sync",
+          },
         })
         .select("*")
         .single();
