@@ -69,6 +69,16 @@ type SearchHistoryItem = {
   results: Job[];
 };
 
+type SearchHistoryAuditItem = {
+  id: string;
+  createdAt: string;
+  mode: SearchMode;
+  filters: Filters;
+  strictPEOnly: boolean;
+  resultCount: number;
+  topResults: string[];
+};
+
 type JobsDiagnostics = {
   raw?: number;
   normalized?: number;
@@ -90,8 +100,10 @@ type RunSearchOptions = {
 };
 
 const SEARCH_HISTORY_KEY = "jobs.search_history.v1";
+const SEARCH_HISTORY_AUDIT_KEY = "jobs.search_history.audit.v1";
 const SEARCH_CACHE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_SEARCH_HISTORY_ITEMS = 12;
+const MAX_SEARCH_HISTORY_AUDIT_ITEMS = 500;
 const MAX_SUGGESTIONS_PER_FIELD = 24;
 
 const DEFAULT_FILTERS: Filters = {
@@ -689,6 +701,29 @@ export function FantasticJobsBoard() {
       return [];
     }
   });
+  const [searchHistoryAudit, setSearchHistoryAudit] = useState<SearchHistoryAuditItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(SEARCH_HISTORY_AUDIT_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((item) => {
+          if (!item || typeof item !== "object") return item;
+          const row = item as SearchHistoryAuditItem;
+          return {
+            ...row,
+            filters: {
+              ...row.filters,
+              location: normalizeLocationExpression(row.filters?.location || ""),
+              remote: false,
+            },
+          };
+        })
+        .filter((item): item is SearchHistoryAuditItem => Boolean(item));
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     try {
@@ -698,6 +733,15 @@ export function FantasticJobsBoard() {
       console.error("Failed to persist search history:", error);
     }
   }, [searchHistory]);
+
+  useEffect(() => {
+    try {
+      const cleaned = searchHistoryAudit.slice(0, MAX_SEARCH_HISTORY_AUDIT_ITEMS);
+      localStorage.setItem(SEARCH_HISTORY_AUDIT_KEY, JSON.stringify(cleaned));
+    } catch (error) {
+      console.error("Failed to persist full search history:", error);
+    }
+  }, [searchHistoryAudit]);
 
   const requestedCount = useMemo(
     () => Math.max(10, Math.min(500, Number(filters.jobsPerSearch) || 100)),
@@ -895,12 +939,28 @@ export function FantasticJobsBoard() {
           : withPEFlags;
         const visibleRows = append ? dedupeJobs([...jobs, ...pageVisibleRows]) : pageVisibleRows;
         const historyResults = visibleRows.map(toHistoryJob);
+        const createdAt = new Date().toISOString();
+        const historyFilters: Filters = {
+          ...filters,
+          location: normalizeLocationExpression(filters.location),
+          remote: false,
+        };
+        const auditEntry: SearchHistoryAuditItem = {
+          id: `${Date.now()}-${mode}-audit`,
+          createdAt,
+          mode,
+          filters: historyFilters,
+          strictPEOnly,
+          resultCount: visibleRows.length,
+          topResults: visibleRows.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
+        };
 
         setJobs(visibleRows);
         setTotal(visibleRows.length);
         setLastRefresh(new Date());
         setBaseOffset(offset);
         setHasMore(incoming.length >= effectiveLimit);
+        setSearchHistoryAudit((prev) => [auditEntry, ...prev].slice(0, MAX_SEARCH_HISTORY_AUDIT_ITEMS));
         setSearchHistory((prev) => {
           const cleaned = prev.filter(hasHistoryResults);
           const isSameQuery = (item: SearchHistoryItem) =>
@@ -915,13 +975,9 @@ export function FantasticJobsBoard() {
 
           const nextItem: SearchHistoryItem = {
             id: `${Date.now()}-${mode}`,
-            createdAt: new Date().toISOString(),
+            createdAt,
             mode,
-            filters: {
-              ...filters,
-              location: normalizeLocationExpression(filters.location),
-              remote: false,
-            },
+            filters: historyFilters,
             strictPEOnly,
             resultCount: visibleRows.length,
             topResults: visibleRows.slice(0, 3).map((j) => `${j.company} - ${j.title}`),
@@ -1044,6 +1100,15 @@ export function FantasticJobsBoard() {
     }
   };
 
+  const formatHistoryTimestamp = (dateStr: string) => {
+    try {
+      const date = parseISO(dateStr);
+      return isValid(date) ? format(date, "MMM d, yyyy HH:mm") : dateStr;
+    } catch {
+      return dateStr;
+    }
+  };
+
   const formatSalary = (job: Job) => {
     if (job.salary) return job.salary;
     if (job.salary_min && job.salary_max) return `${job.currency} ${job.salary_min.toLocaleString()} - ${job.salary_max.toLocaleString()}`;
@@ -1116,6 +1181,28 @@ export function FantasticJobsBoard() {
       description: restored.length > 0
         ? `Restored ${restored.length} results from history.`
         : "No cached rows in this history item. Run search once to cache it.",
+    });
+  };
+
+  const applyHistoryAuditItem = (item: SearchHistoryAuditItem) => {
+    setFilters({
+      ...item.filters,
+      location: normalizeLocationExpression(item.filters.location || ""),
+      remote: false,
+    });
+    setPositionInput("");
+    setIndustryKeywordInput("");
+    setLocationInput("");
+    setSearchMode(item.mode);
+    setSourceTab(item.mode === "all" ? "all" : item.mode);
+    setStrictPEOnly(Boolean(item.strictPEOnly));
+    setSelectedSources({
+      linkedin: item.mode === "linkedin" || item.mode === "all",
+      career: item.mode === "career" || item.mode === "all",
+    });
+    toast({
+      title: "History filters applied",
+      description: "Press Search Selected Sources to run this saved query.",
     });
   };
 
@@ -1682,6 +1769,57 @@ export function FantasticJobsBoard() {
                     </Button>
                   </div>
                 ))}
+              </div>
+            </div>
+          ) : null}
+
+          {searchHistoryAudit.length > 0 ? (
+            <div className="control-surface p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="mono-label">Full Search History</p>
+                <p className="text-xs text-muted-foreground">{searchHistoryAudit.length} runs</p>
+              </div>
+              <div className="space-y-2 max-h-56 overflow-auto">
+                {searchHistoryAudit.map((h) => {
+                  const cachedMatch = searchHistory.find(
+                    (cached) =>
+                      cached.mode === h.mode &&
+                      cached.strictPEOnly === h.strictPEOnly &&
+                      JSON.stringify(cached.filters) === JSON.stringify(h.filters),
+                  );
+                  return (
+                    <div key={h.id} className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <div className="truncate">
+                        <span className="font-medium text-foreground">{formatHistoryTimestamp(h.createdAt)}</span>
+                        {" · "}
+                        {h.mode}
+                        {" · "}
+                        {h.resultCount} results
+                        {h.topResults.length > 0 ? ` · ${h.topResults[0]}` : ""}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => applyHistoryAuditItem(h)}
+                        >
+                          Use Filters
+                        </Button>
+                        {cachedMatch ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => loadHistoryItem(cachedMatch)}
+                          >
+                            Load
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : null}
