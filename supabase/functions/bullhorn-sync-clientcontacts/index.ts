@@ -28,18 +28,43 @@ const DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS = [
   "dateAdded",
   "dateLastModified",
   "isDeleted",
-];
-const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
-  ...DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS,
-  "skills",
-  "skillsCount",
   "dateLastVisit",
   "dateLastComment",
   "address1",
   "address2",
   "city",
   "state",
+  "skills",
+  "skillsCount",
 ];
+const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
+  ...DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS,
+  "skillList",
+  "skillIDList",
+  "specialty",
+  "specialities",
+  "expertise",
+  "categories(id,name)",
+  "specialties(id,name)",
+];
+const SKILL_OVERLAY_FIELDS = [
+  "id",
+  "skills",
+  "skillsCount",
+  "skillList",
+  "skillIDList",
+  "specialty",
+  "specialities",
+  "expertise",
+  "categories(id,name)",
+  "specialties(id,name)",
+  "dateLastVisit",
+  "dateLastComment",
+  "address1",
+  "address2",
+  "city",
+  "state",
+].join(",");
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -170,6 +195,69 @@ function removeInvalidFields(selector: string, invalidFields: string[]): string 
     return base && !invalidSet.has(base);
   });
   return kept.join(",");
+}
+
+function hasMeaningfulValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value) && value !== 0;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+  return false;
+}
+
+function hasSkillsPayload(contact: any): boolean {
+  if (!contact || typeof contact !== "object") return false;
+  const candidateKeys = [
+    "skills",
+    "skillsCount",
+    "skill",
+    "skillList",
+    "skillIDList",
+    "specialty",
+    "specialities",
+    "expertise",
+    "categories",
+    "specialties",
+  ];
+  for (const key of candidateKeys) {
+    if (hasMeaningfulValue(contact[key])) return true;
+  }
+  for (const key of Object.keys(contact)) {
+    const lower = key.toLowerCase();
+    if ((lower.includes("skill") || lower.includes("special") || lower.includes("categor")) && hasMeaningfulValue(contact[key])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function mergeOverlayIntoContact(contact: any, overlay: any): any {
+  if (!contact || typeof contact !== "object" || !overlay || typeof overlay !== "object") return contact;
+  const keysToMerge = [
+    "skills",
+    "skillsCount",
+    "skillList",
+    "skillIDList",
+    "specialty",
+    "specialities",
+    "expertise",
+    "categories",
+    "specialties",
+    "dateLastVisit",
+    "dateLastComment",
+    "address1",
+    "address2",
+    "city",
+    "state",
+  ];
+  for (const key of keysToMerge) {
+    if (!hasMeaningfulValue(contact[key]) && hasMeaningfulValue(overlay[key])) {
+      contact[key] = overlay[key];
+    }
+  }
+  return contact;
 }
 
 function buildCustomFieldNames(prefix: string, max: number): string[] {
@@ -382,6 +470,58 @@ async function refreshBullhornTokens(supabase: any, refreshToken: string): Promi
   };
 }
 
+async function fetchSkillOverlayForIds(
+  restUrl: string,
+  bhRestToken: string,
+  ids: number[],
+): Promise<Map<number, any>> {
+  const overlayById = new Map<number, any>();
+  const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isFinite(id))));
+  if (!uniqueIds.length) return overlayById;
+
+  const whereClause = `id IN (${uniqueIds.join(",")})`;
+  const buildQueryUrl = (fields: string) =>
+    `${restUrl}query/ClientContact?BhRestToken=${encodeURIComponent(
+      bhRestToken,
+    )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${uniqueIds.length}&start=0`;
+
+  let activeFields = SKILL_OVERLAY_FIELDS;
+  const attemptedSelectors = new Set<string>([activeFields]);
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const response = await fetch(buildQueryUrl(activeFields));
+    if (response.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 600 + attempt * 450));
+      continue;
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const invalidFields = parseInvalidFieldNames(body);
+      if (invalidFields.length) {
+        const pruned = removeInvalidFields(activeFields, invalidFields);
+        if (pruned && pruned !== activeFields && !attemptedSelectors.has(pruned)) {
+          activeFields = pruned;
+          attemptedSelectors.add(pruned);
+          continue;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 350 + attempt * 300));
+      continue;
+    }
+
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    for (const row of rows) {
+      const id = Number(row?.id);
+      if (!Number.isFinite(id)) continue;
+      overlayById.set(id, row);
+    }
+    break;
+  }
+
+  return overlayById;
+}
+
 async function fetchClientContactsBatch(
   restUrl: string,
   bhRestToken: string,
@@ -390,7 +530,7 @@ async function fetchClientContactsBatch(
   includeDeleted: boolean,
   preferredFields?: string,
 ): Promise<{ rows: any[]; total: number | null }> {
-  const strictFallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
+  const baselineFallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
   const skillsFallbackFields = DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS.join(",");
 
   const whereClause = includeDeleted ? "id>0" : "isDeleted=false";
@@ -399,7 +539,7 @@ async function fetchClientContactsBatch(
       bhRestToken,
     )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
 
-  // Prefer rich selector; then try skills-aware fallback; finally strict fallback.
+  // Prefer rich selector; then keep pruning invalid fields while retaining skills/city fields when possible.
   let activeFields = preferredFields?.trim() || skillsFallbackFields;
   const attemptedSelectors = new Set<string>([activeFields]);
 
@@ -429,20 +569,20 @@ async function fetchClientContactsBatch(
       }
 
       if (
-        activeFields !== strictFallbackFields &&
+        activeFields !== baselineFallbackFields &&
         response.status >= 400 &&
         response.status < 500 &&
         (normalizedBody.includes("field") || normalizedBody.includes("invalid"))
       ) {
-        if (activeFields !== skillsFallbackFields) {
+        if (activeFields !== skillsFallbackFields && !attemptedSelectors.has(skillsFallbackFields)) {
           console.warn("[bullhorn-sync-clientcontacts] Falling back to skills-aware selector after field error");
           activeFields = skillsFallbackFields;
           attemptedSelectors.add(skillsFallbackFields);
           continue;
         }
-        console.warn("[bullhorn-sync-clientcontacts] Falling back to strict selector after repeated field errors");
-        activeFields = strictFallbackFields;
-        attemptedSelectors.add(strictFallbackFields);
+        console.warn("[bullhorn-sync-clientcontacts] Falling back to baseline selector after repeated field errors");
+        activeFields = baselineFallbackFields;
+        attemptedSelectors.add(baselineFallbackFields);
         continue;
       }
       lastError = `Bullhorn query failed (${response.status}): ${body.slice(0, 300)}`;
@@ -455,6 +595,27 @@ async function fetchClientContactsBatch(
     const totalRaw = payload?.total;
     const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
 
+    const rowsWithSkillsBefore = rows.filter((row) => hasSkillsPayload(row)).length;
+    if (rows.length && rowsWithSkillsBefore < rows.length) {
+      const missingIds = rows
+        .filter((row) => !hasSkillsPayload(row))
+        .map((row) => Number(row?.id))
+        .filter((id) => Number.isFinite(id));
+      if (missingIds.length) {
+        const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds);
+        if (overlayById.size) {
+          for (const row of rows) {
+            const id = Number(row?.id);
+            if (!Number.isFinite(id)) continue;
+            const overlay = overlayById.get(id);
+            if (!overlay) continue;
+            mergeOverlayIntoContact(row, overlay);
+          }
+        }
+      }
+    }
+
+    const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
     const skillKeys = firstRow && typeof firstRow === "object"
       ? Object.keys(firstRow).filter((key) => {
@@ -465,7 +626,9 @@ async function fetchClientContactsBatch(
     console.log(
       `[bullhorn-sync-clientcontacts] Batch start=${start} count=${rows.length} selectorFields=${
         splitTopLevelFields(activeFields).length
-      } skillKeys=${skillKeys.join(",") || "none"} hasSkills=${Boolean(firstRow?.skills)}`,
+      } skillKeys=${skillKeys.join(",") || "none"} hasSkills=${Boolean(firstRow?.skills)} rowsWithSkills=${
+        rowsWithSkillsBefore
+      }->${rowsWithSkillsAfter}`,
     );
     return { rows, total };
   }
@@ -488,8 +651,8 @@ function mapMirrorRow(contact: any, jobId: string) {
     status: contact?.status || null,
     phone: contact?.phone || null,
     mobile: contact?.mobile || null,
-    address_city: contact?.address?.city || null,
-    address_state: contact?.address?.state || null,
+    address_city: contact?.address?.city || contact?.city || null,
+    address_state: contact?.address?.state || contact?.state || null,
     address_country_id: Number.isFinite(Number(contact?.address?.countryID))
       ? Number(contact.address.countryID)
       : null,
