@@ -1,4 +1,4 @@
-import { Upload, History, Settings, Users, LayoutDashboard, Mail, ShieldCheck, UsersRound, Sparkles, Database } from "lucide-react";
+import { Upload, History, Settings, Users, LayoutDashboard, Mail, ShieldCheck, UsersRound, Sparkles, Database, ChevronDown } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -13,12 +13,21 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import brockDeckerLogo from "@/assets/brock-decker-logo.png";
 import { useProfileName } from "@/hooks/useProfileName";
 import { getEnrichmentRuns } from "@/lib/dataApi";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
 const RUNS_HISTORY_VIEWED_KEY_PREFIX = "runs-history-last-viewed-at";
+const CONSOLE_MODE_STORAGE_KEY = "sidebar-console-mode";
+type ConsoleMode = "Operator Console" | "CRM System";
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -47,6 +56,11 @@ export function AppSidebar() {
     [profileName],
   );
   const [lastViewedAt, setLastViewedAt] = useState<string>("");
+  const [consoleMode, setConsoleMode] = useState<ConsoleMode>(() => {
+    if (typeof window === "undefined") return "Operator Console";
+    const stored = window.localStorage.getItem(CONSOLE_MODE_STORAGE_KEY);
+    return stored === "CRM System" ? "CRM System" : "Operator Console";
+  });
 
   useEffect(() => {
     if (!viewedKey) {
@@ -55,6 +69,11 @@ export function AppSidebar() {
     }
     setLastViewedAt(localStorage.getItem(viewedKey) || "");
   }, [viewedKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CONSOLE_MODE_STORAGE_KEY, consoleMode);
+  }, [consoleMode]);
 
   useEffect(() => {
     const refreshFromStorage = () => {
@@ -125,9 +144,23 @@ export function AppSidebar() {
           />
         </div>
         {!collapsed && (
-          <div className="mt-1 rounded-md border border-sidebar-border/60 bg-sidebar-accent/30 px-2 py-1">
-            <p className="mono-label text-[9px] text-sidebar-foreground/70">Operator Console</p>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="mt-1 flex w-full items-center justify-between rounded-md border border-sidebar-border/60 bg-sidebar-accent/30 px-2 py-1 text-left transition-colors hover:bg-sidebar-accent/50"
+              >
+                <span className="mono-label text-[9px] text-sidebar-foreground/80">{consoleMode}</span>
+                <ChevronDown className="h-3 w-3 text-sidebar-foreground/60" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuRadioGroup value={consoleMode} onValueChange={(value) => setConsoleMode(value as ConsoleMode)}>
+                <DropdownMenuRadioItem value="Operator Console">Operator Console</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="CRM System">CRM System</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </SidebarHeader>
 
