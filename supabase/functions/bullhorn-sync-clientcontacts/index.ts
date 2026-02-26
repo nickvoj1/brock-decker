@@ -441,6 +441,46 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
   return Array.from(new Set(result)).join(",");
 }
 
+function buildSkillOverlayFieldSelector(supportedFields: Set<string> | null): string {
+  const result: string[] = ["id"];
+  const hasField = (field: string) => !supportedFields || supportedFields.has(field);
+  const add = (field: string) => {
+    if (!field) return;
+    result.push(field);
+  };
+  const addSimple = (field: string) => {
+    if (hasField(field)) result.push(field);
+  };
+
+  [
+    "skills",
+    "skillsCount",
+    "skill",
+    "skillList",
+    "skillIDList",
+    "specialty",
+    "specialities",
+    "expertise",
+    "dateLastVisit",
+    "dateLastComment",
+    "address1",
+    "address2",
+    "city",
+    "state",
+  ].forEach(addSimple);
+
+  if (hasField("categories")) add("categories(id,name)");
+  if (hasField("specialties")) add("specialties(id,name)");
+
+  buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
+  buildCustomFieldNames("customText", 40).forEach(addSimple);
+  buildCustomFieldNames("customObject", 20).forEach(addSimple);
+  buildCustomFieldNames("customInt", 20).forEach(addSimple);
+  buildCustomFieldNames("customDate", 20).forEach(addSimple);
+
+  return Array.from(new Set(result)).join(",");
+}
+
 function normalizeBullhornDate(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "string") {
@@ -556,6 +596,7 @@ async function fetchSkillOverlayForIds(
   restUrl: string,
   bhRestToken: string,
   ids: number[],
+  preferredFields?: string,
 ): Promise<Map<number, any>> {
   const overlayById = new Map<number, any>();
   const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isFinite(id))));
@@ -567,7 +608,7 @@ async function fetchSkillOverlayForIds(
       bhRestToken,
     )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${uniqueIds.length}&start=0`;
 
-  let activeFields = SKILL_OVERLAY_FIELDS;
+  let activeFields = preferredFields?.trim() || SKILL_OVERLAY_FIELDS;
   const attemptedSelectors = new Set<string>([activeFields]);
 
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -644,6 +685,38 @@ async function fetchWildcardOverlayBatch(
   return overlayById;
 }
 
+async function fetchEntityOverlayById(
+  restUrl: string,
+  bhRestToken: string,
+  id: number,
+): Promise<any | null> {
+  const entityUrl = `${restUrl}entity/ClientContact/${id}?BhRestToken=${encodeURIComponent(
+    bhRestToken,
+  )}&fields=${encodeURIComponent("*")}`;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(entityUrl);
+    if (response.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 650 + attempt * 450));
+      continue;
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.warn(
+        `[bullhorn-sync-clientcontacts] Entity overlay failed for ${id} (${response.status}): ${body.slice(0, 180)}`,
+      );
+      return null;
+    }
+
+    const payload = await response.json();
+    const data = payload?.data && typeof payload.data === "object" ? payload.data : payload;
+    if (!data || typeof data !== "object") return null;
+    return data;
+  }
+
+  return null;
+}
+
 async function fetchClientContactsBatch(
   restUrl: string,
   bhRestToken: string,
@@ -651,6 +724,7 @@ async function fetchClientContactsBatch(
   count: number,
   includeDeleted: boolean,
   preferredFields?: string,
+  supportedFields?: Set<string> | null,
 ): Promise<{ rows: any[]; total: number | null }> {
   const coreFallbackFields = DEFAULT_CLIENTCONTACT_CORE_FIELDS.join(",");
   const baselineFallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
@@ -665,6 +739,7 @@ async function fetchClientContactsBatch(
   // Prefer rich selector; always degrade to core selector to avoid hard-fail syncs.
   let activeFields = preferredFields?.trim() || skillsFallbackFields;
   const attemptedSelectors = new Set<string>([activeFields]);
+  const skillOverlaySelector = buildSkillOverlayFieldSelector(supportedFields ?? null);
 
   let lastError: string | null = null;
   for (let attempt = 0; attempt < 9; attempt++) {
@@ -761,7 +836,7 @@ async function fetchClientContactsBatch(
         .map((row) => Number(row?.id))
         .filter((id) => Number.isFinite(id));
       if (missingIds.length) {
-        const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds);
+        const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds, skillOverlaySelector);
         if (overlayById.size) {
           for (const row of rows) {
             const id = Number(row?.id);
@@ -770,6 +845,27 @@ async function fetchClientContactsBatch(
             if (!overlay) continue;
             mergeOverlayIntoContact(row, overlay);
           }
+        }
+      }
+
+      const stillMissingIds = rows
+        .filter((row) => !hasSkillsPayload(row))
+        .map((row) => Number(row?.id))
+        .filter((id) => Number.isFinite(id))
+        .slice(0, 50);
+      if (stillMissingIds.length) {
+        const rowById = new Map<number, any>();
+        for (const row of rows) {
+          const id = Number(row?.id);
+          if (Number.isFinite(id)) rowById.set(id, row);
+        }
+
+        for (const id of stillMissingIds) {
+          const entityOverlay = await fetchEntityOverlayById(restUrl, bhRestToken, id);
+          if (!entityOverlay) continue;
+          const target = rowById.get(id);
+          if (!target) continue;
+          mergeOverlayIntoContact(target, entityOverlay);
         }
       }
     }
@@ -931,6 +1027,7 @@ async function processSyncJob(
       requestBatchSize,
       Boolean(job.include_deleted),
       preferredFieldSelector,
+      supportedFields,
     );
 
     if (totalExpected === null && Number.isFinite(Number(total))) {
