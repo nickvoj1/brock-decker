@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -22,7 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Database, RefreshCw, Clock, Plus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Clock, Database, Plus, RefreshCw, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -172,6 +172,42 @@ interface BullhornSyncAdminProps {
   tableOnly?: boolean;
 }
 
+type ContactSortKey =
+  | "id"
+  | "name"
+  | "jobTitle"
+  | "company"
+  | "workEmail"
+  | "status"
+  | "workPhone"
+  | "consultant"
+  | "address"
+  | "lastVisit"
+  | "dateAdded"
+  | "dateLastModified"
+  | "skills";
+
+type ContactSortDirection = "asc" | "desc";
+
+type ContactDisplayRow = {
+  contact: BullhornMirrorContact;
+  fullName: string;
+  jobTitle: string;
+  company: string;
+  workEmail: string;
+  status: string;
+  workPhone: string;
+  consultant: string;
+  address: string;
+  lastVisit: string;
+  dateAdded: string;
+  dateLastModified: string;
+  skills: string;
+  lastVisitMillis: number | null;
+  dateAddedMillis: number | null;
+  dateLastModifiedMillis: number | null;
+};
+
 type ContactFilterDraftRow = {
   id: string;
   field: BullhornContactFilterField;
@@ -221,6 +257,87 @@ function buildAppliedFilters(rows: ContactFilterDraftRow[]): BullhornContactFilt
     .filter((row) => row.values.length > 0);
 }
 
+function toDateMillis(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (Number.isFinite(numeric)) {
+    const millis = numeric > 1e11 ? numeric : numeric * 1000;
+    if (Number.isFinite(millis)) return millis;
+  }
+  const parsed = new Date(String(value)).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeSortableText(value: string): string {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized === "-") return "";
+  return normalized.toLowerCase();
+}
+
+function compareNullableNumbers(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
+function compareSortableText(a: string, b: string): number {
+  return normalizeSortableText(a).localeCompare(normalizeSortableText(b), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayRow {
+  const rawRecord =
+    contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
+      ? (contact.raw as Record<string, unknown>)
+      : {};
+  const workEmail = formatMirrorValue(rawRecord.email ?? contact.email);
+  const fullName = formatMirrorValue(
+    rawRecord.name ??
+      contact.name ??
+      `${contact.first_name || ""} ${contact.last_name || ""}`.trim(),
+  );
+  const jobTitle = formatMirrorValue(rawRecord.occupation ?? contact.occupation);
+  const company = formatMirrorValue(
+    (rawRecord.clientCorporation as Record<string, unknown> | undefined)?.name ??
+      contact.client_corporation_name,
+  );
+  const status = formatMirrorValue(rawRecord.status ?? contact.status);
+  const workPhone = formatMirrorValue(rawRecord.phone);
+  const consultant = formatMirrorValue(
+    (rawRecord.owner as Record<string, unknown> | undefined)?.name ?? contact.owner_name,
+  );
+  const address = formatMirrorAddress(rawRecord.address, contact.address_city, contact.address_state);
+  const lastVisitRaw = rawRecord.lastVisit;
+  const dateAddedRaw = rawRecord.dateAdded;
+  const dateLastModifiedRaw = rawRecord.dateLastModified ?? contact.date_last_modified;
+  const lastVisit = formatMirrorDate(lastVisitRaw);
+  const dateAdded = formatMirrorDate(dateAddedRaw);
+  const dateLastModified = formatMirrorDate(dateLastModifiedRaw);
+  const skills = extractSkillsFromRaw(rawRecord);
+
+  return {
+    contact,
+    fullName,
+    jobTitle,
+    company,
+    workEmail,
+    status,
+    workPhone,
+    consultant,
+    address,
+    lastVisit,
+    dateAdded,
+    dateLastModified,
+    skills,
+    lastVisitMillis: toDateMillis(lastVisitRaw),
+    dateAddedMillis: toDateMillis(dateAddedRaw),
+    dateLastModifiedMillis: toDateMillis(dateLastModifiedRaw),
+  };
+}
+
 export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdminProps) {
   const profileName = useProfileName();
   const navigate = useNavigate();
@@ -239,6 +356,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [filterRows, setFilterRows] = useState<ContactFilterDraftRow[]>([]);
   const [appliedFilters, setAppliedFilters] = useState<BullhornContactFilterRow[]>([]);
   const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
+  const [sortKey, setSortKey] = useState<ContactSortKey>("id");
+  const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
   const contactsScrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -432,6 +551,75 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       default:
         return "bg-muted text-muted-foreground";
     }
+  };
+
+  const displayedContacts = useMemo(() => {
+    const rows = contacts.map((contact) => buildContactDisplayRow(contact));
+    const direction = sortDirection === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      let compared = 0;
+      switch (sortKey) {
+        case "id":
+          compared = a.contact.bullhorn_id - b.contact.bullhorn_id;
+          break;
+        case "name":
+          compared = compareSortableText(a.fullName, b.fullName);
+          break;
+        case "jobTitle":
+          compared = compareSortableText(a.jobTitle, b.jobTitle);
+          break;
+        case "company":
+          compared = compareSortableText(a.company, b.company);
+          break;
+        case "workEmail":
+          compared = compareSortableText(a.workEmail, b.workEmail);
+          break;
+        case "status":
+          compared = compareSortableText(a.status, b.status);
+          break;
+        case "workPhone":
+          compared = compareSortableText(a.workPhone, b.workPhone);
+          break;
+        case "consultant":
+          compared = compareSortableText(a.consultant, b.consultant);
+          break;
+        case "address":
+          compared = compareSortableText(a.address, b.address);
+          break;
+        case "lastVisit":
+          compared = compareNullableNumbers(a.lastVisitMillis, b.lastVisitMillis);
+          break;
+        case "dateAdded":
+          compared = compareNullableNumbers(a.dateAddedMillis, b.dateAddedMillis);
+          break;
+        case "dateLastModified":
+          compared = compareNullableNumbers(a.dateLastModifiedMillis, b.dateLastModifiedMillis);
+          break;
+        case "skills":
+          compared = compareSortableText(a.skills, b.skills);
+          break;
+        default:
+          compared = 0;
+      }
+      return compared * direction;
+    });
+    return rows;
+  }, [contacts, sortDirection, sortKey]);
+
+  const toggleSort = (key: ContactSortKey) => {
+    if (sortKey === key) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === "id" ? "desc" : "asc");
+  };
+
+  const renderSortIcon = (key: ContactSortKey) => {
+    if (sortKey !== key) return <ArrowUpDown className="ml-1 h-3.5 w-3.5 opacity-60" />;
+    return sortDirection === "asc"
+      ? <ArrowUp className="ml-1 h-3.5 w-3.5" />
+      : <ArrowDown className="ml-1 h-3.5 w-3.5" />;
   };
 
   return (
@@ -734,55 +922,97 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             <Table className="w-[2200px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
-                  <TableHead className={`w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>ID</TableHead>
-                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Name</TableHead>
-                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Job Title</TableHead>
-                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Company</TableHead>
-                  <TableHead className={`w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Email</TableHead>
-                  <TableHead className={`w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Status</TableHead>
-                  <TableHead className={`w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Phone</TableHead>
-                  <TableHead className={`w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Consultant</TableHead>
-                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Address</TableHead>
-                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Visit</TableHead>
-                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Date Added</TableHead>
-                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Modified</TableHead>
-                  <TableHead className={`w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Skills</TableHead>
+                  <TableHead className={`w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("id")}>
+                      ID {renderSortIcon("id")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("name")}>
+                      Name {renderSortIcon("name")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("jobTitle")}>
+                      Job Title {renderSortIcon("jobTitle")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("company")}>
+                      Company {renderSortIcon("company")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("workEmail")}>
+                      Work Email {renderSortIcon("workEmail")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("status")}>
+                      Status {renderSortIcon("status")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("workPhone")}>
+                      Work Phone {renderSortIcon("workPhone")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("consultant")}>
+                      Consultant {renderSortIcon("consultant")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("address")}>
+                      Address {renderSortIcon("address")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("lastVisit")}>
+                      Last Visit {renderSortIcon("lastVisit")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("dateAdded")}>
+                      Date Added {renderSortIcon("dateAdded")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("dateLastModified")}>
+                      Last Modified {renderSortIcon("dateLastModified")}
+                    </Button>
+                  </TableHead>
+                  <TableHead className={`w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("skills")}>
+                      Skills {renderSortIcon("skills")}
+                    </Button>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/55 [&_tr:last-child]:border-b-0" : "[&_tr]:border-0"}>
-                {contacts.length === 0 ? (
+                {displayedContacts.length === 0 ? (
                   <TableRow className={tableOnly ? "border-b border-border/55 hover:bg-transparent" : "border-0 hover:bg-transparent"}>
                     <TableCell colSpan={13} className="py-5 text-center text-base text-muted-foreground">
                       {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  contacts.map((contact, index) => {
-                    const rawRecord =
-                      contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
-                        ? (contact.raw as Record<string, unknown>)
-                        : {};
-                    const workEmail = formatMirrorValue(rawRecord.email ?? contact.email);
-                    const fullName = formatMirrorValue(
-                      rawRecord.name ??
-                        contact.name ??
-                        `${contact.first_name || ""} ${contact.last_name || ""}`.trim(),
-                    );
-                    const jobTitle = formatMirrorValue(rawRecord.occupation ?? contact.occupation);
-                    const company = formatMirrorValue(
-                      (rawRecord.clientCorporation as Record<string, unknown> | undefined)?.name ??
-                        contact.client_corporation_name,
-                    );
-                    const status = formatMirrorValue(rawRecord.status ?? contact.status);
-                    const workPhone = formatMirrorValue(rawRecord.phone);
-                    const consultant = formatMirrorValue(
-                      (rawRecord.owner as Record<string, unknown> | undefined)?.name ?? contact.owner_name,
-                    );
-                    const address = formatMirrorAddress(rawRecord.address, contact.address_city, contact.address_state);
-                    const lastVisit = formatMirrorDate(rawRecord.lastVisit);
-                    const dateAdded = formatMirrorDate(rawRecord.dateAdded);
-                    const dateLastModified = formatMirrorDate(rawRecord.dateLastModified ?? contact.date_last_modified);
-                    const skills = extractSkillsFromRaw(rawRecord);
+                  displayedContacts.map((row, index) => {
+                    const {
+                      contact,
+                      workEmail,
+                      fullName,
+                      jobTitle,
+                      company,
+                      status,
+                      workPhone,
+                      consultant,
+                      address,
+                      lastVisit,
+                      dateAdded,
+                      dateLastModified,
+                      skills,
+                    } = row;
                     return (
                       <TableRow
                         key={contact.bullhorn_id}
