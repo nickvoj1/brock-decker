@@ -50,14 +50,8 @@ const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
   "categories(id,name)",
   "specialties(id,name)",
 ];
-const DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS = Array.from(
-  { length: 5 },
-  (_, idx) => `customTextBlock${idx + 1}`,
-);
-const DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS = Array.from(
-  { length: 20 },
-  (_, idx) => `customText${idx + 1}`,
-);
+const DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS = Array.from({ length: 5 }, (_, idx) => `customTextBlock${idx + 1}`);
+const DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS = Array.from({ length: 20 }, (_, idx) => `customText${idx + 1}`);
 const DEFAULT_CONSERVATIVE_CUSTOM_FIELDS = [
   ...DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS,
   ...DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS,
@@ -204,12 +198,16 @@ function normalizeFilterRows(input: unknown): MirrorFilterRow[] {
     const rawValues = Array.isArray(record.values)
       ? record.values
       : String(record.values || "")
-        .split(/[\n,;|]+/)
-        .map((item) => item.trim())
-        .filter(Boolean);
+          .split(/[\n,;|]+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
 
     const values = rawValues
-      .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+      .map((value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
       .filter((value) => value.length > 0)
       .slice(0, 25);
 
@@ -230,8 +228,8 @@ function parseJsonLikeString(value: string): unknown | null {
   const looksJson =
     trimmed.startsWith("{") ||
     trimmed.startsWith("[") ||
-    (trimmed.startsWith("\"{") && trimmed.endsWith("}\"")) ||
-    (trimmed.startsWith("\"[") && trimmed.endsWith("]\""));
+    (trimmed.startsWith('"{') && trimmed.endsWith('}"')) ||
+    (trimmed.startsWith('"[') && trimmed.endsWith(']"'));
   if (!looksJson) return null;
 
   try {
@@ -380,7 +378,12 @@ function getFieldValuesForMirrorFilter(contact: any, field: MirrorFilterField): 
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-function matchFilterValue(fieldValues: string[], filterValue: string, field: MirrorFilterField, operator: MirrorFilterOperator): boolean {
+function matchFilterValue(
+  fieldValues: string[],
+  filterValue: string,
+  field: MirrorFilterField,
+  operator: MirrorFilterOperator,
+): boolean {
   if (!fieldValues.length) return false;
   const target = normalizeToken(filterValue);
   if (!target) return false;
@@ -575,9 +578,7 @@ function deriveCanonicalSkills(contact: any): void {
     contact.skills = terms.join(" ; ");
   }
   if (terms.length) {
-    contact.skillsCount = hasNumericSkillsCount
-      ? Math.max(Math.floor(numericSkillsCount), terms.length)
-      : terms.length;
+    contact.skillsCount = hasNumericSkillsCount ? Math.max(Math.floor(numericSkillsCount), terms.length) : terms.length;
   }
 }
 
@@ -600,7 +601,10 @@ function hasSkillsPayload(contact: any): boolean {
   }
   for (const key of Object.keys(contact)) {
     const lower = key.toLowerCase();
-    if ((lower.includes("skill") || lower.includes("special") || lower.includes("categor")) && hasMeaningfulValue(contact[key])) {
+    if (
+      (lower.includes("skill") || lower.includes("special") || lower.includes("categor")) &&
+      hasMeaningfulValue(contact[key])
+    ) {
       return true;
     }
   }
@@ -735,9 +739,7 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
   ["skills", "skillList", "skillIDList", "skill", "specialty", "specialities", "expertise"].forEach(addSimple);
   if (supportedFields) {
     // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
-    ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "address1", "address2", "city", "state"].forEach(
-      add,
-    );
+    ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "address1", "address2", "city", "state"].forEach(add);
   }
 
   if (supportedFields) {
@@ -874,7 +876,9 @@ function normalizeBullhornDate(value: unknown): string | null {
 }
 
 function normalizeEmail(email: unknown): string | null {
-  const value = String(email || "").trim().toLowerCase();
+  const value = String(email || "")
+    .trim()
+    .toLowerCase();
   return value && value.includes("@") ? value : null;
 }
 
@@ -1175,9 +1179,11 @@ async function fetchClientContactsBatch(
         for (const candidate of fallbackCandidates) {
           if (candidate === activeFields || attemptedSelectors.has(candidate)) continue;
           const label =
-            candidate === coreFallbackFields ? "core selector" :
-            candidate === baselineFallbackFields ? "baseline selector" :
-            "skills-aware selector";
+            candidate === coreFallbackFields
+              ? "core selector"
+              : candidate === baselineFallbackFields
+                ? "baseline selector"
+                : "skills-aware selector";
           console.warn(`[bullhorn-sync-clientcontacts] Falling back to ${label} after field error`);
           activeFields = candidate;
           attemptedSelectors.add(candidate);
@@ -1190,11 +1196,7 @@ async function fetchClientContactsBatch(
         continue;
       }
 
-      if (
-        activeFields !== coreFallbackFields &&
-        response.status >= 400 &&
-        response.status < 500
-      ) {
+      if (activeFields !== coreFallbackFields && response.status >= 400 && response.status < 500) {
         console.warn(
           `[bullhorn-sync-clientcontacts] Non-OK ${response.status}, forcing core selector. body=${body.slice(0, 200)}`,
         );
@@ -1270,12 +1272,13 @@ async function fetchClientContactsBatch(
 
     const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
-    const skillKeys = firstRow && typeof firstRow === "object"
-      ? Object.keys(firstRow).filter((key) => {
-        const lower = key.toLowerCase();
-        return lower.includes("skill") || lower.includes("special") || lower.includes("category");
-      })
-      : [];
+    const skillKeys =
+      firstRow && typeof firstRow === "object"
+        ? Object.keys(firstRow).filter((key) => {
+            const lower = key.toLowerCase();
+            return lower.includes("skill") || lower.includes("special") || lower.includes("category");
+          })
+        : [];
     console.log(
       `[bullhorn-sync-clientcontacts] Batch start=${start} count=${rows.length} selectorFields=${
         splitTopLevelFields(activeFields).length
@@ -1306,9 +1309,7 @@ function mapMirrorRow(contact: any, jobId: string) {
     mobile: contact?.mobile || null,
     address_city: contact?.address?.city || contact?.city || null,
     address_state: contact?.address?.state || contact?.state || null,
-    address_country_id: Number.isFinite(Number(contact?.address?.countryID))
-      ? Number(contact.address.countryID)
-      : null,
+    address_country_id: Number.isFinite(Number(contact?.address?.countryID)) ? Number(contact.address.countryID) : null,
     client_corporation_id: Number.isFinite(Number(contact?.clientCorporation?.id))
       ? Number(contact.clientCorporation.id)
       : null,
@@ -1433,9 +1434,7 @@ async function processSyncJob(
       break;
     }
 
-    const mapped = rows
-      .map((c) => mapMirrorRow(c, job.id))
-      .filter((row) => Number.isFinite(Number(row.bullhorn_id)));
+    const mapped = rows.map((c) => mapMirrorRow(c, job.id)).filter((row) => Number.isFinite(Number(row.bullhorn_id)));
 
     if (mapped.length) {
       const { error: upsertError } = await supabase
@@ -1598,11 +1597,7 @@ serve(async (req) => {
 
       const maxBatchesPerInvocation = normalizeMaxBatches(data?.maxBatchesPerInvocation);
 
-      const { data: job, error } = await supabase
-        .from("bullhorn_sync_jobs")
-        .select("*")
-        .eq("id", jobId)
-        .maybeSingle();
+      const { data: job, error } = await supabase.from("bullhorn_sync_jobs").select("*").eq("id", jobId).maybeSingle();
 
       if (error || !job) return jsonResponse({ success: false, error: "Sync job not found" }, 404);
       if (job.status === "completed" || job.status === "cancelled") {
@@ -1638,11 +1633,7 @@ serve(async (req) => {
       const jobId = String(data?.jobId || "").trim();
       if (!jobId) return jsonResponse({ success: false, error: "jobId is required" }, 400);
 
-      const { data: job, error } = await supabase
-        .from("bullhorn_sync_jobs")
-        .select("*")
-        .eq("id", jobId)
-        .maybeSingle();
+      const { data: job, error } = await supabase.from("bullhorn_sync_jobs").select("*").eq("id", jobId).maybeSingle();
       if (error || !job) return jsonResponse({ success: false, error: "Sync job not found" }, 404);
 
       return jsonResponse({ success: true, data: job });
