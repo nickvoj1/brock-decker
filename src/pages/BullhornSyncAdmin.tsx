@@ -806,12 +806,12 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
       <Card className={tableOnly ? "border-0 bg-transparent shadow-none -mx-4 md:-mx-6 lg:-mx-7 h-[calc(100dvh-6rem)] md:h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-8rem)] flex flex-col overflow-hidden" : undefined}>
         <CardHeader
-          className={tableOnly ? "border-b bg-background" : undefined}
+          className={tableOnly ? "border-b bg-background px-3 py-2" : undefined}
         >
           <div className="flex w-full items-center">
-            <div className="flex w-full flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-1.5">
               <Input
-                className="h-9 w-[280px] min-w-[220px] md:w-[340px]"
+                className="h-8 w-[240px] min-w-[200px] md:w-[300px]"
                 value={contactsSearchDraft}
                 onChange={(e) => setContactsSearchDraft(e.target.value)}
                 placeholder="Search by name, email, company, title, city"
@@ -819,7 +819,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               <Button
                 size="sm"
                 variant="default"
-                className="h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                className="h-8 bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => setIsFiltersDialogOpen(true)}
               >
                 Filters{appliedFilters.length ? ` (${appliedFilters.length})` : ""}
@@ -827,7 +827,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               <Button
                 size="sm"
                 variant="outline"
-                className="h-9"
+                className="h-8"
                 onClick={() => {
                   setContactsSearch(contactsSearchDraft.trim());
                 }}
@@ -837,7 +837,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               <Button
                 size="sm"
                 variant="outline"
-                className="h-9"
+                className="h-8"
                 onClick={() => {
                   setContactsSearchDraft("");
                   setContactsSearch("");
@@ -850,7 +850,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               <Button
                 size="sm"
                 variant="outline"
-                className="h-9 w-9"
+                className="h-8 w-8"
                 onClick={() => loadBullhornMirrorContacts({ reset: true })}
                 disabled={contactsLoading}
               >
@@ -981,7 +981,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <CardContent className={tableOnly ? "px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7 flex flex-col flex-1 min-h-0" : "space-y-3"}>
+        <CardContent className={tableOnly ? "px-0 pb-0 flex flex-col flex-1 min-h-0" : "space-y-3"}>
           <div
             className={`w-full ${
               tableOnly
