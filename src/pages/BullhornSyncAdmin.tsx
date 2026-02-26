@@ -54,16 +54,54 @@ const SKILLS_CANDIDATE_KEYS = [
 
 function formatMirrorValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "-";
+  const parseJsonLike = (input: string): unknown | null => {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    const looksJson =
+      trimmed.startsWith("{") ||
+      trimmed.startsWith("[") ||
+      (trimmed.startsWith("\"{") && trimmed.endsWith("}\"")) ||
+      (trimmed.startsWith("\"[") && trimmed.endsWith("]\""));
+    if (!looksJson) return null;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") {
+        try {
+          return JSON.parse(parsed);
+        } catch {
+          return parsed;
+        }
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+
+  if (typeof value === "string") {
+    const parsed = parseJsonLike(value);
+    if (parsed !== null) return formatMirrorValue(parsed);
+    return value.trim() || "-";
+  }
+
   if (Array.isArray(value)) {
     if (!value.length) return "-";
-    return value.map((item) => formatMirrorValue(item)).join("; ");
+    const rendered = value
+      .map((item) => formatMirrorValue(item))
+      .filter((item) => item !== "-");
+    return rendered.length ? rendered.join("; ") : "-";
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
+    if ("data" in record) {
+      const dataValue = formatMirrorValue(record.data);
+      if (dataValue !== "-") return dataValue;
+    }
     if ("id" in record || "name" in record) {
-      const name = record.name ? String(record.name) : "";
-      const id = record.id !== undefined && record.id !== null ? String(record.id) : "";
-      const combined = `${name}${id ? ` (${id})` : ""}`.trim();
+      const name = record.name ? String(record.name).trim() : "";
+      const id = record.id !== undefined && record.id !== null ? String(record.id).trim() : "";
+      const combined = name || id;
       if (combined) return combined;
     }
     try {
@@ -118,6 +156,20 @@ function extractSkillsFromRaw(rawRecord: Record<string, unknown>): string {
 
   if (fuzzyMatches.length) return fuzzyMatches.join(" ; ");
   return "-";
+}
+
+function getExpectedTotal(job: BullhornSyncJob | null | undefined): number | null {
+  if (!job) return null;
+
+  const direct = Number(job.total_expected);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  if (job.metadata && typeof job.metadata === "object") {
+    const fromMetadata = Number((job.metadata as Record<string, unknown>).max_contacts);
+    if (Number.isFinite(fromMetadata) && fromMetadata > 0) return fromMetadata;
+  }
+
+  return null;
 }
 
 export default function BullhornSyncAdmin() {
@@ -248,8 +300,9 @@ export default function BullhornSyncAdmin() {
 
   const latestSyncJob = syncJobs[0] || null;
   const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
-  const progressPercent = latestSyncJob?.total_expected
-    ? Math.min(100, Math.round((latestSyncJob.total_synced / latestSyncJob.total_expected) * 100))
+  const latestExpectedTotal = getExpectedTotal(latestSyncJob);
+  const progressPercent = latestSyncJob && latestExpectedTotal
+    ? Math.min(100, Math.round((latestSyncJob.total_synced / latestExpectedTotal) * 100))
     : 0;
   const totalContactPages = Math.max(1, Math.ceil(contactsTotal / CONTACTS_PAGE_SIZE));
   const pageStart = contactsTotal === 0 ? 0 : (contactsPage - 1) * CONTACTS_PAGE_SIZE + 1;
@@ -342,7 +395,9 @@ export default function BullhornSyncAdmin() {
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
               <p className="font-medium">
                 {latestSyncJob
-                  ? `${latestSyncJob.total_synced.toLocaleString()} / ${(latestSyncJob.total_expected || 0).toLocaleString()}`
+                  ? latestExpectedTotal
+                    ? `${latestSyncJob.total_synced.toLocaleString()} / ${latestExpectedTotal.toLocaleString()}`
+                    : `${latestSyncJob.total_synced.toLocaleString()} synced`
                   : "-"}
               </p>
               <Progress value={progressPercent} className="mt-2 h-2" />
@@ -368,26 +423,31 @@ export default function BullhornSyncAdmin() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  syncJobs.map((job) => (
-                    <TableRow key={job.id}>
-                      <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={getStatusColor(job.status)}>
-                          {job.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{(job.total_expected || 0).toLocaleString()}</TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">
-                        <div className="flex items-center justify-end gap-1">
-                          <Clock className="h-3 w-3" />
-                          {job.started_at
-                            ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
-                            : "-"}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  syncJobs.map((job) => {
+                    const expectedTotal = getExpectedTotal(job);
+                    return (
+                      <TableRow key={job.id}>
+                        <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={getStatusColor(job.status)}>
+                            {job.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">
+                          {expectedTotal ? expectedTotal.toLocaleString() : "-"}
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          <div className="flex items-center justify-end gap-1">
+                            <Clock className="h-3 w-3" />
+                            {job.started_at
+                              ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
+                              : "-"}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
