@@ -595,12 +595,14 @@ async function fetchClientContactsBatch(
     const totalRaw = payload?.total;
     const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
 
-    const rowsWithSkillsBefore = rows.filter((row) => hasSkillsPayload(row)).length;
+    // deno-lint-ignore no-explicit-any
+    const rowsWithSkillsBefore = rows.filter((row: any) => hasSkillsPayload(row)).length;
     if (rows.length && rowsWithSkillsBefore < rows.length) {
+      // deno-lint-ignore no-explicit-any
       const missingIds = rows
-        .filter((row) => !hasSkillsPayload(row))
-        .map((row) => Number(row?.id))
-        .filter((id) => Number.isFinite(id));
+        .filter((row: any) => !hasSkillsPayload(row))
+        .map((row: any) => Number(row?.id))
+        .filter((id: any) => Number.isFinite(id));
       if (missingIds.length) {
         const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds);
         if (overlayById.size) {
@@ -615,7 +617,8 @@ async function fetchClientContactsBatch(
       }
     }
 
-    const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
+    // deno-lint-ignore no-explicit-any
+    const rowsWithSkillsAfter = rows.filter((row: any) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
     const skillKeys = firstRow && typeof firstRow === "object"
       ? Object.keys(firstRow).filter((key) => {
