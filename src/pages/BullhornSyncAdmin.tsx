@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -15,7 +15,7 @@ import {
 } from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -358,7 +358,6 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ContactSortKey>("id");
   const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
-  const contactsScrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -478,22 +477,28 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
   useEffect(() => {
     if (profileName !== ADMIN_PROFILE) return;
-    const scrollAreaRoot = contactsScrollAreaRef.current;
-    if (!scrollAreaRoot) return;
-    const viewport = scrollAreaRoot.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
-    if (!viewport) return;
 
     const maybeLoadMore = () => {
       if (contactsLoading || isLoadingMore || !hasMoreContacts) return;
-      const distanceToBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-      if (distanceToBottom > 220) return;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      const scrollHeight = Math.max(
+        document.documentElement.scrollHeight || 0,
+        document.body.scrollHeight || 0,
+      );
+      const distanceToBottom = scrollHeight - (scrollTop + viewportHeight);
+      if (distanceToBottom > 260) return;
       void loadBullhornMirrorContacts({ silent: true, append: true, offset: contactsOffset });
     };
 
-    viewport.addEventListener("scroll", maybeLoadMore);
+    window.addEventListener("scroll", maybeLoadMore, { passive: true });
+    window.addEventListener("resize", maybeLoadMore);
     // Trigger load-more immediately when visible area is not filled.
     maybeLoadMore();
-    return () => viewport.removeEventListener("scroll", maybeLoadMore);
+    return () => {
+      window.removeEventListener("scroll", maybeLoadMore);
+      window.removeEventListener("resize", maybeLoadMore);
+    };
   }, [profileName, contactsLoading, isLoadingMore, hasMoreContacts, contactsOffset, loadBullhornMirrorContacts]);
 
   const startSync = async (mode: "test" | "full") => {
@@ -754,7 +759,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 placeholder="Search by name, email, company, title, city"
               />
               <Button
-                variant="outline"
+                variant="default"
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => setIsFiltersDialogOpen(true)}
               >
                 Filters{appliedFilters.length ? ` (${appliedFilters.length})` : ""}
@@ -911,14 +917,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           </DialogContent>
         </Dialog>
         <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7" : "space-y-3"}>
-          <ScrollArea
-            ref={contactsScrollAreaRef}
-            className={`h-[68vh] w-full ${
+          <div
+            className={`w-full ${
               tableOnly
-                ? "h-[calc(100vh-210px)] border-l-2 border-t-2 border-primary rounded-none bg-background shadow-[inset_1px_0_0_rgba(15,15,15,0.9),inset_0_1px_0_rgba(15,15,15,0.9)]"
+                ? "min-h-[calc(100vh-210px)] border-l-2 border-t-2 border-primary rounded-none bg-background shadow-[inset_1px_0_0_rgba(15,15,15,0.9),inset_0_1px_0_rgba(15,15,15,0.9)]"
                 : ""
             }`}
           >
+            <div className="w-full overflow-x-auto">
             <Table className="w-[2200px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
@@ -1065,8 +1071,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 )}
               </TableBody>
             </Table>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
+            </div>
+          </div>
 
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
