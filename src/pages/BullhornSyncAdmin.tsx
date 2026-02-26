@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
+  BullhornContactFilterField,
+  BullhornContactFilterOperator,
+  BullhornContactFilterRow,
   BullhornMirrorContact,
   BullhornSyncJob,
   getBullhornMirrorStats,
@@ -17,7 +20,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
-import { Database, RefreshCw, Clock } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Database, RefreshCw, Clock, Plus, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -167,6 +171,55 @@ interface BullhornSyncAdminProps {
   tableOnly?: boolean;
 }
 
+type ContactFilterDraftRow = {
+  id: string;
+  field: BullhornContactFilterField;
+  operator: BullhornContactFilterOperator;
+  valueInput: string;
+};
+
+const FILTER_FIELD_OPTIONS: Array<{ value: BullhornContactFilterField; label: string }> = [
+  { value: "name", label: "Name" },
+  { value: "company", label: "Company" },
+  { value: "title", label: "Job Title" },
+  { value: "email", label: "Work Email" },
+  { value: "city", label: "City" },
+  { value: "country", label: "Country" },
+  { value: "consultant", label: "Consultant" },
+  { value: "status", label: "Status" },
+  { value: "skills", label: "Skills" },
+];
+
+const FILTER_OPERATOR_OPTIONS: Array<{ value: BullhornContactFilterOperator; label: string }> = [
+  { value: "contains", label: "Contains" },
+  { value: "equals", label: "Equals" },
+];
+
+function createFilterDraftRow(): ContactFilterDraftRow {
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `filter-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    id,
+    field: "skills",
+    operator: "contains",
+    valueInput: "",
+  };
+}
+
+function buildAppliedFilters(rows: ContactFilterDraftRow[]): BullhornContactFilterRow[] {
+  return rows
+    .map((row) => ({
+      field: row.field,
+      operator: row.operator,
+      values: row.valueInput
+        .split(/[\n,;|]+/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    }))
+    .filter((row) => row.values.length > 0);
+}
+
 export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdminProps) {
   const profileName = useProfileName();
   const navigate = useNavigate();
@@ -182,6 +235,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [contactsSearchDraft, setContactsSearchDraft] = useState("");
   const [contactsSearch, setContactsSearch] = useState("");
+  const [filterRows, setFilterRows] = useState<ContactFilterDraftRow[]>([]);
+  const [appliedFilters, setAppliedFilters] = useState<BullhornContactFilterRow[]>([]);
   const contactsScrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -231,18 +286,27 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   };
 
   const loadBullhornMirrorContacts = useCallback(async (
-    options: { silent?: boolean; search?: string; reset?: boolean; append?: boolean; offset?: number } = {},
+    options: {
+      silent?: boolean;
+      search?: string;
+      filters?: BullhornContactFilterRow[];
+      reset?: boolean;
+      append?: boolean;
+      offset?: number;
+    } = {},
   ) => {
     const isReset = Boolean(options.reset);
     if (!options.silent) setContactsLoading(true);
     if (options.append) setIsLoadingMore(true);
     try {
       const search = options.search ?? contactsSearch;
+      const filters = options.filters ?? appliedFilters;
       const offset = isReset ? 0 : options.offset ?? 0;
       const result = await listBullhornMirrorContacts(ADMIN_PROFILE, {
         limit: CONTACTS_PAGE_SIZE,
         offset,
         search,
+        filters,
       });
 
       if (result.success && result.data) {
@@ -283,13 +347,13 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       if (!options.silent) setContactsLoading(false);
       if (options.append) setIsLoadingMore(false);
     }
-  }, [contactsSearch]);
+  }, [contactsSearch, appliedFilters]);
 
   useEffect(() => {
     if (profileName === ADMIN_PROFILE) {
       loadBullhornMirrorContacts({ reset: true });
     }
-  }, [profileName, contactsSearch, loadBullhornMirrorContacts]);
+  }, [profileName, contactsSearch, appliedFilters, loadBullhornMirrorContacts]);
 
   useEffect(() => {
     if (profileName !== ADMIN_PROFILE) return;
@@ -509,6 +573,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 variant="outline"
                 onClick={() => {
                   setContactsSearch(contactsSearchDraft.trim());
+                  setAppliedFilters(buildAppliedFilters(filterRows));
                 }}
               >
                 Search
@@ -518,6 +583,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 onClick={() => {
                   setContactsSearchDraft("");
                   setContactsSearch("");
+                  setFilterRows([]);
+                  setAppliedFilters([]);
                 }}
               >
                 Clear
@@ -530,6 +597,90 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
               </Button>
             </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setFilterRows((prev) => [...prev, createFilterDraftRow()])}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Add Filter Row
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Same row values = OR. Different rows = AND.
+              </p>
+            </div>
+            {filterRows.map((row) => (
+              <div key={row.id} className="grid grid-cols-12 gap-2">
+                <div className="col-span-12 md:col-span-3">
+                  <Select
+                    value={row.field}
+                    onValueChange={(value) =>
+                      setFilterRows((prev) =>
+                        prev.map((item) => (item.id === row.id ? { ...item, field: value as BullhornContactFilterField } : item)),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Field" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FILTER_FIELD_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-12 md:col-span-2">
+                  <Select
+                    value={row.operator}
+                    onValueChange={(value) =>
+                      setFilterRows((prev) =>
+                        prev.map((item) => (item.id === row.id ? { ...item, operator: value as BullhornContactFilterOperator } : item)),
+                      )
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Operator" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FILTER_OPERATOR_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-11 md:col-span-6">
+                  <Input
+                    className="h-9"
+                    value={row.valueInput}
+                    onChange={(e) =>
+                      setFilterRows((prev) =>
+                        prev.map((item) => (item.id === row.id ? { ...item, valueInput: e.target.value } : item)),
+                      )
+                    }
+                    placeholder="Values (comma separated for OR)"
+                  />
+                </div>
+                <div className="col-span-1 md:col-span-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={() => setFilterRows((prev) => prev.filter((item) => item.id !== row.id))}
+                    aria-label="Remove filter row"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
         </CardHeader>
         <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7" : "space-y-3"}>

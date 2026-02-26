@@ -37,6 +37,25 @@ export interface BullhornMirrorContact {
   raw: Record<string, unknown> | null;
 }
 
+export type BullhornContactFilterField =
+  | "name"
+  | "company"
+  | "title"
+  | "email"
+  | "city"
+  | "country"
+  | "consultant"
+  | "status"
+  | "skills";
+
+export type BullhornContactFilterOperator = "contains" | "equals";
+
+export interface BullhornContactFilterRow {
+  field: BullhornContactFilterField;
+  operator?: BullhornContactFilterOperator;
+  values: string[];
+}
+
 interface BullhornSyncResponse<T = unknown> {
   success: boolean;
   data?: T;
@@ -100,6 +119,7 @@ export async function listBullhornMirrorContacts(
     limit?: number;
     offset?: number;
     search?: string;
+    filters?: BullhornContactFilterRow[];
   } = {},
 ) {
   return callBullhornSync<{
