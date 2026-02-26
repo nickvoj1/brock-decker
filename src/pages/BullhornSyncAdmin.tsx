@@ -450,7 +450,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         </Card>
       )}
 
-      <Card>
+      <Card className={tableOnly ? "border-0 bg-transparent shadow-none" : undefined}>
         <CardHeader>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -490,31 +490,30 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <ScrollArea className="h-[420px] w-full rounded-md border">
-            <Table className="min-w-full w-max">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="whitespace-nowrap">Synced At</TableHead>
-                  <TableHead className="whitespace-nowrap">ID</TableHead>
-                  <TableHead className="whitespace-nowrap">Name</TableHead>
-                  <TableHead className="whitespace-nowrap">Job Title</TableHead>
-                  <TableHead className="whitespace-nowrap">Company</TableHead>
-                  <TableHead className="whitespace-nowrap">Work Email</TableHead>
-                  <TableHead className="whitespace-nowrap">Status</TableHead>
-                  <TableHead className="whitespace-nowrap">Work Phone</TableHead>
-                  <TableHead className="whitespace-nowrap">Consultant</TableHead>
-                  <TableHead className="whitespace-nowrap">Address</TableHead>
-                  <TableHead className="whitespace-nowrap">Last Visit</TableHead>
-                  <TableHead className="whitespace-nowrap">Date Added</TableHead>
-                  <TableHead className="whitespace-nowrap">Last Modified</TableHead>
-                  <TableHead className="whitespace-nowrap">Skills</TableHead>
+        <CardContent className={tableOnly ? "space-y-3 px-0 pb-0" : "space-y-3"}>
+          <ScrollArea className="h-[68vh] w-full">
+            <Table className="min-w-full w-max text-sm">
+              <TableHeader className="[&_tr]:border-0">
+                <TableRow className="border-0 hover:bg-transparent">
+                  <TableHead className="whitespace-nowrap text-sm">ID</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Name</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Job Title</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Company</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Work Email</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Status</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Work Phone</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Consultant</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Address</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Last Visit</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Date Added</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Last Modified</TableHead>
+                  <TableHead className="whitespace-nowrap text-sm">Skills</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
+              <TableBody className="[&_tr]:border-0">
                 {contacts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={14} className="text-center text-sm text-muted-foreground">
+                  <TableRow className="border-0 hover:bg-transparent">
+                    <TableCell colSpan={13} className="py-5 text-center text-base text-muted-foreground">
                       {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
                     </TableCell>
                   </TableRow>
@@ -546,15 +545,12 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                     const dateLastModified = formatMirrorDate(rawRecord.dateLastModified ?? contact.date_last_modified);
                     const skills = extractSkillsFromRaw(rawRecord);
                     return (
-                      <TableRow key={contact.bullhorn_id}>
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground py-2">
-                          {new Date(contact.synced_at).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs whitespace-nowrap py-2">{contact.bullhorn_id}</TableCell>
-                        <TableCell className="max-w-[200px] text-xs py-2">{fullName}</TableCell>
-                        <TableCell className="max-w-[240px] text-xs py-2">{jobTitle}</TableCell>
-                        <TableCell className="max-w-[220px] text-xs py-2">{company}</TableCell>
-                        <TableCell className="max-w-[230px] text-xs py-2">
+                      <TableRow key={contact.bullhorn_id} className="border-0 hover:bg-transparent">
+                        <TableCell className="whitespace-nowrap py-3 font-mono text-sm">{contact.bullhorn_id}</TableCell>
+                        <TableCell className="max-w-[220px] py-3 text-sm">{fullName}</TableCell>
+                        <TableCell className="max-w-[260px] py-3 text-sm">{jobTitle}</TableCell>
+                        <TableCell className="max-w-[240px] py-3 text-sm">{company}</TableCell>
+                        <TableCell className="max-w-[250px] py-3 text-sm">
                           {workEmail !== "-" ? (
                             <a href={`mailto:${workEmail}`} className="text-primary hover:underline">
                               {workEmail}
@@ -563,14 +559,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                             "-"
                           )}
                         </TableCell>
-                        <TableCell className="max-w-[120px] text-xs py-2">{status}</TableCell>
-                        <TableCell className="max-w-[160px] text-xs py-2">{workPhone}</TableCell>
-                        <TableCell className="max-w-[180px] text-xs py-2">{consultant}</TableCell>
-                        <TableCell className="max-w-[260px] text-xs py-2">{address}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs py-2">{lastVisit}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs py-2">{dateAdded}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs py-2">{dateLastModified}</TableCell>
-                        <TableCell className="max-w-[260px] text-xs py-2" title={skills}>
+                        <TableCell className="max-w-[130px] py-3 text-sm">{status}</TableCell>
+                        <TableCell className="max-w-[180px] py-3 text-sm">{workPhone}</TableCell>
+                        <TableCell className="max-w-[200px] py-3 text-sm">{consultant}</TableCell>
+                        <TableCell className="max-w-[280px] py-3 text-sm">{address}</TableCell>
+                        <TableCell className="whitespace-nowrap py-3 text-sm">{lastVisit}</TableCell>
+                        <TableCell className="whitespace-nowrap py-3 text-sm">{dateAdded}</TableCell>
+                        <TableCell className="whitespace-nowrap py-3 text-sm">{dateLastModified}</TableCell>
+                        <TableCell className="max-w-[320px] py-3 text-sm" title={skills}>
                           {skills.length > 120 ? `${skills.slice(0, 117)}...` : skills}
                         </TableCell>
                       </TableRow>
