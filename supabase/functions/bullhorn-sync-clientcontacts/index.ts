@@ -50,6 +50,11 @@ const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
   "categories(id,name)",
   "specialties(id,name)",
 ];
+const CUSTOM_SKILL_OVERLAY_FIELDS = [
+  ...Array.from({ length: 20 }, (_, idx) => `customTextBlock${idx + 1}`),
+  ...Array.from({ length: 40 }, (_, idx) => `customText${idx + 1}`),
+  ...Array.from({ length: 20 }, (_, idx) => `customObject${idx + 1}`),
+];
 const SKILL_OVERLAY_FIELDS = [
   "id",
   "skills",
@@ -67,6 +72,7 @@ const SKILL_OVERLAY_FIELDS = [
   "address2",
   "city",
   "state",
+  ...CUSTOM_SKILL_OVERLAY_FIELDS,
 ].join(",");
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -254,6 +260,7 @@ function mergeOverlayIntoContact(contact: any, overlay: any): any {
     "address2",
     "city",
     "state",
+    ...CUSTOM_SKILL_OVERLAY_FIELDS,
   ];
   for (const key of keysToMerge) {
     if (!hasMeaningfulValue(contact[key]) && hasMeaningfulValue(overlay[key])) {
