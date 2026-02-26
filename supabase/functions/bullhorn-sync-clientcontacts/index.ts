@@ -246,6 +246,7 @@ function valueToSkillTerms(value: unknown): string[] {
 
   const raw = String(value).trim();
   if (!raw) return [];
+  if (/^\d+(\.\d+)?$/.test(raw)) return [];
   if (raw.length > 450) return [];
   if (raw.includes("@") && !raw.includes(";")) return [];
 
@@ -265,7 +266,10 @@ function valueToSkillTerms(value: unknown): string[] {
 
 function deriveCanonicalSkills(contact: any): void {
   if (!contact || typeof contact !== "object") return;
-  if (hasMeaningfulValue(contact.skills) && hasMeaningfulValue(contact.skillsCount)) return;
+  const hasStringSkills = typeof contact.skills === "string" && contact.skills.trim().length > 0;
+  const numericSkillsCount = Number(contact.skillsCount);
+  const hasNumericSkillsCount = Number.isFinite(numericSkillsCount) && numericSkillsCount > 0;
+  if (hasStringSkills && hasNumericSkillsCount) return;
 
   const terms: string[] = [];
   const seen = new Set<string>();
@@ -283,11 +287,13 @@ function deriveCanonicalSkills(contact: any): void {
     }
   }
 
-  if (!hasMeaningfulValue(contact.skills) && terms.length) {
+  if (!hasStringSkills && terms.length) {
     contact.skills = terms.join(" ; ");
   }
-  if (!hasMeaningfulValue(contact.skillsCount) && terms.length) {
-    contact.skillsCount = terms.length;
+  if (terms.length) {
+    contact.skillsCount = hasNumericSkillsCount
+      ? Math.max(Math.floor(numericSkillsCount), terms.length)
+      : terms.length;
   }
 }
 
