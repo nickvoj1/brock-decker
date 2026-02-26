@@ -50,6 +50,18 @@ const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
   "categories(id,name)",
   "specialties(id,name)",
 ];
+const DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS = Array.from(
+  { length: 5 },
+  (_, idx) => `customTextBlock${idx + 1}`,
+);
+const DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS = Array.from(
+  { length: 20 },
+  (_, idx) => `customText${idx + 1}`,
+);
+const DEFAULT_CONSERVATIVE_CUSTOM_FIELDS = [
+  ...DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS,
+  ...DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS,
+];
 const CUSTOM_SKILL_OVERLAY_FIELDS = [
   ...Array.from({ length: 20 }, (_, idx) => `customTextBlock${idx + 1}`),
   ...Array.from({ length: 40 }, (_, idx) => `customText${idx + 1}`),
@@ -346,6 +358,10 @@ function buildCustomFieldNames(prefix: string, max: number): string[] {
   return Array.from({ length: max }, (_, idx) => `${prefix}${idx + 1}`);
 }
 
+function addDefaultConservativeCustomFields(addSimple: (field: string) => void): void {
+  for (const field of DEFAULT_CONSERVATIVE_CUSTOM_FIELDS) addSimple(field);
+}
+
 function extractMetaFieldNames(metaPayload: any): Set<string> {
   const names = new Set<string>();
   const candidates = [
@@ -427,16 +443,22 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
   if (hasField("specialties")) add("specialties(id,name)");
 
   ["skills", "skillList", "skillIDList", "skill", "specialty", "specialities", "expertise"].forEach(addSimple);
-  // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
-  ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "address1", "address2", "city", "state"].forEach(
-    add,
-  );
+  if (supportedFields) {
+    // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
+    ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "address1", "address2", "city", "state"].forEach(
+      add,
+    );
+  }
 
-  buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
-  buildCustomFieldNames("customText", 40).forEach(addSimple);
-  buildCustomFieldNames("customObject", 20).forEach(addSimple);
-  buildCustomFieldNames("customInt", 20).forEach(addSimple);
-  buildCustomFieldNames("customDate", 20).forEach(addSimple);
+  if (supportedFields) {
+    buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
+    buildCustomFieldNames("customText", 40).forEach(addSimple);
+    buildCustomFieldNames("customObject", 20).forEach(addSimple);
+    buildCustomFieldNames("customInt", 20).forEach(addSimple);
+    buildCustomFieldNames("customDate", 20).forEach(addSimple);
+  } else {
+    addDefaultConservativeCustomFields(addSimple);
+  }
 
   return Array.from(new Set(result)).join(",");
 }
@@ -472,11 +494,22 @@ function buildSkillOverlayFieldSelector(supportedFields: Set<string> | null): st
   if (hasField("categories")) add("categories(id,name)");
   if (hasField("specialties")) add("specialties(id,name)");
 
-  buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
-  buildCustomFieldNames("customText", 40).forEach(addSimple);
-  buildCustomFieldNames("customObject", 20).forEach(addSimple);
-  buildCustomFieldNames("customInt", 20).forEach(addSimple);
-  buildCustomFieldNames("customDate", 20).forEach(addSimple);
+  if (supportedFields) {
+    buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
+    buildCustomFieldNames("customText", 40).forEach(addSimple);
+    buildCustomFieldNames("customObject", 20).forEach(addSimple);
+    buildCustomFieldNames("customInt", 20).forEach(addSimple);
+    buildCustomFieldNames("customDate", 20).forEach(addSimple);
+
+    for (const field of supportedFields) {
+      const lower = field.toLowerCase();
+      if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
+      if (lower === "categories" || lower === "specialties") continue;
+      addSimple(field);
+    }
+  } else {
+    addDefaultConservativeCustomFields(addSimple);
+  }
 
   return Array.from(new Set(result)).join(",");
 }
@@ -524,13 +557,7 @@ function buildEntitySkillFieldSelector(supportedFields: Set<string> | null): str
       addSimple(field);
     }
   } else {
-    [
-      ...buildCustomFieldNames("customTextBlock", 20),
-      ...buildCustomFieldNames("customText", 40),
-      ...buildCustomFieldNames("customObject", 20),
-      ...buildCustomFieldNames("customInt", 20),
-      ...buildCustomFieldNames("customDate", 20),
-    ].forEach(add);
+    for (const field of DEFAULT_CONSERVATIVE_CUSTOM_FIELDS) add(field);
   }
 
   return Array.from(new Set(result)).join(",");
@@ -666,7 +693,7 @@ async function fetchSkillOverlayForIds(
   let activeFields = preferredFields?.trim() || SKILL_OVERLAY_FIELDS;
   const attemptedSelectors = new Set<string>([activeFields]);
 
-  for (let attempt = 0; attempt < 6; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     const response = await fetch(buildQueryUrl(activeFields));
     if (response.status === 429) {
       await new Promise((resolve) => setTimeout(resolve, 600 + attempt * 450));
@@ -811,7 +838,7 @@ async function fetchClientContactsBatch(
   const entitySkillSelector = buildEntitySkillFieldSelector(supportedFields ?? null);
 
   let lastError: string | null = null;
-  for (let attempt = 0; attempt < 9; attempt++) {
+  for (let attempt = 0; attempt < 25; attempt++) {
     const queryUrl = buildQueryUrl(activeFields);
     const response = await fetch(queryUrl);
     if (response.status === 429) {
@@ -825,9 +852,17 @@ async function fetchClientContactsBatch(
       let switchedSelector = false;
 
       if (invalidFields.length) {
-        // Avoid retry loops that prune one invalid field per attempt.
-        // For batch sync, jump straight to the safest selector.
-        if (activeFields !== coreFallbackFields && !attemptedSelectors.has(coreFallbackFields)) {
+        const prunedSelector = removeInvalidFields(activeFields, invalidFields);
+        if (prunedSelector && prunedSelector !== activeFields && !attemptedSelectors.has(prunedSelector)) {
+          console.warn(
+            `[bullhorn-sync-clientcontacts] Pruned invalid fields [${invalidFields.join(", ")}], retrying with selector size ${
+              splitTopLevelFields(prunedSelector).length
+            }`,
+          );
+          activeFields = prunedSelector;
+          attemptedSelectors.add(prunedSelector);
+          switchedSelector = true;
+        } else if (activeFields !== coreFallbackFields && !attemptedSelectors.has(coreFallbackFields)) {
           console.warn(
             `[bullhorn-sync-clientcontacts] Invalid fields [${invalidFields.join(", ")}]; forcing core selector`,
           );
