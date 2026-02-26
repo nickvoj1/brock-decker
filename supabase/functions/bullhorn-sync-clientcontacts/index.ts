@@ -562,13 +562,14 @@ async function fetchClientContactsBatch(
       let switchedSelector = false;
 
       if (invalidFields.length) {
-        const pruned = removeInvalidFields(activeFields, invalidFields);
-        if (pruned && pruned !== activeFields && !attemptedSelectors.has(pruned)) {
+        // Avoid retry loops that prune one invalid field per attempt.
+        // For batch sync, jump straight to the safest selector.
+        if (activeFields !== coreFallbackFields && !attemptedSelectors.has(coreFallbackFields)) {
           console.warn(
-            `[bullhorn-sync-clientcontacts] Removing unsupported fields [${invalidFields.join(", ")}] and retrying`,
+            `[bullhorn-sync-clientcontacts] Invalid fields [${invalidFields.join(", ")}]; forcing core selector`,
           );
-          activeFields = pruned;
-          attemptedSelectors.add(pruned);
+          activeFields = coreFallbackFields;
+          attemptedSelectors.add(coreFallbackFields);
           switchedSelector = true;
         }
       }
