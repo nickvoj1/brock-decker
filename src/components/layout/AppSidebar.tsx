@@ -1,5 +1,18 @@
-import { Upload, History, Settings, Users, LayoutDashboard, Mail, ShieldCheck, UsersRound, Sparkles, Database, ChevronDown } from "lucide-react";
-import { NavLink, useLocation } from "react-router-dom";
+import {
+  Upload,
+  History,
+  Settings,
+  Users,
+  LayoutDashboard,
+  Mail,
+  ShieldCheck,
+  UsersRound,
+  Sparkles,
+  Database,
+  ChevronDown,
+  ListChecks,
+} from "lucide-react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -42,12 +55,17 @@ const navItems = [
 const adminItems = [
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Admin Panel", url: "/admin", icon: ShieldCheck },
-  { title: "Contact Sync", url: "/admin/bullhorn-sync", icon: Database },
+];
+
+const crmItems = [
+  { title: "Contact Sync", url: "/crm/contact-sync", icon: Database },
+  { title: "Distribution Lists", url: "/crm/distribution-lists", icon: ListChecks },
 ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const location = useLocation();
+  const navigate = useNavigate();
   const profileName = useProfileName();
   const collapsed = state === "collapsed";
   const isAdmin = profileName === ADMIN_PROFILE;
@@ -74,6 +92,11 @@ export function AppSidebar() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(CONSOLE_MODE_STORAGE_KEY, consoleMode);
   }, [consoleMode]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/crm/")) return;
+    if (consoleMode !== "CRM System") setConsoleMode("CRM System");
+  }, [location.pathname, consoleMode]);
 
   useEffect(() => {
     const refreshFromStorage = () => {
@@ -133,6 +156,18 @@ export function AppSidebar() {
     return location.pathname === url || location.pathname.startsWith(`${url}/`);
   };
 
+  const handleConsoleModeChange = (value: string) => {
+    const nextMode: ConsoleMode = value === "CRM System" ? "CRM System" : "Operator Console";
+    setConsoleMode(nextMode);
+    if (nextMode === "CRM System") {
+      navigate("/crm/contact-sync");
+      return;
+    }
+    if (location.pathname.startsWith("/crm/")) {
+      navigate("/dashboard");
+    }
+  };
+
   return (
     <Sidebar className="depth-sidebar border-r border-sidebar-border bg-sidebar/95" collapsible="icon">
       <SidebarHeader className="px-2 py-2 border-b border-sidebar-border/70">
@@ -155,7 +190,7 @@ export function AppSidebar() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuRadioGroup value={consoleMode} onValueChange={(value) => setConsoleMode(value as ConsoleMode)}>
+              <DropdownMenuRadioGroup value={consoleMode} onValueChange={handleConsoleModeChange}>
                 <DropdownMenuRadioItem value="Operator Console">Operator Console</DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="CRM System">CRM System</DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
@@ -165,47 +200,77 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="p-2">
-        <SidebarGroup>
-          {!collapsed && <p className="mono-label px-2 pb-2">Navigation</p>}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => {
-                const isActive = isRouteActive(item.url);
-                const isRunsHistoryItem = item.url === "/history";
-                const showRunsAlert = isRunsHistoryItem && unreadCompletedRuns > 0;
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-                      <NavLink
-                        to={item.url}
-                        className={`interactive-lift group relative flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
-                          isActive
-                            ? "border-primary/30 bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-sm"
-                            : "border-transparent text-sidebar-foreground/70 hover:border-sidebar-border/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                        }`}
-                      >
-                        <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground"}`} />
-                        {!collapsed && <span>{item.title}</span>}
-                        {showRunsAlert && (
-                          <span
-                            className={`inline-flex h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background ${
-                              collapsed ? "absolute right-2 top-2" : "ml-auto"
-                            }`}
-                            aria-label={`${unreadCompletedRuns} completed run updates`}
-                            title={`${unreadCompletedRuns} completed run updates`}
-                          />
-                        )}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {consoleMode === "Operator Console" ? (
+          <SidebarGroup>
+            {!collapsed && <p className="mono-label px-2 pb-2">Navigation</p>}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {navItems.map((item) => {
+                  const isActive = isRouteActive(item.url);
+                  const isRunsHistoryItem = item.url === "/history";
+                  const showRunsAlert = isRunsHistoryItem && unreadCompletedRuns > 0;
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+                        <NavLink
+                          to={item.url}
+                          className={`interactive-lift group relative flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
+                            isActive
+                              ? "border-primary/30 bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-sm"
+                              : "border-transparent text-sidebar-foreground/70 hover:border-sidebar-border/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                          }`}
+                        >
+                          <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground"}`} />
+                          {!collapsed && <span>{item.title}</span>}
+                          {showRunsAlert && (
+                            <span
+                              className={`inline-flex h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background ${
+                                collapsed ? "absolute right-2 top-2" : "ml-auto"
+                              }`}
+                              aria-label={`${unreadCompletedRuns} completed run updates`}
+                              title={`${unreadCompletedRuns} completed run updates`}
+                            />
+                          )}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : (
+          <SidebarGroup>
+            {!collapsed && <p className="mono-label px-2 pb-2">CRM System</p>}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {crmItems.map((item) => {
+                  const isActive = isRouteActive(item.url);
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+                        <NavLink
+                          to={item.url}
+                          className={`interactive-lift group relative flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200 ${
+                            isActive
+                              ? "border-primary/30 bg-sidebar-accent text-sidebar-accent-foreground font-medium shadow-sm"
+                              : "border-transparent text-sidebar-foreground/70 hover:border-sidebar-border/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                          }`}
+                        >
+                          <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-sidebar-foreground/70 group-hover:text-sidebar-foreground"}`} />
+                          {!collapsed && <span>{item.title}</span>}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         {/* Admin Section - Only visible to admin */}
-        {isAdmin && (
+        {isAdmin && consoleMode === "Operator Console" && (
           <SidebarGroup className="mt-4 pt-4 border-t border-sidebar-border/70">
             {!collapsed && <p className="mono-label px-2 pb-2 text-primary/80">Admin</p>}
             <SidebarGroupContent>

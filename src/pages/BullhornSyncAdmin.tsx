@@ -163,7 +163,11 @@ function getExpectedTotal(job: BullhornSyncJob | null | undefined): number | nul
   return null;
 }
 
-export default function BullhornSyncAdmin() {
+interface BullhornSyncAdminProps {
+  tableOnly?: boolean;
+}
+
+export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdminProps) {
   const profileName = useProfileName();
   const navigate = useNavigate();
   const [syncJobs, setSyncJobs] = useState<BullhornSyncJob[]>([]);
@@ -183,12 +187,13 @@ export default function BullhornSyncAdmin() {
       navigate("/");
       return;
     }
-    if (profileName === ADMIN_PROFILE) {
+    if (profileName === ADMIN_PROFILE && !tableOnly) {
       loadBullhornSyncData();
     }
-  }, [profileName, navigate]);
+  }, [profileName, navigate, tableOnly]);
 
   useEffect(() => {
+    if (tableOnly) return;
     const activeJob = syncJobs.find((job) => job.status === "queued" || job.status === "running");
     if (!activeJob || profileName !== ADMIN_PROFILE) return;
 
@@ -198,7 +203,7 @@ export default function BullhornSyncAdmin() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [syncJobs, profileName]);
+  }, [syncJobs, profileName, tableOnly]);
 
   const loadBullhornSyncData = async (options: { silent?: boolean } = {}) => {
     if (!options.silent) setSyncJobLoading(true);
@@ -324,121 +329,126 @@ export default function BullhornSyncAdmin() {
   };
 
   return (
-    <AppLayout title="Contact Sync" description="Background read-only sync of Bullhorn contacts (ClientContact)">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Database className="h-5 w-5" />
-                Bullhorn Contact Sync
-              </CardTitle>
-              <CardDescription>
-                Full read-only sync from Bullhorn ClientContact (no write/delete operations against Bullhorn).
-              </CardDescription>
+    <AppLayout
+      title="Contact Sync"
+      description={tableOnly ? "Bullhorn mirrored ClientContact table view" : "Background read-only sync of Bullhorn contacts (ClientContact)"}
+    >
+      {!tableOnly && (
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-5 w-5" />
+                  Bullhorn Contact Sync
+                </CardTitle>
+                <CardDescription>
+                  Full read-only sync from Bullhorn ClientContact (no write/delete operations against Bullhorn).
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadBullhornSyncData()}
+                  disabled={syncJobLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => startSync("test")}
+                  disabled={syncActionLoading || !!activeSyncJob}
+                >
+                  {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start 5-Contact Test"}
+                </Button>
+                <Button size="sm" onClick={() => startSync("full")} disabled={syncActionLoading || !!activeSyncJob}>
+                  {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start Full Contact Sync"}
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => loadBullhornSyncData()}
-                disabled={syncJobLoading}
-              >
-                <RefreshCw className={`h-4 w-4 ${syncJobLoading ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => startSync("test")}
-                disabled={syncActionLoading || !!activeSyncJob}
-              >
-                {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start 5-Contact Test"}
-              </Button>
-              <Button size="sm" onClick={() => startSync("full")} disabled={syncActionLoading || !!activeSyncJob}>
-                {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start Full Contact Sync"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-md border p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Mirrored Contacts</p>
-              <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
-            </div>
-            <div className="rounded-md border p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Sync Run</p>
-              <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
-              {latestSyncJob && (
-                <Badge variant="outline" className={`mt-2 ${getStatusColor(latestSyncJob.status)}`}>
-                  {latestSyncJob.status}
-                </Badge>
-              )}
-            </div>
-            <div className="rounded-md border p-3">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
-              <p className="font-medium">
-                {latestSyncJob
-                  ? latestExpectedTotal
-                    ? `${latestSyncJob.total_synced.toLocaleString()} / ${latestExpectedTotal.toLocaleString()}`
-                    : `${latestSyncJob.total_synced.toLocaleString()} synced`
-                  : "-"}
-              </p>
-              <Progress value={progressPercent} className="mt-2 h-2" />
-            </div>
-          </div>
-
-          <ScrollArea className="h-[320px]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Run</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Synced</TableHead>
-                  <TableHead className="text-right">Expected</TableHead>
-                  <TableHead className="text-right">Started</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {syncJobs.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                      No sync runs yet
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  syncJobs.map((job) => {
-                    const expectedTotal = getExpectedTotal(job);
-                    return (
-                      <TableRow key={job.id}>
-                        <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={getStatusColor(job.status)}>
-                            {job.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">
-                          {expectedTotal ? expectedTotal.toLocaleString() : "-"}
-                        </TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground">
-                          <div className="flex items-center justify-end gap-1">
-                            <Clock className="h-3 w-3" />
-                            {job.started_at
-                              ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
-                              : "-"}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Mirrored Contacts</p>
+                <p className="text-2xl font-semibold">{mirrorCount.toLocaleString()}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Latest Sync Run</p>
+                <p className="font-medium">{latestSyncJob?.id?.slice(0, 8) || "-"}</p>
+                {latestSyncJob && (
+                  <Badge variant="outline" className={`mt-2 ${getStatusColor(latestSyncJob.status)}`}>
+                    {latestSyncJob.status}
+                  </Badge>
                 )}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        </CardContent>
-      </Card>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Progress</p>
+                <p className="font-medium">
+                  {latestSyncJob
+                    ? latestExpectedTotal
+                      ? `${latestSyncJob.total_synced.toLocaleString()} / ${latestExpectedTotal.toLocaleString()}`
+                      : `${latestSyncJob.total_synced.toLocaleString()} synced`
+                    : "-"}
+                </p>
+                <Progress value={progressPercent} className="mt-2 h-2" />
+              </div>
+            </div>
+
+            <ScrollArea className="h-[320px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Run</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Synced</TableHead>
+                    <TableHead className="text-right">Expected</TableHead>
+                    <TableHead className="text-right">Started</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {syncJobs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                        No sync runs yet
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    syncJobs.map((job) => {
+                      const expectedTotal = getExpectedTotal(job);
+                      return (
+                        <TableRow key={job.id}>
+                          <TableCell className="font-mono text-xs">{job.id.slice(0, 12)}...</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={getStatusColor(job.status)}>
+                              {job.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">{job.total_synced.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">
+                            {expectedTotal ? expectedTotal.toLocaleString() : "-"}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            <div className="flex items-center justify-end gap-1">
+                              <Clock className="h-3 w-3" />
+                              {job.started_at
+                                ? formatDistanceToNow(new Date(job.started_at), { addSuffix: true })
+                                : "-"}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
