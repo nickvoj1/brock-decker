@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -358,6 +359,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ContactSortKey>("id");
   const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -614,6 +616,49 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     return rows;
   }, [contacts, sortDirection, sortKey]);
 
+  const visibleContactIds = useMemo(
+    () => displayedContacts.map(({ contact }) => contact.bullhorn_id),
+    [displayedContacts],
+  );
+
+  useEffect(() => {
+    setSelectedContactIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visibleSet = new Set(visibleContactIds);
+      const next = new Set(Array.from(prev).filter((id) => visibleSet.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visibleContactIds]);
+
+  const allVisibleSelected = visibleContactIds.length > 0 && visibleContactIds.every((id) => selectedContactIds.has(id));
+  const partiallySelected = !allVisibleSelected && visibleContactIds.some((id) => selectedContactIds.has(id));
+
+  const toggleSelectAllVisible = useCallback((checked: boolean | "indeterminate") => {
+    setSelectedContactIds((prev) => {
+      if (visibleContactIds.length === 0) return prev;
+      const shouldSelectAll = checked !== false;
+      const next = new Set(prev);
+      if (shouldSelectAll) {
+        visibleContactIds.forEach((id) => next.add(id));
+      } else {
+        visibleContactIds.forEach((id) => next.delete(id));
+      }
+      return next;
+    });
+  }, [visibleContactIds]);
+
+  const toggleSelectContact = useCallback((bullhornId: number, checked: boolean | "indeterminate") => {
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      if (checked !== false) {
+        next.add(bullhornId);
+      } else {
+        next.delete(bullhornId);
+      }
+      return next;
+    });
+  }, []);
+
   const toggleSort = (key: ContactSortKey) => {
     if (sortKey === key) {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -634,7 +679,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     ? "h-8 w-full justify-between rounded-md px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/85 hover:bg-primary/15"
     : "h-7 px-1 text-sm font-medium";
   const stickyHeadBaseClass = tableOnly
-    ? "sticky top-0 z-30 h-11 bg-gradient-to-b from-card via-card to-muted/30 text-foreground/80 shadow-[inset_0_-1px_0_hsl(var(--border)/0.8)]"
+    ? "sticky top-0 z-30 h-11 bg-card text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]"
     : "";
 
   return (
@@ -761,7 +806,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
       <Card className={tableOnly ? "border-0 bg-transparent shadow-none -mx-4 md:-mx-6 lg:-mx-7 h-[calc(100dvh-6rem)] md:h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-8rem)] flex flex-col overflow-hidden" : undefined}>
         <CardHeader
-          className={tableOnly ? "border-b bg-background/95" : undefined}
+          className={tableOnly ? "border-b bg-background" : undefined}
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex w-full max-w-[680px] items-center gap-2">
@@ -939,11 +984,24 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full overflow-y-scroll overflow-x-scroll crm-grid-shell pr-3" : "overflow-x-auto"}`}>
             <table className="w-[2600px] min-w-[2600px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
-                <TableRow className={tableOnly ? "border-b border-border/70 bg-muted/15 hover:bg-muted/15" : "border-0 hover:bg-transparent"}>
-                  <TableHead className={`${stickyHeadBaseClass} w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("id")}>
-                      ID {renderSortIcon("id")}
-                    </Button>
+                <TableRow className={tableOnly ? "border-b border-border/70 bg-card hover:bg-card" : "border-0 hover:bg-transparent"}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[140px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        checked={allVisibleSelected ? true : partiallySelected ? "indeterminate" : false}
+                        onCheckedChange={toggleSelectAllVisible}
+                        aria-label="Select all visible contacts"
+                        className="h-4 w-4 shrink-0 border-border"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`${headerSortButtonClass} ${tableOnly ? "w-auto min-w-0 flex-1 justify-between px-1.5" : ""}`}
+                        onClick={() => toggleSort("id")}
+                      >
+                        ID {renderSortIcon("id")}
+                      </Button>
+                    </div>
                   </TableHead>
                   <TableHead className={`${stickyHeadBaseClass} w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("name")}>
@@ -1040,7 +1098,17 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                             : "border-0 hover:bg-transparent"
                         }
                       >
-                        <TableCell className={`w-[95px] whitespace-nowrap py-3 font-mono text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{contact.bullhorn_id}</TableCell>
+                        <TableCell className={`w-[140px] whitespace-nowrap py-3 font-mono text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={selectedContactIds.has(contact.bullhorn_id)}
+                              onCheckedChange={(checked) => toggleSelectContact(contact.bullhorn_id, checked)}
+                              aria-label={`Select contact ${contact.bullhorn_id}`}
+                              className="h-4 w-4 shrink-0 border-border"
+                            />
+                            <span>{contact.bullhorn_id}</span>
+                          </div>
+                        </TableCell>
                         <TableCell className={`w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={fullName}>
                           <span className="block truncate">{fullName}</span>
                         </TableCell>
