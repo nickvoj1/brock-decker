@@ -95,8 +95,8 @@ export function AppSidebar() {
 
   useEffect(() => {
     if (!location.pathname.startsWith("/crm/")) return;
-    if (consoleMode !== "CRM System") setConsoleMode("CRM System");
-  }, [location.pathname, consoleMode]);
+    setConsoleMode((prev) => (prev === "CRM System" ? prev : "CRM System"));
+  }, [location.pathname]);
 
   useEffect(() => {
     const refreshFromStorage = () => {
