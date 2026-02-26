@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Database, RefreshCw, Clock, Plus, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -237,6 +238,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [contactsSearch, setContactsSearch] = useState("");
   const [filterRows, setFilterRows] = useState<ContactFilterDraftRow[]>([]);
   const [appliedFilters, setAppliedFilters] = useState<BullhornContactFilterRow[]>([]);
+  const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
   const contactsScrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -557,12 +559,6 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       <Card className={tableOnly ? "border-0 bg-transparent shadow-none" : undefined}>
         <CardHeader>
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <CardTitle>Synced Contacts</CardTitle>
-              <CardDescription>
-                Bullhorn-style grid with core CRM columns. Additional mirrored fields remain stored in raw payload.
-              </CardDescription>
-            </div>
             <div className="flex w-full max-w-[680px] items-center gap-2">
               <Input
                 value={contactsSearchDraft}
@@ -571,9 +567,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               />
               <Button
                 variant="outline"
+                onClick={() => setIsFiltersDialogOpen(true)}
+              >
+                Filters{appliedFilters.length ? ` (${appliedFilters.length})` : ""}
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => {
                   setContactsSearch(contactsSearchDraft.trim());
-                  setAppliedFilters(buildAppliedFilters(filterRows));
                 }}
               >
                 Search
@@ -598,91 +599,129 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </Button>
             </div>
           </div>
-          <div className="mt-3 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
+        </CardHeader>
+        <Dialog open={isFiltersDialogOpen} onOpenChange={setIsFiltersDialogOpen}>
+          <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Contact Filters</DialogTitle>
+              <DialogDescription>
+                Same row values = OR. Different rows = AND.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setFilterRows((prev) => [...prev, createFilterDraftRow()])}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Add Filter Row
+                </Button>
+              </div>
+
+              {filterRows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No filters added yet.
+                </p>
+              ) : (
+                filterRows.map((row) => (
+                  <div key={row.id} className="grid grid-cols-12 gap-2">
+                    <div className="col-span-12 md:col-span-3">
+                      <Select
+                        value={row.field}
+                        onValueChange={(value) =>
+                          setFilterRows((prev) =>
+                            prev.map((item) => (item.id === row.id ? { ...item, field: value as BullhornContactFilterField } : item)),
+                          )
+                        }
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Field" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FILTER_FIELD_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-12 md:col-span-2">
+                      <Select
+                        value={row.operator}
+                        onValueChange={(value) =>
+                          setFilterRows((prev) =>
+                            prev.map((item) => (item.id === row.id ? { ...item, operator: value as BullhornContactFilterOperator } : item)),
+                          )
+                        }
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue placeholder="Operator" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FILTER_OPERATOR_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-11 md:col-span-6">
+                      <Input
+                        className="h-9"
+                        value={row.valueInput}
+                        onChange={(e) =>
+                          setFilterRows((prev) =>
+                            prev.map((item) => (item.id === row.id ? { ...item, valueInput: e.target.value } : item)),
+                          )
+                        }
+                        placeholder="Values (comma separated for OR)"
+                      />
+                    </div>
+                    <div className="col-span-1 md:col-span-1">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => setFilterRows((prev) => prev.filter((item) => item.id !== row.id))}
+                        aria-label="Remove filter row"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button
                 variant="outline"
-                size="sm"
-                onClick={() => setFilterRows((prev) => [...prev, createFilterDraftRow()])}
+                onClick={() => {
+                  setFilterRows([]);
+                  setAppliedFilters([]);
+                }}
               >
-                <Plus className="mr-1 h-3.5 w-3.5" />
-                Add Filter Row
+                Clear Filters
               </Button>
-              <p className="text-xs text-muted-foreground">
-                Same row values = OR. Different rows = AND.
-              </p>
-            </div>
-            {filterRows.map((row) => (
-              <div key={row.id} className="grid grid-cols-12 gap-2">
-                <div className="col-span-12 md:col-span-3">
-                  <Select
-                    value={row.field}
-                    onValueChange={(value) =>
-                      setFilterRows((prev) =>
-                        prev.map((item) => (item.id === row.id ? { ...item, field: value as BullhornContactFilterField } : item)),
-                      )
-                    }
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Field" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FILTER_FIELD_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="col-span-12 md:col-span-2">
-                  <Select
-                    value={row.operator}
-                    onValueChange={(value) =>
-                      setFilterRows((prev) =>
-                        prev.map((item) => (item.id === row.id ? { ...item, operator: value as BullhornContactFilterOperator } : item)),
-                      )
-                    }
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Operator" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FILTER_OPERATOR_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="col-span-11 md:col-span-6">
-                  <Input
-                    className="h-9"
-                    value={row.valueInput}
-                    onChange={(e) =>
-                      setFilterRows((prev) =>
-                        prev.map((item) => (item.id === row.id ? { ...item, valueInput: e.target.value } : item)),
-                      )
-                    }
-                    placeholder="Values (comma separated for OR)"
-                  />
-                </div>
-                <div className="col-span-1 md:col-span-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-9 w-9"
-                    onClick={() => setFilterRows((prev) => prev.filter((item) => item.id !== row.id))}
-                    aria-label="Remove filter row"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardHeader>
+              <Button variant="outline" onClick={() => setIsFiltersDialogOpen(false)}>
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  setAppliedFilters(buildAppliedFilters(filterRows));
+                  setIsFiltersDialogOpen(false);
+                }}
+              >
+                Apply Filters
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7" : "space-y-3"}>
           <ScrollArea
             ref={contactsScrollAreaRef}
