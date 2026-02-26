@@ -1,4 +1,4 @@
-// Uses built-in Deno.serve
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -74,6 +74,8 @@ const SKILL_OVERLAY_FIELDS = [
   "state",
   ...CUSTOM_SKILL_OVERLAY_FIELDS,
 ].join(",");
+const SKILL_KEY_REGEX = /(skill|special|categor|expert|industry|sector|keyword|tag)/i;
+const CUSTOM_FIELD_REGEX = /^custom(textblock|text|object|int|date)\d+$/i;
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -216,6 +218,67 @@ function hasMeaningfulValue(value: unknown): boolean {
   return false;
 }
 
+function valueToSkillTerms(value: unknown): string[] {
+  if (!hasMeaningfulValue(value)) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => valueToSkillTerms(item));
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    if (typeof record.name === "string" && record.name.trim()) return [record.name.trim()];
+    if (typeof record.value === "string" && record.value.trim()) return [record.value.trim()];
+    return Object.values(record).flatMap((entry) => valueToSkillTerms(entry));
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return [];
+  if (raw.length > 450) return [];
+  if (raw.includes("@") && !raw.includes(";")) return [];
+
+  const delimiterRegex = /[;|,]/;
+  if (!delimiterRegex.test(raw)) {
+    if (raw.length <= 80 && raw.split(/\s+/).length <= 6) return [raw];
+    return [];
+  }
+
+  const tokens = raw
+    .split(/[;|,]/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && token.length <= 60);
+  if (tokens.length > 60) return [];
+  return tokens;
+}
+
+function deriveCanonicalSkills(contact: any): void {
+  if (!contact || typeof contact !== "object") return;
+  if (hasMeaningfulValue(contact.skills) && hasMeaningfulValue(contact.skillsCount)) return;
+
+  const terms: string[] = [];
+  const seen = new Set<string>();
+  for (const [key, value] of Object.entries(contact)) {
+    if (!value) continue;
+    const lower = key.toLowerCase();
+    if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
+    for (const rawTerm of valueToSkillTerms(value)) {
+      const term = rawTerm.trim();
+      if (!term) continue;
+      const dedupe = term.toLowerCase();
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      terms.push(term);
+    }
+  }
+
+  if (!hasMeaningfulValue(contact.skills) && terms.length) {
+    contact.skills = terms.join(" ; ");
+  }
+  if (!hasMeaningfulValue(contact.skillsCount) && terms.length) {
+    contact.skillsCount = terms.length;
+  }
+}
+
 function hasSkillsPayload(contact: any): boolean {
   if (!contact || typeof contact !== "object") return false;
   const candidateKeys = [
@@ -267,6 +330,15 @@ function mergeOverlayIntoContact(contact: any, overlay: any): any {
       contact[key] = overlay[key];
     }
   }
+
+  for (const [key, value] of Object.entries(overlay)) {
+    const lower = key.toLowerCase();
+    if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
+    if (!hasMeaningfulValue(contact[key]) && hasMeaningfulValue(value)) {
+      contact[key] = value;
+    }
+  }
+
   return contact;
 }
 
@@ -532,6 +604,46 @@ async function fetchSkillOverlayForIds(
   return overlayById;
 }
 
+async function fetchWildcardOverlayBatch(
+  restUrl: string,
+  bhRestToken: string,
+  start: number,
+  count: number,
+  includeDeleted: boolean,
+): Promise<Map<number, any>> {
+  const overlayById = new Map<number, any>();
+  const whereClause = includeDeleted ? "id>0" : "isDeleted=false";
+  const queryUrl = `${restUrl}query/ClientContact?BhRestToken=${encodeURIComponent(
+    bhRestToken,
+  )}&fields=${encodeURIComponent("*")}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await fetch(queryUrl);
+    if (response.status === 429) {
+      await new Promise((resolve) => setTimeout(resolve, 600 + attempt * 500));
+      continue;
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.warn(
+        `[bullhorn-sync-clientcontacts] Wildcard overlay query failed (${response.status}): ${body.slice(0, 180)}`,
+      );
+      return overlayById;
+    }
+
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    for (const row of rows) {
+      const id = Number(row?.id);
+      if (!Number.isFinite(id)) continue;
+      overlayById.set(id, row);
+    }
+    return overlayById;
+  }
+
+  return overlayById;
+}
+
 async function fetchClientContactsBatch(
   restUrl: string,
   bhRestToken: string,
@@ -631,14 +743,23 @@ async function fetchClientContactsBatch(
     const totalRaw = payload?.total;
     const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
 
-    // deno-lint-ignore no-explicit-any
-    const rowsWithSkillsBefore = rows.filter((row: any) => hasSkillsPayload(row)).length;
+    const rowsWithSkillsBefore = rows.filter((row) => hasSkillsPayload(row)).length;
     if (rows.length && rowsWithSkillsBefore < rows.length) {
-      // deno-lint-ignore no-explicit-any
+      const wildcardOverlay = await fetchWildcardOverlayBatch(restUrl, bhRestToken, start, count, includeDeleted);
+      if (wildcardOverlay.size) {
+        for (const row of rows) {
+          const id = Number(row?.id);
+          if (!Number.isFinite(id)) continue;
+          const overlay = wildcardOverlay.get(id);
+          if (!overlay) continue;
+          mergeOverlayIntoContact(row, overlay);
+        }
+      }
+
       const missingIds = rows
-        .filter((row: any) => !hasSkillsPayload(row))
-        .map((row: any) => Number(row?.id))
-        .filter((id: any) => Number.isFinite(id));
+        .filter((row) => !hasSkillsPayload(row))
+        .map((row) => Number(row?.id))
+        .filter((id) => Number.isFinite(id));
       if (missingIds.length) {
         const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds);
         if (overlayById.size) {
@@ -653,8 +774,11 @@ async function fetchClientContactsBatch(
       }
     }
 
-    // deno-lint-ignore no-explicit-any
-    const rowsWithSkillsAfter = rows.filter((row: any) => hasSkillsPayload(row)).length;
+    for (const row of rows) {
+      deriveCanonicalSkills(row);
+    }
+
+    const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
     const skillKeys = firstRow && typeof firstRow === "object"
       ? Object.keys(firstRow).filter((key) => {
@@ -893,7 +1017,7 @@ async function processSyncJob(
   await queueContinuation(supabaseUrl, supabaseServiceKey, job.id, job.batch_size, maxBatchesPerInvocation);
 }
 
-Deno.serve(async (req) => {
+serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
