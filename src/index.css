@@ -346,6 +346,37 @@
     background-color: hsl(var(--muted) / 0.55) !important;
   }
 
+  .crm-grid-shell {
+    scrollbar-gutter: stable both-edges;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary) / 0.72) hsl(var(--muted) / 0.72);
+  }
+
+  .crm-grid-shell::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  .crm-grid-shell::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.74);
+    border-left: 1px solid hsl(var(--border) / 0.42);
+    border-top: 1px solid hsl(var(--border) / 0.42);
+  }
+
+  .crm-grid-shell::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, hsl(var(--primary) / 0.85), hsl(var(--primary) / 0.62));
+    border: 2px solid hsl(var(--muted) / 0.85);
+    border-radius: 9999px;
+  }
+
+  .crm-grid-shell::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, hsl(var(--primary) / 0.95), hsl(var(--primary) / 0.74));
+  }
+
+  .crm-grid-shell::-webkit-scrollbar-corner {
+    background: hsl(var(--muted) / 0.82);
+  }
+
   .depth-header {
     @apply border-b border-border/70 bg-background/95;
     box-shadow:

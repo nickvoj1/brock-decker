@@ -481,8 +481,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
     const maybeLoadMore = () => {
       if (contactsLoading || isLoadingMore || !hasMoreContacts) return;
-      const viewportHost = tableViewportRef.current;
-      const viewport = viewportHost?.firstElementChild as HTMLDivElement | null;
+      const viewport = tableViewportRef.current;
       if (!viewport) return;
       const viewportHeight = viewport.clientHeight || 0;
       const scrollTop = viewport.scrollTop || 0;
@@ -492,8 +491,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       void loadBullhornMirrorContacts({ silent: true, append: true, offset: contactsOffset });
     };
 
-    const viewportHost = tableViewportRef.current;
-    const viewport = viewportHost?.firstElementChild as HTMLDivElement | null;
+    const viewport = tableViewportRef.current;
     if (!viewport) return;
 
     viewport.addEventListener("scroll", maybeLoadMore, { passive: true });
@@ -632,6 +630,13 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       : <ArrowDown className="ml-1 h-3.5 w-3.5" />;
   };
 
+  const headerSortButtonClass = tableOnly
+    ? "h-8 w-full justify-between rounded-md px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/85 hover:bg-primary/15"
+    : "h-7 px-1 text-sm font-medium";
+  const stickyHeadBaseClass = tableOnly
+    ? "sticky top-0 z-30 h-11 bg-gradient-to-b from-card via-card to-muted/30 text-foreground/80 shadow-[inset_0_-1px_0_hsl(var(--border)/0.8)]"
+    : "";
+
   return (
     <AppLayout
       title="Contact Sync"
@@ -754,7 +759,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         </Card>
       )}
 
-      <Card className={tableOnly ? "border-0 bg-transparent shadow-none -mx-4 md:-mx-6 lg:-mx-7 -mb-4 md:-mb-6 lg:-mb-7 h-[calc(100dvh-4rem)] md:h-[calc(100dvh-4.5rem)] flex flex-col" : undefined}>
+      <Card className={tableOnly ? "border-0 bg-transparent shadow-none -mx-4 md:-mx-6 lg:-mx-7 h-[calc(100dvh-6rem)] md:h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-8rem)] flex flex-col overflow-hidden" : undefined}>
         <CardHeader
           className={tableOnly ? "border-b bg-background/95" : undefined}
         >
@@ -931,72 +936,72 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 : ""
             }`}
           >
-            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full [&>div]:h-full [&>div]:overflow-y-scroll [&>div]:overflow-x-scroll" : "overflow-x-auto"}`}>
+            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full crm-grid-shell" : "overflow-x-auto"}`}>
             <Table className="w-[2200px] table-fixed text-base">
-              <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-background/95 [&_th]:backdrop-blur" : "[&_tr]:border-0"}>
-                <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
-                  <TableHead className={`w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("id")}>
+              <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
+                <TableRow className={tableOnly ? "border-b border-border/70 bg-muted/15 hover:bg-muted/15" : "border-0 hover:bg-transparent"}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("id")}>
                       ID {renderSortIcon("id")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("name")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("name")}>
                       Name {renderSortIcon("name")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("jobTitle")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("jobTitle")}>
                       Job Title {renderSortIcon("jobTitle")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("company")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("company")}>
                       Company {renderSortIcon("company")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("workEmail")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("workEmail")}>
                       Work Email {renderSortIcon("workEmail")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("status")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("status")}>
                       Status {renderSortIcon("status")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("workPhone")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("workPhone")}>
                       Work Phone {renderSortIcon("workPhone")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("consultant")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("consultant")}>
                       Consultant {renderSortIcon("consultant")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("address")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("address")}>
                       Address {renderSortIcon("address")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("lastVisit")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("lastVisit")}>
                       Last Visit {renderSortIcon("lastVisit")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("dateAdded")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("dateAdded")}>
                       Date Added {renderSortIcon("dateAdded")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("dateLastModified")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("dateLastModified")}>
                       Last Modified {renderSortIcon("dateLastModified")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("skills")}>
+                  <TableHead className={`${stickyHeadBaseClass} w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("skills")}>
                       Skills {renderSortIcon("skills")}
                     </Button>
                   </TableHead>
