@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -23,21 +23,6 @@ import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
 const CONTACTS_PAGE_SIZE = 25;
-const CORE_RAW_COLUMN_KEYS = new Set([
-  "id",
-  "name",
-  "occupation",
-  "clientCorporation",
-  "email",
-  "status",
-  "phone",
-  "owner",
-  "address",
-  "lastVisit",
-  "dateAdded",
-  "dateLastModified",
-  "skills",
-]);
 const SKILLS_CANDIDATE_KEYS = [
   "skills",
   "skill",
@@ -307,20 +292,6 @@ export default function BullhornSyncAdmin() {
   const totalContactPages = Math.max(1, Math.ceil(contactsTotal / CONTACTS_PAGE_SIZE));
   const pageStart = contactsTotal === 0 ? 0 : (contactsPage - 1) * CONTACTS_PAGE_SIZE + 1;
   const pageEnd = Math.min(contactsPage * CONTACTS_PAGE_SIZE, contactsTotal);
-  const rawColumns = useMemo(() => {
-    const columns = new Set<string>();
-    contacts.forEach((contact) => {
-      if (contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)) {
-        Object.keys(contact.raw).forEach((key) => columns.add(key));
-      }
-    });
-    return Array.from(columns).sort((a, b) => a.localeCompare(b));
-  }, [contacts]);
-  const extraRawColumns = useMemo(
-    () => rawColumns.filter((column) => !CORE_RAW_COLUMN_KEYS.has(column)),
-    [rawColumns],
-  );
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case "success":
@@ -461,7 +432,7 @@ export default function BullhornSyncAdmin() {
             <div>
               <CardTitle>Synced Contacts</CardTitle>
               <CardDescription>
-                Bullhorn-style grid with core CRM columns + all additional mirrored fields ({extraRawColumns.length} extra columns)
+                Bullhorn-style grid with core CRM columns. Additional mirrored fields remain stored in raw payload.
               </CardDescription>
             </div>
             <div className="flex w-full max-w-[680px] items-center gap-2">
@@ -514,20 +485,12 @@ export default function BullhornSyncAdmin() {
                   <TableHead className="whitespace-nowrap">Date Added</TableHead>
                   <TableHead className="whitespace-nowrap">Last Modified</TableHead>
                   <TableHead className="whitespace-nowrap">Skills</TableHead>
-                  {extraRawColumns.map((column) => (
-                    <TableHead key={column} className="whitespace-nowrap">
-                      {column}
-                    </TableHead>
-                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {contacts.length === 0 ? (
                   <TableRow>
-                    <TableCell
-                      colSpan={Math.max(14, extraRawColumns.length + 14)}
-                      className="text-center text-sm text-muted-foreground"
-                    >
+                    <TableCell colSpan={14} className="text-center text-sm text-muted-foreground">
                       {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
                     </TableCell>
                   </TableRow>
@@ -586,26 +549,6 @@ export default function BullhornSyncAdmin() {
                         <TableCell className="max-w-[260px] text-xs py-2" title={skills}>
                           {skills.length > 120 ? `${skills.slice(0, 117)}...` : skills}
                         </TableCell>
-                        {extraRawColumns.map((column) => {
-                          const rawValue = formatMirrorValue(rawRecord[column]);
-                          const displayValue = rawValue.length > 140 ? `${rawValue.slice(0, 137)}...` : rawValue;
-                          const isEmailColumn = column.toLowerCase() === "email" && rawValue.includes("@");
-                          return (
-                            <TableCell
-                              key={`${contact.bullhorn_id}-${column}`}
-                              className="max-w-[300px] text-xs align-top py-2"
-                              title={rawValue}
-                            >
-                              {isEmailColumn ? (
-                                <a href={`mailto:${rawValue}`} className="text-primary hover:underline">
-                                  {displayValue}
-                                </a>
-                              ) : (
-                                displayValue
-                              )}
-                            </TableCell>
-                          );
-                        })}
                       </TableRow>
                     );
                   })
