@@ -92,6 +92,71 @@ function resetRateLimit(profileName: string): void {
   rateLimitMap.delete(profileName);
 }
 
+const RETRY_DELAYS_MS = [150, 450, 1000];
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && error !== null) {
+    const maybe = error as { message?: unknown; details?: unknown; error?: unknown };
+    if (typeof maybe.message === "string" && maybe.message.trim().length > 0) return maybe.message;
+    if (typeof maybe.error === "string" && maybe.error.trim().length > 0) return maybe.error;
+    if (typeof maybe.details === "string" && maybe.details.trim().length > 0) return maybe.details;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  return "Unknown error";
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  const message = extractErrorMessage(error).toLowerCase();
+  return (
+    message.includes("connection reset") ||
+    message.includes("sendrequest") ||
+    message.includes("network") ||
+    message.includes("fetch failed") ||
+    message.includes("timed out") ||
+    message.includes("temporarily unavailable") ||
+    message.includes("econnreset") ||
+    message.includes("socket") ||
+    message.includes("tls")
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runQueryWithRetry<T>(
+  label: string,
+  queryFn: () => Promise<{ data: T; error: unknown }>,
+): Promise<{ data: T; error: unknown }> {
+  let lastTransientError: unknown = null;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const result = await queryFn();
+      if (!result.error) return result;
+
+      if (!isTransientNetworkError(result.error)) return result;
+      lastTransientError = result.error;
+    } catch (error) {
+      if (!isTransientNetworkError(error)) throw error;
+      lastTransientError = error;
+    }
+
+    if (attempt >= RETRY_DELAYS_MS.length) break;
+    const delay = RETRY_DELAYS_MS[attempt];
+    console.warn(`[verify-profile-pin] transient error on ${label}; retrying in ${delay}ms`);
+    await sleep(delay);
+  }
+
+  throw lastTransientError ?? new Error(`Transient error in ${label}`);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -113,11 +178,13 @@ serve(async (req) => {
 
     // Check if profile has a PIN set
     if (action === "check") {
-      const { data, error } = await supabase
-        .from("profile_pins")
-        .select("id, reset_requested_at")
-        .eq("profile_name", profileName)
-        .maybeSingle();
+      const { data, error } = await runQueryWithRetry("check-pin", () =>
+        supabase
+          .from("profile_pins")
+          .select("id, reset_requested_at")
+          .eq("profile_name", profileName)
+          .maybeSingle()
+      );
 
       if (error) throw error;
 
@@ -144,25 +211,32 @@ serve(async (req) => {
       const { hash: pinHash, salt } = await hashPin(pin);
 
       // Check if already exists
-      const { data: existing } = await supabase
-        .from("profile_pins")
-        .select("id")
-        .eq("profile_name", profileName)
-        .maybeSingle();
+      const { data: existing, error: existingError } = await runQueryWithRetry("get-existing-pin", () =>
+        supabase
+          .from("profile_pins")
+          .select("id")
+          .eq("profile_name", profileName)
+          .maybeSingle()
+      );
+      if (existingError) throw existingError;
 
       if (existing) {
         // Update existing with new hash and salt
-        const { error } = await supabase
-          .from("profile_pins")
-          .update({ pin_hash: pinHash, salt: salt, reset_requested_at: null })
-          .eq("profile_name", profileName);
+        const { error } = await runQueryWithRetry("update-pin", () =>
+          supabase
+            .from("profile_pins")
+            .update({ pin_hash: pinHash, salt: salt, reset_requested_at: null })
+            .eq("profile_name", profileName)
+        );
 
         if (error) throw error;
       } else {
         // Insert new with hash and salt
-        const { error } = await supabase
-          .from("profile_pins")
-          .insert({ profile_name: profileName, pin_hash: pinHash, salt: salt });
+        const { error } = await runQueryWithRetry("insert-pin", () =>
+          supabase
+            .from("profile_pins")
+            .insert({ profile_name: profileName, pin_hash: pinHash, salt: salt })
+        );
 
         if (error) throw error;
       }
@@ -193,11 +267,13 @@ serve(async (req) => {
         );
       }
 
-      const { data, error } = await supabase
-        .from("profile_pins")
-        .select("pin_hash, salt")
-        .eq("profile_name", profileName)
-        .maybeSingle();
+      const { data, error } = await runQueryWithRetry("verify-pin-load", () =>
+        supabase
+          .from("profile_pins")
+          .select("pin_hash, salt")
+          .eq("profile_name", profileName)
+          .maybeSingle()
+      );
 
       if (error) throw error;
 
@@ -223,10 +299,13 @@ serve(async (req) => {
         // If valid legacy hash, migrate to new secure hash
         if (isValid) {
           const { hash: newHash, salt: newSalt } = await hashPin(pin);
-          await supabase
-            .from("profile_pins")
-            .update({ pin_hash: newHash, salt: newSalt })
-            .eq("profile_name", profileName);
+          const { error: migrationError } = await runQueryWithRetry("migrate-legacy-pin", () =>
+            supabase
+              .from("profile_pins")
+              .update({ pin_hash: newHash, salt: newSalt })
+              .eq("profile_name", profileName)
+          );
+          if (migrationError) throw migrationError;
           console.log(`Migrated PIN hash for ${profileName} to PBKDF2`);
         }
       }
@@ -244,10 +323,12 @@ serve(async (req) => {
 
     // Request PIN reset (by user who forgot their PIN)
     if (action === "request-reset") {
-      const { error } = await supabase
-        .from("profile_pins")
-        .update({ reset_requested_at: new Date().toISOString() })
-        .eq("profile_name", profileName);
+      const { error } = await runQueryWithRetry("request-pin-reset", () =>
+        supabase
+          .from("profile_pins")
+          .update({ reset_requested_at: new Date().toISOString() })
+          .eq("profile_name", profileName)
+      );
 
       if (error) throw error;
 
@@ -259,12 +340,14 @@ serve(async (req) => {
 
     // Check if user is admin
     if (action === "check-admin") {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", profileName)
-        .eq("role", "admin")
-        .maybeSingle();
+      const { data, error } = await runQueryWithRetry("check-admin", () =>
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", profileName)
+          .eq("role", "admin")
+          .maybeSingle()
+      );
 
       if (error) throw error;
 
@@ -284,12 +367,15 @@ serve(async (req) => {
       }
 
       // Verify admin status
-      const { data: adminData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", adminProfile)
-        .eq("role", "admin")
-        .maybeSingle();
+      const { data: adminData, error: adminError } = await runQueryWithRetry("list-reset-requests-admin-check", () =>
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", adminProfile)
+          .eq("role", "admin")
+          .maybeSingle()
+      );
+      if (adminError) throw adminError;
 
       if (!adminData) {
         return new Response(
@@ -298,11 +384,13 @@ serve(async (req) => {
         );
       }
 
-      const { data, error } = await supabase
-        .from("profile_pins")
-        .select("profile_name, reset_requested_at")
-        .not("reset_requested_at", "is", null)
-        .order("reset_requested_at", { ascending: false });
+      const { data, error } = await runQueryWithRetry("list-reset-requests", () =>
+        supabase
+          .from("profile_pins")
+          .select("profile_name, reset_requested_at")
+          .not("reset_requested_at", "is", null)
+          .order("reset_requested_at", { ascending: false })
+      );
 
       if (error) throw error;
 
@@ -322,12 +410,15 @@ serve(async (req) => {
       }
 
       // Verify admin status
-      const { data: adminData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", adminProfile)
-        .eq("role", "admin")
-        .maybeSingle();
+      const { data: adminData, error: adminError } = await runQueryWithRetry("admin-reset-admin-check", () =>
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", adminProfile)
+          .eq("role", "admin")
+          .maybeSingle()
+      );
+      if (adminError) throw adminError;
 
       if (!adminData) {
         return new Response(
@@ -337,10 +428,12 @@ serve(async (req) => {
       }
 
       // Delete the PIN so user can set a new one
-      const { error } = await supabase
-        .from("profile_pins")
-        .delete()
-        .eq("profile_name", profileName);
+      const { error } = await runQueryWithRetry("admin-reset-delete-pin", () =>
+        supabase
+          .from("profile_pins")
+          .delete()
+          .eq("profile_name", profileName)
+      );
 
       if (error) throw error;
 
@@ -359,18 +452,23 @@ serve(async (req) => {
     );
 
   } catch (error: unknown) {
-    console.error("Error:", error);
-    let message = "Unknown error";
-    if (error instanceof Error) {
-      message = error.message;
-    } else if (typeof error === "object" && error !== null) {
-      message = JSON.stringify(error);
-    } else if (typeof error === "string") {
-      message = error;
-    }
+    const rawMessage = extractErrorMessage(error);
+    const transientNetworkError = isTransientNetworkError(error);
+    const message = transientNetworkError
+      ? "Temporary connection issue. Please try again."
+      : rawMessage;
+    console.error("verify-profile-pin error:", rawMessage);
     return new Response(
-      JSON.stringify({ success: false, error: message }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
+      JSON.stringify({
+        success: false,
+        error: message,
+        code: transientNetworkError ? "TEMPORARY_NETWORK_ERROR" : undefined,
+        retryable: transientNetworkError ? true : undefined,
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: transientNetworkError ? 503 : 500,
+      }
     );
   }
 });
