@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -177,9 +177,12 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [contacts, setContacts] = useState<BullhornMirrorContact[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
   const [contactsLoading, setContactsLoading] = useState(false);
-  const [contactsPage, setContactsPage] = useState(1);
+  const [contactsOffset, setContactsOffset] = useState(0);
+  const [hasMoreContacts, setHasMoreContacts] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [contactsSearchDraft, setContactsSearchDraft] = useState("");
   const [contactsSearch, setContactsSearch] = useState("");
+  const contactsScrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -199,7 +202,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
     const interval = setInterval(() => {
       loadBullhornSyncData({ silent: true });
-      loadBullhornMirrorContacts({ silent: true });
+      loadBullhornMirrorContacts({ silent: true, reset: true });
     }, 3000);
 
     return () => clearInterval(interval);
@@ -227,14 +230,15 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
   };
 
-  const loadBullhornMirrorContacts = async (
-    options: { silent?: boolean; page?: number; search?: string } = {},
+  const loadBullhornMirrorContacts = useCallback(async (
+    options: { silent?: boolean; search?: string; reset?: boolean; append?: boolean; offset?: number } = {},
   ) => {
+    const isReset = Boolean(options.reset);
     if (!options.silent) setContactsLoading(true);
+    if (options.append) setIsLoadingMore(true);
     try {
-      const page = options.page ?? contactsPage;
       const search = options.search ?? contactsSearch;
-      const offset = (page - 1) * CONTACTS_PAGE_SIZE;
+      const offset = isReset ? 0 : options.offset ?? 0;
       const result = await listBullhornMirrorContacts(ADMIN_PROFILE, {
         limit: CONTACTS_PAGE_SIZE,
         offset,
@@ -242,6 +246,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       });
 
       if (result.success && result.data) {
+        const rawBatch = result.data.contacts || [];
         const visibleContacts = (result.data.contacts || []).filter((contact) => {
           const directStatus = contact.status;
           const rawStatus =
@@ -250,8 +255,25 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               : null;
           return !isArchivedStatus(directStatus) && !isArchivedStatus(rawStatus);
         });
-        setContacts(visibleContacts);
+
+        if (isReset) {
+          setContacts(visibleContacts);
+        } else {
+          setContacts((prev) => {
+            const merged = new Map<number, BullhornMirrorContact>();
+            for (const row of prev) merged.set(row.bullhorn_id, row);
+            for (const row of visibleContacts) merged.set(row.bullhorn_id, row);
+            return Array.from(merged.values());
+          });
+        }
+
         setContactsTotal(result.data.total || 0);
+        const nextOffset = offset + rawBatch.length;
+        setContactsOffset(nextOffset);
+        const reachedEnd =
+          rawBatch.length < CONTACTS_PAGE_SIZE ||
+          (Number(result.data.total || 0) > 0 && nextOffset >= Number(result.data.total || 0));
+        setHasMoreContacts(!reachedEnd);
       } else if (!options.silent) {
         toast.error(result.error || "Failed to load synced contacts");
       }
@@ -259,14 +281,35 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       if (!options.silent) toast.error("Failed to load synced contacts");
     } finally {
       if (!options.silent) setContactsLoading(false);
+      if (options.append) setIsLoadingMore(false);
     }
-  };
+  }, [contactsSearch]);
 
   useEffect(() => {
     if (profileName === ADMIN_PROFILE) {
-      loadBullhornMirrorContacts();
+      loadBullhornMirrorContacts({ reset: true });
     }
-  }, [profileName, contactsPage, contactsSearch]);
+  }, [profileName, contactsSearch, loadBullhornMirrorContacts]);
+
+  useEffect(() => {
+    if (profileName !== ADMIN_PROFILE) return;
+    const scrollAreaRoot = contactsScrollAreaRef.current;
+    if (!scrollAreaRoot) return;
+    const viewport = scrollAreaRoot.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+    if (!viewport) return;
+
+    const maybeLoadMore = () => {
+      if (contactsLoading || isLoadingMore || !hasMoreContacts) return;
+      const distanceToBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      if (distanceToBottom > 220) return;
+      void loadBullhornMirrorContacts({ silent: true, append: true, offset: contactsOffset });
+    };
+
+    viewport.addEventListener("scroll", maybeLoadMore);
+    // Trigger load-more immediately when visible area is not filled.
+    maybeLoadMore();
+    return () => viewport.removeEventListener("scroll", maybeLoadMore);
+  }, [profileName, contactsLoading, isLoadingMore, hasMoreContacts, contactsOffset, loadBullhornMirrorContacts]);
 
   const startSync = async (mode: "test" | "full") => {
     setSyncActionLoading(true);
@@ -289,7 +332,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       );
       await Promise.all([
         loadBullhornSyncData(),
-        loadBullhornMirrorContacts({ silent: true, page: 1 }),
+        loadBullhornMirrorContacts({ silent: true, reset: true }),
       ]);
     } catch {
       toast.error("Failed to start Bullhorn contact sync");
@@ -308,9 +351,6 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const progressPercent = latestSyncJob && latestExpectedTotal
     ? Math.min(100, Math.round((latestSyncJob.total_synced / latestExpectedTotal) * 100))
     : 0;
-  const totalContactPages = Math.max(1, Math.ceil(contactsTotal / CONTACTS_PAGE_SIZE));
-  const pageStart = contactsTotal === 0 ? 0 : (contactsPage - 1) * CONTACTS_PAGE_SIZE + 1;
-  const pageEnd = Math.min(contactsPage * CONTACTS_PAGE_SIZE, contactsTotal);
   const getStatusColor = (status: string) => {
     switch (status) {
       case "success":
@@ -468,7 +508,6 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               <Button
                 variant="outline"
                 onClick={() => {
-                  setContactsPage(1);
                   setContactsSearch(contactsSearchDraft.trim());
                 }}
               >
@@ -479,12 +518,15 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 onClick={() => {
                   setContactsSearchDraft("");
                   setContactsSearch("");
-                  setContactsPage(1);
                 }}
               >
                 Clear
               </Button>
-              <Button variant="outline" onClick={() => loadBullhornMirrorContacts()} disabled={contactsLoading}>
+              <Button
+                variant="outline"
+                onClick={() => loadBullhornMirrorContacts({ reset: true })}
+                disabled={contactsLoading}
+              >
                 <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
               </Button>
             </div>
@@ -492,28 +534,29 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         </CardHeader>
         <CardContent className={tableOnly ? "space-y-3 px-0 pb-0" : "space-y-3"}>
           <ScrollArea
+            ref={contactsScrollAreaRef}
             className={`h-[68vh] w-full ${
               tableOnly
                 ? "rounded-xl border-2 border-primary bg-background shadow-[0_0_0_1px_rgba(15,15,15,0.95),0_14px_32px_rgba(0,0,0,0.08)]"
                 : ""
             }`}
           >
-            <Table className="min-w-full w-max text-sm">
+            <Table className="w-[2200px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>ID</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Name</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Job Title</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Company</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Email</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Status</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Phone</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Consultant</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Address</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Visit</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Date Added</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Modified</TableHead>
-                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Skills</TableHead>
+                  <TableHead className={`w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>ID</TableHead>
+                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Name</TableHead>
+                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Job Title</TableHead>
+                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Company</TableHead>
+                  <TableHead className={`w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Email</TableHead>
+                  <TableHead className={`w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Status</TableHead>
+                  <TableHead className={`w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Phone</TableHead>
+                  <TableHead className={`w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Consultant</TableHead>
+                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Address</TableHead>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Visit</TableHead>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Date Added</TableHead>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Modified</TableHead>
+                  <TableHead className={`w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Skills</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/55 [&_tr:last-child]:border-b-0" : "[&_tr]:border-0"}>
@@ -524,7 +567,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                     </TableCell>
                   </TableRow>
                 ) : (
-                  contacts.map((contact) => {
+                  contacts.map((contact, index) => {
                     const rawRecord =
                       contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
                         ? (contact.raw as Record<string, unknown>)
@@ -553,30 +596,48 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                     return (
                       <TableRow
                         key={contact.bullhorn_id}
-                        className={tableOnly ? "border-b border-border/55 hover:bg-accent/20" : "border-0 hover:bg-transparent"}
+                        className={
+                          tableOnly
+                            ? `border-b border-border/55 ${index % 2 === 1 ? "bg-primary/5" : ""} hover:bg-primary/10`
+                            : "border-0 hover:bg-transparent"
+                        }
                       >
-                        <TableCell className={`whitespace-nowrap py-3 font-mono text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{contact.bullhorn_id}</TableCell>
-                        <TableCell className={`max-w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{fullName}</TableCell>
-                        <TableCell className={`max-w-[260px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{jobTitle}</TableCell>
-                        <TableCell className={`max-w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{company}</TableCell>
-                        <TableCell className={`max-w-[250px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>
+                        <TableCell className={`w-[95px] whitespace-nowrap py-3 font-mono text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{contact.bullhorn_id}</TableCell>
+                        <TableCell className={`w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={fullName}>
+                          <span className="block truncate">{fullName}</span>
+                        </TableCell>
+                        <TableCell className={`w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={jobTitle}>
+                          <span className="block truncate">{jobTitle}</span>
+                        </TableCell>
+                        <TableCell className={`w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={company}>
+                          <span className="block truncate">{company}</span>
+                        </TableCell>
+                        <TableCell className={`w-[260px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>
                           {workEmail !== "-" ? (
-                            <a href={`mailto:${workEmail}`} className="text-primary hover:underline">
+                            <a href={`mailto:${workEmail}`} className="block truncate text-primary hover:underline" title={workEmail}>
                               {workEmail}
                             </a>
                           ) : (
                             "-"
                           )}
                         </TableCell>
-                        <TableCell className={`max-w-[130px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{status}</TableCell>
-                        <TableCell className={`max-w-[180px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{workPhone}</TableCell>
-                        <TableCell className={`max-w-[200px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{consultant}</TableCell>
-                        <TableCell className={`max-w-[280px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{address}</TableCell>
-                        <TableCell className={`whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{lastVisit}</TableCell>
-                        <TableCell className={`whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateAdded}</TableCell>
-                        <TableCell className={`whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateLastModified}</TableCell>
-                        <TableCell className={`max-w-[320px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={skills}>
-                          {skills.length > 120 ? `${skills.slice(0, 117)}...` : skills}
+                        <TableCell className={`w-[125px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={status}>
+                          <span className="block truncate">{status}</span>
+                        </TableCell>
+                        <TableCell className={`w-[160px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={workPhone}>
+                          <span className="block truncate">{workPhone}</span>
+                        </TableCell>
+                        <TableCell className={`w-[180px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={consultant}>
+                          <span className="block truncate">{consultant}</span>
+                        </TableCell>
+                        <TableCell className={`w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={address}>
+                          <span className="block truncate">{address}</span>
+                        </TableCell>
+                        <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{lastVisit}</TableCell>
+                        <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateAdded}</TableCell>
+                        <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateLastModified}</TableCell>
+                        <TableCell className={`w-[370px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={skills}>
+                          <span className="block truncate">{skills}</span>
                         </TableCell>
                       </TableRow>
                     );
@@ -589,29 +650,11 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
-              Showing {pageStart}-{pageEnd} of {contactsTotal.toLocaleString()}
+              Loaded {contacts.length.toLocaleString()} of {contactsTotal.toLocaleString()}
             </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setContactsPage((p) => Math.max(1, p - 1))}
-                disabled={contactsPage <= 1 || contactsLoading}
-              >
-                Previous
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Page {contactsPage} / {totalContactPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setContactsPage((p) => Math.min(totalContactPages, p + 1))}
-                disabled={contactsPage >= totalContactPages || contactsLoading}
-              >
-                Next
-              </Button>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              {isLoadingMore ? "Loading next 25..." : hasMoreContacts ? "Scroll down to load next 25" : "All contacts loaded"}
+            </p>
           </div>
         </CardContent>
       </Card>
