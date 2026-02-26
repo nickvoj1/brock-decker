@@ -808,22 +808,26 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         <CardHeader
           className={tableOnly ? "border-b bg-background" : undefined}
         >
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex w-full max-w-[680px] items-center gap-2">
+          <div className="flex w-full items-center">
+            <div className="flex w-full flex-wrap items-center gap-2">
               <Input
+                className="h-9 w-[280px] min-w-[220px] md:w-[340px]"
                 value={contactsSearchDraft}
                 onChange={(e) => setContactsSearchDraft(e.target.value)}
                 placeholder="Search by name, email, company, title, city"
               />
               <Button
+                size="sm"
                 variant="default"
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
+                className="h-9 bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => setIsFiltersDialogOpen(true)}
               >
                 Filters{appliedFilters.length ? ` (${appliedFilters.length})` : ""}
               </Button>
               <Button
+                size="sm"
                 variant="outline"
+                className="h-9"
                 onClick={() => {
                   setContactsSearch(contactsSearchDraft.trim());
                 }}
@@ -831,7 +835,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 Search
               </Button>
               <Button
+                size="sm"
                 variant="outline"
+                className="h-9"
                 onClick={() => {
                   setContactsSearchDraft("");
                   setContactsSearch("");
@@ -842,7 +848,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 Clear
               </Button>
               <Button
+                size="sm"
                 variant="outline"
+                className="h-9 w-9"
                 onClick={() => loadBullhornMirrorContacts({ reset: true })}
                 disabled={contactsLoading}
               >
