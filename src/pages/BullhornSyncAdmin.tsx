@@ -932,7 +932,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           <div
             className={`w-full ${
               tableOnly
-                ? "flex-1 min-h-0 border-l-2 border-t-2 border-primary rounded-none bg-background shadow-[inset_1px_0_0_rgba(15,15,15,0.9),inset_0_1px_0_rgba(15,15,15,0.9)]"
+                ? "flex-1 min-h-0 border-t-2 border-primary rounded-none bg-background shadow-[inset_0_1px_0_rgba(15,15,15,0.9)]"
                 : ""
             }`}
           >
