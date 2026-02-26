@@ -481,7 +481,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
     const maybeLoadMore = () => {
       if (contactsLoading || isLoadingMore || !hasMoreContacts) return;
-      const viewport = tableViewportRef.current;
+      const viewportHost = tableViewportRef.current;
+      const viewport = viewportHost?.firstElementChild as HTMLDivElement | null;
       if (!viewport) return;
       const viewportHeight = viewport.clientHeight || 0;
       const scrollTop = viewport.scrollTop || 0;
@@ -491,7 +492,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       void loadBullhornMirrorContacts({ silent: true, append: true, offset: contactsOffset });
     };
 
-    const viewport = tableViewportRef.current;
+    const viewportHost = tableViewportRef.current;
+    const viewport = viewportHost?.firstElementChild as HTMLDivElement | null;
     if (!viewport) return;
 
     viewport.addEventListener("scroll", maybeLoadMore, { passive: true });
@@ -752,7 +754,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         </Card>
       )}
 
-      <Card className={tableOnly ? "border-0 bg-transparent shadow-none h-[calc(100dvh-8.5rem)] md:h-[calc(100dvh-10rem)] flex flex-col" : undefined}>
+      <Card className={tableOnly ? "border-0 bg-transparent shadow-none -mx-4 md:-mx-6 lg:-mx-7 -mb-4 md:-mb-6 lg:-mb-7 h-[calc(100dvh-4rem)] md:h-[calc(100dvh-4.5rem)] flex flex-col" : undefined}>
         <CardHeader
           className={tableOnly ? "border-b bg-background/95" : undefined}
         >
@@ -921,7 +923,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7 flex flex-col flex-1 min-h-0" : "space-y-3"}>
+        <CardContent className={tableOnly ? "px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7 flex flex-col flex-1 min-h-0" : "space-y-3"}>
           <div
             className={`w-full ${
               tableOnly
@@ -929,7 +931,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 : ""
             }`}
           >
-            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full overflow-auto" : "overflow-x-auto"}`}>
+            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full [&>div]:h-full [&>div]:overflow-y-scroll [&>div]:overflow-x-scroll" : "overflow-x-auto"}`}>
             <Table className="w-[2200px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-background/95 [&_th]:backdrop-blur" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
