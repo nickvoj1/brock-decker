@@ -1,9 +1,8 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 // Convert bytes to hex string
@@ -22,7 +21,6 @@ function hexToBytes(hex: string): Uint8Array {
 
 // Secure PIN hashing using PBKDF2 with per-user salt
 async function hashPin(pin: string, existingSalt?: string): Promise<{ hash: string; salt: string }> {
-  // Generate unique salt per user if not provided (16 bytes = 128 bits)
   const salt = existingSalt 
     ? hexToBytes(existingSalt)
     : crypto.getRandomValues(new Uint8Array(16));
@@ -30,7 +28,6 @@ async function hashPin(pin: string, existingSalt?: string): Promise<{ hash: stri
   const encoder = new TextEncoder();
   const pinData = encoder.encode(pin);
   
-  // Import key for PBKDF2
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
     pinData,
@@ -39,7 +36,6 @@ async function hashPin(pin: string, existingSalt?: string): Promise<{ hash: stri
     ['deriveBits']
   );
   
-  // Derive key with 100,000 iterations (OWASP recommended minimum)
   const hashBuffer = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
@@ -57,7 +53,7 @@ async function hashPin(pin: string, existingSalt?: string): Promise<{ hash: stri
   };
 }
 
-// Legacy hash function for migration (will be removed after all PINs migrated)
+// Legacy hash function for migration
 async function legacyHashPin(pin: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(pin + "enrich-flow-salt-2024");
@@ -66,10 +62,10 @@ async function legacyHashPin(pin: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Rate limiting tracker (in-memory, resets on function cold start)
+// Rate limiting tracker
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const WINDOW_MS = 15 * 60 * 1000;
 
 function checkRateLimit(profileName: string): boolean {
   const now = Date.now();
@@ -92,7 +88,26 @@ function resetRateLimit(profileName: string): void {
   rateLimitMap.delete(profileName);
 }
 
-serve(async (req) => {
+// Retry wrapper for transient connection errors
+async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 300): Promise<T> {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isTransient = msg.includes("connection reset") || msg.includes("connection error") || msg.includes("SendRequest");
+      if (i < retries && isTransient) {
+        console.warn(`Retry ${i + 1}/${retries} after transient error: ${msg}`);
+        await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Unreachable");
+}
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -113,11 +128,13 @@ serve(async (req) => {
 
     // Check if profile has a PIN set
     if (action === "check") {
-      const { data, error } = await supabase
-        .from("profile_pins")
-        .select("id, reset_requested_at")
-        .eq("profile_name", profileName)
-        .maybeSingle();
+      const { data, error } = await withRetry(() =>
+        supabase
+          .from("profile_pins")
+          .select("id, reset_requested_at")
+          .eq("profile_name", profileName)
+          .maybeSingle()
+      );
 
       if (error) throw error;
 
@@ -140,34 +157,33 @@ serve(async (req) => {
         );
       }
 
-      // Generate new hash with per-user salt
       const { hash: pinHash, salt } = await hashPin(pin);
 
-      // Check if already exists
-      const { data: existing } = await supabase
-        .from("profile_pins")
-        .select("id")
-        .eq("profile_name", profileName)
-        .maybeSingle();
+      const { data: existing } = await withRetry(() =>
+        supabase
+          .from("profile_pins")
+          .select("id")
+          .eq("profile_name", profileName)
+          .maybeSingle()
+      );
 
       if (existing) {
-        // Update existing with new hash and salt
-        const { error } = await supabase
-          .from("profile_pins")
-          .update({ pin_hash: pinHash, salt: salt, reset_requested_at: null })
-          .eq("profile_name", profileName);
-
+        const { error } = await withRetry(() =>
+          supabase
+            .from("profile_pins")
+            .update({ pin_hash: pinHash, salt: salt, reset_requested_at: null })
+            .eq("profile_name", profileName)
+        );
         if (error) throw error;
       } else {
-        // Insert new with hash and salt
-        const { error } = await supabase
-          .from("profile_pins")
-          .insert({ profile_name: profileName, pin_hash: pinHash, salt: salt });
-
+        const { error } = await withRetry(() =>
+          supabase
+            .from("profile_pins")
+            .insert({ profile_name: profileName, pin_hash: pinHash, salt: salt })
+        );
         if (error) throw error;
       }
 
-      // Clear rate limit on successful PIN set
       resetRateLimit(profileName);
 
       return new Response(
@@ -185,7 +201,6 @@ serve(async (req) => {
         );
       }
 
-      // Check rate limit
       if (!checkRateLimit(profileName)) {
         return new Response(
           JSON.stringify({ success: false, error: "Too many attempts. Please wait 15 minutes." }),
@@ -193,11 +208,13 @@ serve(async (req) => {
         );
       }
 
-      const { data, error } = await supabase
-        .from("profile_pins")
-        .select("pin_hash, salt")
-        .eq("profile_name", profileName)
-        .maybeSingle();
+      const { data, error } = await withRetry(() =>
+        supabase
+          .from("profile_pins")
+          .select("pin_hash, salt")
+          .eq("profile_name", profileName)
+          .maybeSingle()
+      );
 
       if (error) throw error;
 
@@ -210,28 +227,25 @@ serve(async (req) => {
 
       let isValid = false;
 
-      // Check if using new PBKDF2 hash (has salt) or legacy SHA-256
       if (data.salt) {
-        // New secure hashing with per-user salt
         const { hash: inputHash } = await hashPin(pin, data.salt);
         isValid = data.pin_hash === inputHash;
       } else {
-        // Legacy hash - verify and migrate to new format
         const legacyHash = await legacyHashPin(pin);
         isValid = data.pin_hash === legacyHash;
         
-        // If valid legacy hash, migrate to new secure hash
         if (isValid) {
           const { hash: newHash, salt: newSalt } = await hashPin(pin);
-          await supabase
-            .from("profile_pins")
-            .update({ pin_hash: newHash, salt: newSalt })
-            .eq("profile_name", profileName);
+          await withRetry(() =>
+            supabase
+              .from("profile_pins")
+              .update({ pin_hash: newHash, salt: newSalt })
+              .eq("profile_name", profileName)
+          );
           console.log(`Migrated PIN hash for ${profileName} to PBKDF2`);
         }
       }
 
-      // Clear rate limit on successful verification
       if (isValid) {
         resetRateLimit(profileName);
       }
@@ -242,12 +256,14 @@ serve(async (req) => {
       );
     }
 
-    // Request PIN reset (by user who forgot their PIN)
+    // Request PIN reset
     if (action === "request-reset") {
-      const { error } = await supabase
-        .from("profile_pins")
-        .update({ reset_requested_at: new Date().toISOString() })
-        .eq("profile_name", profileName);
+      const { error } = await withRetry(() =>
+        supabase
+          .from("profile_pins")
+          .update({ reset_requested_at: new Date().toISOString() })
+          .eq("profile_name", profileName)
+      );
 
       if (error) throw error;
 
@@ -259,12 +275,14 @@ serve(async (req) => {
 
     // Check if user is admin
     if (action === "check-admin") {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", profileName)
-        .eq("role", "admin")
-        .maybeSingle();
+      const { data, error } = await withRetry(() =>
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", profileName)
+          .eq("role", "admin")
+          .maybeSingle()
+      );
 
       if (error) throw error;
 
@@ -283,13 +301,14 @@ serve(async (req) => {
         );
       }
 
-      // Verify admin status
-      const { data: adminData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", adminProfile)
-        .eq("role", "admin")
-        .maybeSingle();
+      const { data: adminData } = await withRetry(() =>
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", adminProfile)
+          .eq("role", "admin")
+          .maybeSingle()
+      );
 
       if (!adminData) {
         return new Response(
@@ -298,11 +317,13 @@ serve(async (req) => {
         );
       }
 
-      const { data, error } = await supabase
-        .from("profile_pins")
-        .select("profile_name, reset_requested_at")
-        .not("reset_requested_at", "is", null)
-        .order("reset_requested_at", { ascending: false });
+      const { data, error } = await withRetry(() =>
+        supabase
+          .from("profile_pins")
+          .select("profile_name, reset_requested_at")
+          .not("reset_requested_at", "is", null)
+          .order("reset_requested_at", { ascending: false })
+      );
 
       if (error) throw error;
 
@@ -321,13 +342,14 @@ serve(async (req) => {
         );
       }
 
-      // Verify admin status
-      const { data: adminData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", adminProfile)
-        .eq("role", "admin")
-        .maybeSingle();
+      const { data: adminData } = await withRetry(() =>
+        supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", adminProfile)
+          .eq("role", "admin")
+          .maybeSingle()
+      );
 
       if (!adminData) {
         return new Response(
@@ -336,15 +358,15 @@ serve(async (req) => {
         );
       }
 
-      // Delete the PIN so user can set a new one
-      const { error } = await supabase
-        .from("profile_pins")
-        .delete()
-        .eq("profile_name", profileName);
+      const { error } = await withRetry(() =>
+        supabase
+          .from("profile_pins")
+          .delete()
+          .eq("profile_name", profileName)
+      );
 
       if (error) throw error;
 
-      // Clear rate limit for the reset profile
       resetRateLimit(profileName);
 
       return new Response(
