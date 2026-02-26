@@ -112,6 +112,66 @@ function normalizeSearchTerm(input: unknown): string {
     .slice(0, 80);
 }
 
+function splitTopLevelFields(selector: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (const ch of selector) {
+    if (ch === "(") {
+      depth += 1;
+      current += ch;
+      continue;
+    }
+    if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      current += ch;
+      continue;
+    }
+    if (ch === "," && depth === 0) {
+      const trimmed = current.trim();
+      if (trimmed) tokens.push(trimmed);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  const tail = current.trim();
+  if (tail) tokens.push(tail);
+  return tokens;
+}
+
+function parseInvalidFieldNames(errorBody: string): string[] {
+  if (!errorBody) return [];
+
+  const out = new Set<string>();
+  const patterns = [
+    /invalid field(?: name)?["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
+    /unknown field["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
+    /no (?:such )?(?:field|property)["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
+    /field["'\s]+([a-zA-Z0-9_]+)["'\s]+(?:is|was) invalid/gi,
+    /cannot resolve field["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of errorBody.matchAll(pattern)) {
+      const candidate = String(match?.[1] || "").trim();
+      if (candidate) out.add(candidate.toLowerCase());
+    }
+  }
+
+  return Array.from(out);
+}
+
+function removeInvalidFields(selector: string, invalidFields: string[]): string {
+  if (!invalidFields.length) return selector;
+  const invalidSet = new Set(invalidFields.map((f) => f.toLowerCase()));
+  const kept = splitTopLevelFields(selector).filter((token) => {
+    const base = token.split("(")[0]?.trim().toLowerCase() || "";
+    return base && !invalidSet.has(base);
+  });
+  return kept.join(",");
+}
+
 function buildCustomFieldNames(prefix: string, max: number): string[] {
   return Array.from({ length: max }, (_, idx) => `${prefix}${idx + 1}`);
 }
@@ -341,9 +401,10 @@ async function fetchClientContactsBatch(
 
   // Prefer rich selector; then try skills-aware fallback; finally strict fallback.
   let activeFields = preferredFields?.trim() || skillsFallbackFields;
+  const attemptedSelectors = new Set<string>([activeFields]);
 
   let lastError: string | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 9; attempt++) {
     const queryUrl = buildQueryUrl(activeFields);
     const response = await fetch(queryUrl);
     if (response.status === 429) {
@@ -353,6 +414,20 @@ async function fetchClientContactsBatch(
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       const normalizedBody = body.toLowerCase();
+      const invalidFields = parseInvalidFieldNames(body);
+
+      if (invalidFields.length) {
+        const pruned = removeInvalidFields(activeFields, invalidFields);
+        if (pruned && pruned !== activeFields && !attemptedSelectors.has(pruned)) {
+          console.warn(
+            `[bullhorn-sync-clientcontacts] Removing unsupported fields [${invalidFields.join(", ")}] and retrying`,
+          );
+          activeFields = pruned;
+          attemptedSelectors.add(pruned);
+          continue;
+        }
+      }
+
       if (
         activeFields !== strictFallbackFields &&
         response.status >= 400 &&
@@ -360,10 +435,14 @@ async function fetchClientContactsBatch(
         (normalizedBody.includes("field") || normalizedBody.includes("invalid"))
       ) {
         if (activeFields !== skillsFallbackFields) {
+          console.warn("[bullhorn-sync-clientcontacts] Falling back to skills-aware selector after field error");
           activeFields = skillsFallbackFields;
+          attemptedSelectors.add(skillsFallbackFields);
           continue;
         }
+        console.warn("[bullhorn-sync-clientcontacts] Falling back to strict selector after repeated field errors");
         activeFields = strictFallbackFields;
+        attemptedSelectors.add(strictFallbackFields);
         continue;
       }
       lastError = `Bullhorn query failed (${response.status}): ${body.slice(0, 300)}`;
@@ -375,6 +454,19 @@ async function fetchClientContactsBatch(
     const rows = Array.isArray(payload?.data) ? payload.data : [];
     const totalRaw = payload?.total;
     const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
+
+    const firstRow = rows[0];
+    const skillKeys = firstRow && typeof firstRow === "object"
+      ? Object.keys(firstRow).filter((key) => {
+        const lower = key.toLowerCase();
+        return lower.includes("skill") || lower.includes("special") || lower.includes("category");
+      })
+      : [];
+    console.log(
+      `[bullhorn-sync-clientcontacts] Batch start=${start} count=${rows.length} selectorFields=${
+        splitTopLevelFields(activeFields).length
+      } skillKeys=${skillKeys.join(",") || "none"} hasSkills=${Boolean(firstRow?.skills)}`,
+    );
     return { rows, total };
   }
 
@@ -480,6 +572,9 @@ async function processSyncJob(
   let lastBatchSize = 0;
   let completed = false;
   const maxContacts = normalizeMaxContacts(job?.metadata?.max_contacts);
+  if ((totalExpected === null || totalExpected <= 0) && maxContacts !== null) {
+    totalExpected = maxContacts;
+  }
   const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
   const preferredFieldSelector = buildClientContactFieldSelector(supportedFields);
 
@@ -640,6 +735,7 @@ Deno.serve(async (req) => {
           requested_by: profileName,
           status: "queued",
           batch_size: maxContacts ? Math.min(batchSize, maxContacts) : batchSize,
+          total_expected: maxContacts,
           include_deleted: includeDeleted,
           metadata: {
             source: "manual_start",
