@@ -89,7 +89,8 @@ function resetRateLimit(profileName: string): void {
 }
 
 // Retry wrapper for transient connection errors
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, delayMs = 300): Promise<T> {
+// deno-lint-ignore no-explicit-any
+async function withRetry<T>(fn: () => Promise<T> | PromiseLike<T> | any, retries = 2, delayMs = 300): Promise<T> {
   for (let i = 0; i <= retries; i++) {
     try {
       return await fn();
