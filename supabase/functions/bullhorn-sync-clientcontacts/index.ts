@@ -12,7 +12,7 @@ const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
 const DEFAULT_TEST_BATCH_SIZE = 5;
 const DEFAULT_CONTACT_LIST_LIMIT = 25;
-const DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS = [
+const DEFAULT_CLIENTCONTACT_CORE_FIELDS = [
   "id",
   "name",
   "firstName",
@@ -28,17 +28,20 @@ const DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS = [
   "dateAdded",
   "dateLastModified",
   "isDeleted",
+];
+const DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS = [
+  ...DEFAULT_CLIENTCONTACT_CORE_FIELDS,
   "dateLastVisit",
   "dateLastComment",
   "address1",
   "address2",
   "city",
   "state",
-  "skills",
-  "skillsCount",
 ];
 const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
   ...DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS,
+  "skills",
+  "skillsCount",
   "skillList",
   "skillIDList",
   "specialty",
@@ -530,6 +533,7 @@ async function fetchClientContactsBatch(
   includeDeleted: boolean,
   preferredFields?: string,
 ): Promise<{ rows: any[]; total: number | null }> {
+  const coreFallbackFields = DEFAULT_CLIENTCONTACT_CORE_FIELDS.join(",");
   const baselineFallbackFields = DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(",");
   const skillsFallbackFields = DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS.join(",");
 
@@ -539,7 +543,7 @@ async function fetchClientContactsBatch(
       bhRestToken,
     )}&fields=${encodeURIComponent(fields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
 
-  // Prefer rich selector; then keep pruning invalid fields while retaining skills/city fields when possible.
+  // Prefer rich selector; always degrade to core selector to avoid hard-fail syncs.
   let activeFields = preferredFields?.trim() || skillsFallbackFields;
   const attemptedSelectors = new Set<string>([activeFields]);
 
@@ -555,6 +559,7 @@ async function fetchClientContactsBatch(
       const body = await response.text().catch(() => "");
       const normalizedBody = body.toLowerCase();
       const invalidFields = parseInvalidFieldNames(body);
+      let switchedSelector = false;
 
       if (invalidFields.length) {
         const pruned = removeInvalidFields(activeFields, invalidFields);
@@ -564,25 +569,48 @@ async function fetchClientContactsBatch(
           );
           activeFields = pruned;
           attemptedSelectors.add(pruned);
-          continue;
+          switchedSelector = true;
         }
       }
 
+      if (switchedSelector) {
+        continue;
+      }
+
       if (
-        activeFields !== baselineFallbackFields &&
         response.status >= 400 &&
         response.status < 500 &&
-        (normalizedBody.includes("field") || normalizedBody.includes("invalid"))
+        (normalizedBody.includes("field") || normalizedBody.includes("invalid") || normalizedBody.includes("unknown"))
       ) {
-        if (activeFields !== skillsFallbackFields && !attemptedSelectors.has(skillsFallbackFields)) {
-          console.warn("[bullhorn-sync-clientcontacts] Falling back to skills-aware selector after field error");
-          activeFields = skillsFallbackFields;
-          attemptedSelectors.add(skillsFallbackFields);
-          continue;
+        const fallbackCandidates = [skillsFallbackFields, baselineFallbackFields, coreFallbackFields];
+        for (const candidate of fallbackCandidates) {
+          if (candidate === activeFields || attemptedSelectors.has(candidate)) continue;
+          const label =
+            candidate === coreFallbackFields ? "core selector" :
+            candidate === baselineFallbackFields ? "baseline selector" :
+            "skills-aware selector";
+          console.warn(`[bullhorn-sync-clientcontacts] Falling back to ${label} after field error`);
+          activeFields = candidate;
+          attemptedSelectors.add(candidate);
+          switchedSelector = true;
+          break;
         }
-        console.warn("[bullhorn-sync-clientcontacts] Falling back to baseline selector after repeated field errors");
-        activeFields = baselineFallbackFields;
-        attemptedSelectors.add(baselineFallbackFields);
+      }
+
+      if (switchedSelector) {
+        continue;
+      }
+
+      if (
+        activeFields !== coreFallbackFields &&
+        response.status >= 400 &&
+        response.status < 500
+      ) {
+        console.warn(
+          `[bullhorn-sync-clientcontacts] Non-OK ${response.status}, forcing core selector. body=${body.slice(0, 200)}`,
+        );
+        activeFields = coreFallbackFields;
+        attemptedSelectors.add(coreFallbackFields);
         continue;
       }
       lastError = `Bullhorn query failed (${response.status}): ${body.slice(0, 300)}`;
