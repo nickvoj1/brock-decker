@@ -37,6 +37,12 @@ const SKILLS_CANDIDATE_KEYS = [
   ...Array.from({ length: 40 }, (_, idx) => `customText${idx + 1}`),
 ];
 
+function isArchivedStatus(value: unknown): boolean {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("archiv");
+}
+
 function formatMirrorValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "-";
   const parseJsonLike = (input: string): unknown | null => {
@@ -231,7 +237,15 @@ export default function BullhornSyncAdmin() {
       });
 
       if (result.success && result.data) {
-        setContacts(result.data.contacts || []);
+        const visibleContacts = (result.data.contacts || []).filter((contact) => {
+          const directStatus = contact.status;
+          const rawStatus =
+            contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
+              ? (contact.raw as Record<string, unknown>).status
+              : null;
+          return !isArchivedStatus(directStatus) && !isArchivedStatus(rawStatus);
+        });
+        setContacts(visibleContacts);
         setContactsTotal(result.data.total || 0);
       } else if (!options.silent) {
         toast.error(result.error || "Failed to load synced contacts");
