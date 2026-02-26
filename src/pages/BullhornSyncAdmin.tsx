@@ -491,28 +491,34 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           </div>
         </CardHeader>
         <CardContent className={tableOnly ? "space-y-3 px-0 pb-0" : "space-y-3"}>
-          <ScrollArea className="h-[68vh] w-full">
+          <ScrollArea
+            className={`h-[68vh] w-full ${
+              tableOnly
+                ? "rounded-xl border-2 border-primary bg-background shadow-[0_0_0_1px_rgba(15,15,15,0.95),0_14px_32px_rgba(0,0,0,0.08)]"
+                : ""
+            }`}
+          >
             <Table className="min-w-full w-max text-sm">
-              <TableHeader className="[&_tr]:border-0">
-                <TableRow className="border-0 hover:bg-transparent">
-                  <TableHead className="whitespace-nowrap text-sm">ID</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Name</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Job Title</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Company</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Work Email</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Status</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Work Phone</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Consultant</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Address</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Last Visit</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Date Added</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Last Modified</TableHead>
-                  <TableHead className="whitespace-nowrap text-sm">Skills</TableHead>
+              <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
+                <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>ID</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Name</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Job Title</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Company</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Email</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Status</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Work Phone</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Consultant</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Address</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Visit</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Date Added</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Last Modified</TableHead>
+                  <TableHead className={`whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>Skills</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody className="[&_tr]:border-0">
+              <TableBody className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/55 [&_tr:last-child]:border-b-0" : "[&_tr]:border-0"}>
                 {contacts.length === 0 ? (
-                  <TableRow className="border-0 hover:bg-transparent">
+                  <TableRow className={tableOnly ? "border-b border-border/55 hover:bg-transparent" : "border-0 hover:bg-transparent"}>
                     <TableCell colSpan={13} className="py-5 text-center text-base text-muted-foreground">
                       {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
                     </TableCell>
@@ -545,12 +551,15 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                     const dateLastModified = formatMirrorDate(rawRecord.dateLastModified ?? contact.date_last_modified);
                     const skills = extractSkillsFromRaw(rawRecord);
                     return (
-                      <TableRow key={contact.bullhorn_id} className="border-0 hover:bg-transparent">
-                        <TableCell className="whitespace-nowrap py-3 font-mono text-sm">{contact.bullhorn_id}</TableCell>
-                        <TableCell className="max-w-[220px] py-3 text-sm">{fullName}</TableCell>
-                        <TableCell className="max-w-[260px] py-3 text-sm">{jobTitle}</TableCell>
-                        <TableCell className="max-w-[240px] py-3 text-sm">{company}</TableCell>
-                        <TableCell className="max-w-[250px] py-3 text-sm">
+                      <TableRow
+                        key={contact.bullhorn_id}
+                        className={tableOnly ? "border-b border-border/55 hover:bg-accent/20" : "border-0 hover:bg-transparent"}
+                      >
+                        <TableCell className={`whitespace-nowrap py-3 font-mono text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{contact.bullhorn_id}</TableCell>
+                        <TableCell className={`max-w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{fullName}</TableCell>
+                        <TableCell className={`max-w-[260px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{jobTitle}</TableCell>
+                        <TableCell className={`max-w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{company}</TableCell>
+                        <TableCell className={`max-w-[250px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>
                           {workEmail !== "-" ? (
                             <a href={`mailto:${workEmail}`} className="text-primary hover:underline">
                               {workEmail}
@@ -559,14 +568,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                             "-"
                           )}
                         </TableCell>
-                        <TableCell className="max-w-[130px] py-3 text-sm">{status}</TableCell>
-                        <TableCell className="max-w-[180px] py-3 text-sm">{workPhone}</TableCell>
-                        <TableCell className="max-w-[200px] py-3 text-sm">{consultant}</TableCell>
-                        <TableCell className="max-w-[280px] py-3 text-sm">{address}</TableCell>
-                        <TableCell className="whitespace-nowrap py-3 text-sm">{lastVisit}</TableCell>
-                        <TableCell className="whitespace-nowrap py-3 text-sm">{dateAdded}</TableCell>
-                        <TableCell className="whitespace-nowrap py-3 text-sm">{dateLastModified}</TableCell>
-                        <TableCell className="max-w-[320px] py-3 text-sm" title={skills}>
+                        <TableCell className={`max-w-[130px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{status}</TableCell>
+                        <TableCell className={`max-w-[180px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{workPhone}</TableCell>
+                        <TableCell className={`max-w-[200px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{consultant}</TableCell>
+                        <TableCell className={`max-w-[280px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{address}</TableCell>
+                        <TableCell className={`whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{lastVisit}</TableCell>
+                        <TableCell className={`whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateAdded}</TableCell>
+                        <TableCell className={`whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateLastModified}</TableCell>
+                        <TableCell className={`max-w-[320px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={skills}>
                           {skills.length > 120 ? `${skills.slice(0, 117)}...` : skills}
                         </TableCell>
                       </TableRow>
