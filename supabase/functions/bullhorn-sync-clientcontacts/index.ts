@@ -481,6 +481,61 @@ function buildSkillOverlayFieldSelector(supportedFields: Set<string> | null): st
   return Array.from(new Set(result)).join(",");
 }
 
+function buildEntitySkillFieldSelector(supportedFields: Set<string> | null): string {
+  const result: string[] = ["id"];
+  const add = (field: string) => {
+    if (!field) return;
+    result.push(field);
+  };
+  const addSimple = (field: string) => {
+    if (!supportedFields || supportedFields.has(field)) result.push(field);
+  };
+
+  [
+    "skills",
+    "skillsCount",
+    "skill",
+    "skillList",
+    "skillIDList",
+    "specialty",
+    "specialities",
+    "expertise",
+    "dateLastVisit",
+    "dateLastComment",
+    "address1",
+    "address2",
+    "city",
+    "state",
+  ].forEach(addSimple);
+
+  if (!supportedFields) {
+    add("categories(id,name)");
+    add("specialties(id,name)");
+  } else {
+    if (supportedFields.has("categories")) add("categories(id,name)");
+    if (supportedFields.has("specialties")) add("specialties(id,name)");
+  }
+
+  if (supportedFields) {
+    for (const field of supportedFields) {
+      const lower = field.toLowerCase();
+      if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
+      if (lower === "categories" || lower === "specialties") continue;
+      addSimple(field);
+    }
+  } else {
+    [
+      ...buildCustomFieldNames("customTextBlock", 20),
+      ...buildCustomFieldNames("customText", 40),
+      ...buildCustomFieldNames("customObject", 20),
+      ...buildCustomFieldNames("customInt", 20),
+      ...buildCustomFieldNames("customDate", 20),
+    ].forEach(add);
+  }
+
+  return Array.from(new Set(result)).join(",");
+}
+
 function normalizeBullhornDate(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value === "string") {
@@ -689,29 +744,42 @@ async function fetchEntityOverlayById(
   restUrl: string,
   bhRestToken: string,
   id: number,
+  preferredFields?: string,
 ): Promise<any | null> {
-  const entityUrl = `${restUrl}entity/ClientContact/${id}?BhRestToken=${encodeURIComponent(
-    bhRestToken,
-  )}&fields=${encodeURIComponent("*")}`;
+  const candidates = [preferredFields?.trim() || "", "*"].filter(Boolean);
+  const tried = new Set<string>();
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch(entityUrl);
-    if (response.status === 429) {
-      await new Promise((resolve) => setTimeout(resolve, 650 + attempt * 450));
-      continue;
-    }
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      console.warn(
-        `[bullhorn-sync-clientcontacts] Entity overlay failed for ${id} (${response.status}): ${body.slice(0, 180)}`,
-      );
-      return null;
-    }
+  for (const fields of candidates) {
+    if (tried.has(fields)) continue;
+    tried.add(fields);
 
-    const payload = await response.json();
-    const data = payload?.data && typeof payload.data === "object" ? payload.data : payload;
-    if (!data || typeof data !== "object") return null;
-    return data;
+    const entityUrl = `${restUrl}entity/ClientContact/${id}?BhRestToken=${encodeURIComponent(
+      bhRestToken,
+    )}&fields=${encodeURIComponent(fields)}`;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await fetch(entityUrl);
+      if (response.status === 429) {
+        await new Promise((resolve) => setTimeout(resolve, 650 + attempt * 450));
+        continue;
+      }
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const invalidFields = parseInvalidFieldNames(body);
+        if (invalidFields.length && fields !== "*") {
+          break;
+        }
+        console.warn(
+          `[bullhorn-sync-clientcontacts] Entity overlay failed for ${id} (${response.status}): ${body.slice(0, 180)}`,
+        );
+        return null;
+      }
+
+      const payload = await response.json();
+      const data = payload?.data && typeof payload.data === "object" ? payload.data : payload;
+      if (!data || typeof data !== "object") return null;
+      return data;
+    }
   }
 
   return null;
@@ -740,6 +808,7 @@ async function fetchClientContactsBatch(
   let activeFields = preferredFields?.trim() || skillsFallbackFields;
   const attemptedSelectors = new Set<string>([activeFields]);
   const skillOverlaySelector = buildSkillOverlayFieldSelector(supportedFields ?? null);
+  const entitySkillSelector = buildEntitySkillFieldSelector(supportedFields ?? null);
 
   let lastError: string | null = null;
   for (let attempt = 0; attempt < 9; attempt++) {
@@ -861,7 +930,7 @@ async function fetchClientContactsBatch(
         }
 
         for (const id of stillMissingIds) {
-          const entityOverlay = await fetchEntityOverlayById(restUrl, bhRestToken, id);
+          const entityOverlay = await fetchEntityOverlayById(restUrl, bhRestToken, id, entitySkillSelector);
           if (!entityOverlay) continue;
           const target = rowById.get(id);
           if (!target) continue;
