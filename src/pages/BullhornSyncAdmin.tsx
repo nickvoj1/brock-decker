@@ -931,7 +931,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           >
             <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full overflow-auto" : "overflow-x-auto"}`}>
             <Table className="w-[2200px] table-fixed text-base">
-              <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
+              <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60 [&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:bg-background/95 [&_th]:backdrop-blur" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
                   <TableHead className={`w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("id")}>
@@ -1079,14 +1079,16 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Loaded {contacts.length.toLocaleString()} of {contactsTotal.toLocaleString()}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {isLoadingMore ? "Loading next 25..." : hasMoreContacts ? "Scroll down to load next 25" : "All contacts loaded"}
-            </p>
-          </div>
+          {!tableOnly && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Loaded {contacts.length.toLocaleString()} of {contactsTotal.toLocaleString()}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {isLoadingMore ? "Loading next 25..." : hasMoreContacts ? "Scroll down to load next 25" : "All contacts loaded"}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </AppLayout>
