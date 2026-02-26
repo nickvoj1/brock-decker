@@ -88,8 +88,35 @@ const SKILL_OVERLAY_FIELDS = [
 ].join(",");
 const SKILL_KEY_REGEX = /(skill|special|categor|expert|industry|sector|keyword|tag)/i;
 const CUSTOM_FIELD_REGEX = /^custom(textblock|text|object|int|date)\d+$/i;
+const MIRROR_FILTER_FIELDS = new Set([
+  "name",
+  "company",
+  "title",
+  "email",
+  "city",
+  "country",
+  "consultant",
+  "status",
+  "skills",
+]);
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+type MirrorFilterOperator = "contains" | "equals";
+type MirrorFilterField =
+  | "name"
+  | "company"
+  | "title"
+  | "email"
+  | "city"
+  | "country"
+  | "consultant"
+  | "status"
+  | "skills";
+type MirrorFilterRow = {
+  field: MirrorFilterField;
+  operator: MirrorFilterOperator;
+  values: string[];
+};
 
 type BullhornTokens = {
   access_token: string;
@@ -158,6 +185,263 @@ function normalizeSearchTerm(input: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+function normalizeFilterOperator(input: unknown): MirrorFilterOperator {
+  return String(input || "").toLowerCase() === "equals" ? "equals" : "contains";
+}
+
+function normalizeFilterRows(input: unknown): MirrorFilterRow[] {
+  if (!Array.isArray(input)) return [];
+
+  const normalized: MirrorFilterRow[] = [];
+  for (const row of input) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const field = String(record.field || "").toLowerCase() as MirrorFilterField;
+    if (!MIRROR_FILTER_FIELDS.has(field)) continue;
+
+    const rawValues = Array.isArray(record.values)
+      ? record.values
+      : String(record.values || "")
+        .split(/[\n,;|]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    const values = rawValues
+      .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+      .filter((value) => value.length > 0)
+      .slice(0, 25);
+
+    if (!values.length) continue;
+    normalized.push({
+      field,
+      operator: normalizeFilterOperator(record.operator),
+      values,
+    });
+  }
+
+  return normalized.slice(0, 20);
+}
+
+function parseJsonLikeString(value: string): unknown | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const looksJson =
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    (trimmed.startsWith("\"{") && trimmed.endsWith("}\"")) ||
+    (trimmed.startsWith("\"[") && trimmed.endsWith("]\""));
+  if (!looksJson) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === "string") {
+      try {
+        return JSON.parse(parsed);
+      } catch {
+        return parsed;
+      }
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeLooseText(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeToken(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+&.\-/ ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function readRawRecord(contact: any): Record<string, unknown> {
+  const raw = contact?.raw;
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+function findAddressRecord(contact: any): Record<string, unknown> {
+  const rawRecord = readRawRecord(contact);
+  const rawAddress = rawRecord.address;
+  if (rawAddress && typeof rawAddress === "object" && !Array.isArray(rawAddress)) {
+    return rawAddress as Record<string, unknown>;
+  }
+  return {};
+}
+
+function extractSkillTermsFromMirrorContact(contact: any): string[] {
+  const rawRecord = readRawRecord(contact);
+  const terms: string[] = [];
+  const seen = new Set<string>();
+
+  const addTerm = (value: string) => {
+    const normalized = normalizeToken(value);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    terms.push(normalized);
+  };
+
+  for (const [key, value] of Object.entries(rawRecord)) {
+    const lower = key.toLowerCase();
+    if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
+
+    const candidates = valueToSkillTerms(value);
+    for (const candidate of candidates) addTerm(candidate);
+
+    if (typeof value === "string") {
+      const parsed = parseJsonLikeString(value);
+      if (parsed !== null) {
+        for (const candidate of valueToSkillTerms(parsed)) addTerm(candidate);
+      }
+    }
+  }
+
+  return terms;
+}
+
+function getFieldValuesForMirrorFilter(contact: any, field: MirrorFilterField): string[] {
+  const rawRecord = readRawRecord(contact);
+  const addressRecord = findAddressRecord(contact);
+  const values: string[] = [];
+
+  const addValue = (value: unknown) => {
+    if (value === null || value === undefined) return;
+    if (typeof value === "string") {
+      const normalized = normalizeLooseText(value);
+      if (normalized) values.push(normalized);
+      return;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      values.push(normalizeLooseText(value));
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) addValue(entry);
+      return;
+    }
+    if (typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if ("name" in record) addValue(record.name);
+      if ("value" in record) addValue(record.value);
+      return;
+    }
+  };
+
+  switch (field) {
+    case "name":
+      addValue(contact?.name);
+      addValue(rawRecord.name);
+      addValue(contact?.first_name);
+      addValue(contact?.last_name);
+      addValue(`${contact?.first_name || ""} ${contact?.last_name || ""}`.trim());
+      break;
+    case "company":
+      addValue(contact?.client_corporation_name);
+      addValue(rawRecord.clientCorporation);
+      break;
+    case "title":
+      addValue(contact?.occupation);
+      addValue(rawRecord.occupation);
+      break;
+    case "email":
+      addValue(contact?.email);
+      addValue(rawRecord.email);
+      break;
+    case "city":
+      addValue(contact?.address_city);
+      addValue(addressRecord.city);
+      addValue(rawRecord.city);
+      break;
+    case "country":
+      addValue(addressRecord.countryName);
+      addValue(addressRecord.country);
+      break;
+    case "consultant":
+      addValue(contact?.owner_name);
+      addValue(rawRecord.owner);
+      break;
+    case "status":
+      addValue(contact?.status);
+      addValue(rawRecord.status);
+      break;
+    case "skills":
+      return extractSkillTermsFromMirrorContact(contact);
+  }
+
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function matchFilterValue(fieldValues: string[], filterValue: string, field: MirrorFilterField, operator: MirrorFilterOperator): boolean {
+  if (!fieldValues.length) return false;
+  const target = normalizeToken(filterValue);
+  if (!target) return false;
+
+  if (field === "skills") {
+    const tokenSet = new Set(fieldValues.map((token) => normalizeToken(token)).filter(Boolean));
+    if (!tokenSet.size) return false;
+
+    if (operator === "equals") {
+      return tokenSet.has(target);
+    }
+
+    const parts = target.split(" ").filter(Boolean);
+    if (parts.length > 1) {
+      return parts.every((part) => tokenSet.has(part));
+    }
+    if (target.length <= 3) {
+      return tokenSet.has(target);
+    }
+    for (const token of tokenSet) {
+      if (token.includes(target)) return true;
+    }
+    return false;
+  }
+
+  const normalizedValues = fieldValues.map((value) => normalizeToken(value)).filter(Boolean);
+  if (!normalizedValues.length) return false;
+  if (operator === "equals") {
+    return normalizedValues.some((value) => value === target);
+  }
+  return normalizedValues.some((value) => value.includes(target));
+}
+
+function contactMatchesFilterRows(contact: any, rows: MirrorFilterRow[]): boolean {
+  if (!rows.length) return true;
+
+  // Bullhorn-like logic: OR within one row, AND between rows.
+  for (const row of rows) {
+    const fieldValues = getFieldValuesForMirrorFilter(contact, row.field);
+    const rowMatched = row.values.some((value) => matchFilterValue(fieldValues, value, row.field, row.operator));
+    if (!rowMatched) return false;
+  }
+  return true;
+}
+
+function contactMatchesQuickSearch(contact: any, searchTerm: string): boolean {
+  if (!searchTerm) return true;
+  const normalized = normalizeLooseText(searchTerm);
+  if (!normalized) return true;
+
+  const candidates = [
+    contact?.name,
+    contact?.email,
+    contact?.client_corporation_name,
+    contact?.occupation,
+    contact?.address_city,
+  ]
+    .map((value) => normalizeLooseText(value))
+    .filter(Boolean);
+
+  return candidates.some((value) => value.includes(normalized));
 }
 
 function splitTopLevelFields(selector: string): string[] {
@@ -1380,27 +1664,72 @@ serve(async (req) => {
       const limit = normalizeListLimit(data?.limit);
       const offset = normalizeListOffset(data?.offset);
       const searchTerm = normalizeSearchTerm(data?.search);
+      const filterRows = normalizeFilterRows(data?.filters);
+      const useAdvancedFiltering = filterRows.length > 0;
 
-      let query = supabase
-        .from("bullhorn_client_contacts_mirror")
-        .select("*", { count: "exact" })
-        .order("synced_at", { ascending: false });
+      if (!useAdvancedFiltering) {
+        let query = supabase
+          .from("bullhorn_client_contacts_mirror")
+          .select("*", { count: "exact" })
+          .order("synced_at", { ascending: false });
 
-      if (searchTerm) {
-        const like = `%${searchTerm}%`;
-        query = query.or(
-          `name.ilike.${like},email.ilike.${like},client_corporation_name.ilike.${like},occupation.ilike.${like},address_city.ilike.${like}`,
-        );
+        if (searchTerm) {
+          const like = `%${searchTerm}%`;
+          query = query.or(
+            `name.ilike.${like},email.ilike.${like},client_corporation_name.ilike.${like},occupation.ilike.${like},address_city.ilike.${like}`,
+          );
+        }
+
+        const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
+
+        if (error) throw error;
+        return jsonResponse({
+          success: true,
+          data: {
+            contacts: contacts || [],
+            total: count || 0,
+            limit,
+            offset,
+          },
+        });
       }
 
-      const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
+      // Advanced filter mode (Bullhorn-style): OR within row values, AND between rows.
+      const chunkSize = 500;
+      let cursor = 0;
+      let matchedTotal = 0;
+      const pagedContacts: any[] = [];
 
-      if (error) throw error;
+      while (true) {
+        const { data: batch, error } = await supabase
+          .from("bullhorn_client_contacts_mirror")
+          .select("*")
+          .order("synced_at", { ascending: false })
+          .range(cursor, cursor + chunkSize - 1);
+
+        if (error) throw error;
+        const rows = Array.isArray(batch) ? batch : [];
+        if (!rows.length) break;
+
+        for (const contact of rows) {
+          if (!contactMatchesQuickSearch(contact, searchTerm)) continue;
+          if (!contactMatchesFilterRows(contact, filterRows)) continue;
+
+          if (matchedTotal >= offset && pagedContacts.length < limit) {
+            pagedContacts.push(contact);
+          }
+          matchedTotal += 1;
+        }
+
+        cursor += rows.length;
+        if (rows.length < chunkSize) break;
+      }
+
       return jsonResponse({
         success: true,
         data: {
-          contacts: contacts || [],
-          total: count || 0,
+          contacts: pagedContacts,
+          total: matchedTotal,
           limit,
           offset,
         },
