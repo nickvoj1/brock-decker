@@ -358,9 +358,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
   const [sortKey, setSortKey] = useState<ContactSortKey>("id");
   const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
-  const [stickyAppHeaderOffset, setStickyAppHeaderOffset] = useState(72);
-  const [stickyToolbarHeight, setStickyToolbarHeight] = useState(0);
-  const stickyToolbarRef = useRef<HTMLDivElement | null>(null);
+  const tableViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -479,55 +477,29 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   }, [profileName, contactsSearch, appliedFilters, loadBullhornMirrorContacts]);
 
   useEffect(() => {
-    const updateOffset = () => {
-      const desktop = window.matchMedia("(min-width: 768px)").matches;
-      setStickyAppHeaderOffset(desktop ? 72 : 64);
-    };
-    updateOffset();
-    window.addEventListener("resize", updateOffset);
-    return () => window.removeEventListener("resize", updateOffset);
-  }, []);
-
-  useEffect(() => {
-    const element = stickyToolbarRef.current;
-    if (!element) return;
-
-    const updateHeight = () => {
-      setStickyToolbarHeight(Math.ceil(element.getBoundingClientRect().height));
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(() => updateHeight());
-    observer.observe(element);
-    window.addEventListener("resize", updateHeight);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateHeight);
-    };
-  }, []);
-
-  useEffect(() => {
     if (profileName !== ADMIN_PROFILE) return;
 
     const maybeLoadMore = () => {
       if (contactsLoading || isLoadingMore || !hasMoreContacts) return;
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
-      const scrollHeight = Math.max(
-        document.documentElement.scrollHeight || 0,
-        document.body.scrollHeight || 0,
-      );
+      const viewport = tableViewportRef.current;
+      if (!viewport) return;
+      const viewportHeight = viewport.clientHeight || 0;
+      const scrollTop = viewport.scrollTop || 0;
+      const scrollHeight = viewport.scrollHeight || 0;
       const distanceToBottom = scrollHeight - (scrollTop + viewportHeight);
       if (distanceToBottom > 260) return;
       void loadBullhornMirrorContacts({ silent: true, append: true, offset: contactsOffset });
     };
 
-    window.addEventListener("scroll", maybeLoadMore, { passive: true });
+    const viewport = tableViewportRef.current;
+    if (!viewport) return;
+
+    viewport.addEventListener("scroll", maybeLoadMore, { passive: true });
     window.addEventListener("resize", maybeLoadMore);
     // Trigger load-more immediately when visible area is not filled.
     maybeLoadMore();
     return () => {
-      window.removeEventListener("scroll", maybeLoadMore);
+      viewport.removeEventListener("scroll", maybeLoadMore);
       window.removeEventListener("resize", maybeLoadMore);
     };
   }, [profileName, contactsLoading, isLoadingMore, hasMoreContacts, contactsOffset, loadBullhornMirrorContacts]);
@@ -658,9 +630,6 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       : <ArrowDown className="ml-1 h-3.5 w-3.5" />;
   };
 
-  const stickyTableHeaderTop = stickyAppHeaderOffset + stickyToolbarHeight;
-  const stickyHeadCellClass = `sticky z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85`;
-
   return (
     <AppLayout
       title="Contact Sync"
@@ -783,10 +752,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         </Card>
       )}
 
-      <Card className={tableOnly ? "border-0 bg-transparent shadow-none" : undefined}>
+      <Card className={tableOnly ? "border-0 bg-transparent shadow-none h-[calc(100dvh-8.5rem)] md:h-[calc(100dvh-10rem)] flex flex-col" : undefined}>
         <CardHeader
-          ref={stickyToolbarRef}
-          className="sticky z-40 top-16 md:top-[4.5rem] bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 border-b"
+          className={tableOnly ? "border-b bg-background/95" : undefined}
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex w-full max-w-[680px] items-center gap-2">
@@ -953,79 +921,79 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7" : "space-y-3"}>
+        <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7 flex flex-col flex-1 min-h-0" : "space-y-3"}>
           <div
             className={`w-full ${
               tableOnly
-                ? "min-h-[calc(100vh-210px)] border-l-2 border-t-2 border-primary rounded-none bg-background shadow-[inset_1px_0_0_rgba(15,15,15,0.9),inset_0_1px_0_rgba(15,15,15,0.9)]"
+                ? "flex-1 min-h-0 border-l-2 border-t-2 border-primary rounded-none bg-background shadow-[inset_1px_0_0_rgba(15,15,15,0.9),inset_0_1px_0_rgba(15,15,15,0.9)]"
                 : ""
             }`}
           >
-            <div className="w-full overflow-x-auto overflow-y-visible">
+            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full overflow-auto" : "overflow-x-auto"}`}>
             <Table className="w-[2200px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("id")}>
                       ID {renderSortIcon("id")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("name")}>
                       Name {renderSortIcon("name")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("jobTitle")}>
                       Job Title {renderSortIcon("jobTitle")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("company")}>
                       Company {renderSortIcon("company")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[260px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("workEmail")}>
                       Work Email {renderSortIcon("workEmail")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[125px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("status")}>
                       Status {renderSortIcon("status")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[160px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("workPhone")}>
                       Work Phone {renderSortIcon("workPhone")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[180px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("consultant")}>
                       Consultant {renderSortIcon("consultant")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[220px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("address")}>
                       Address {renderSortIcon("address")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("lastVisit")}>
                       Last Visit {renderSortIcon("lastVisit")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("dateAdded")}>
                       Date Added {renderSortIcon("dateAdded")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("dateLastModified")}>
                       Last Modified {renderSortIcon("dateLastModified")}
                     </Button>
                   </TableHead>
-                  <TableHead style={{ top: stickyTableHeaderTop }} className={`${stickyHeadCellClass} w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
+                  <TableHead className={`w-[370px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/60 last:border-r-0" : ""}`}>
                     <Button variant="ghost" size="sm" className="h-7 px-1 text-sm font-medium" onClick={() => toggleSort("skills")}>
                       Skills {renderSortIcon("skills")}
                     </Button>
