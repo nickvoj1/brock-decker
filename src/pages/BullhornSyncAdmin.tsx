@@ -659,7 +659,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   };
 
   const stickyTableHeaderTop = stickyAppHeaderOffset + stickyToolbarHeight;
-  const stickyHeadCellClass = `sticky z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85`;
+  const stickyHeadCellClass = `sticky z-30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85`;
 
   return (
     <AppLayout
@@ -786,7 +786,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       <Card className={tableOnly ? "border-0 bg-transparent shadow-none" : undefined}>
         <CardHeader
           ref={stickyToolbarRef}
-          className="sticky z-20 top-16 md:top-[4.5rem] bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 border-b"
+          className="sticky z-40 top-16 md:top-[4.5rem] bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/90 border-b"
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex w-full max-w-[680px] items-center gap-2">
@@ -961,7 +961,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 : ""
             }`}
           >
-            <div className="w-full overflow-x-auto">
+            <div className="w-full overflow-x-auto overflow-y-visible">
             <Table className="w-[2200px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/60 bg-muted/20 hover:bg-muted/20" : "border-0 hover:bg-transparent"}>
