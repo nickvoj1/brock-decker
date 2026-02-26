@@ -532,12 +532,12 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
             </div>
           </div>
         </CardHeader>
-        <CardContent className={tableOnly ? "space-y-3 px-0 pb-0" : "space-y-3"}>
+        <CardContent className={tableOnly ? "space-y-3 px-0 pb-0 -mx-4 md:-mx-6 lg:-mx-7" : "space-y-3"}>
           <ScrollArea
             ref={contactsScrollAreaRef}
             className={`h-[68vh] w-full ${
               tableOnly
-                ? "rounded-xl border-2 border-primary bg-background shadow-[0_0_0_1px_rgba(15,15,15,0.95),0_14px_32px_rgba(0,0,0,0.08)]"
+                ? "h-[calc(100vh-210px)] border-l-2 border-t-2 border-primary rounded-none bg-background shadow-[inset_1px_0_0_rgba(15,15,15,0.9),inset_0_1px_0_rgba(15,15,15,0.9)]"
                 : ""
             }`}
           >
