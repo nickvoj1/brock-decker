@@ -13,6 +13,7 @@ import GenerateMail from "./pages/GenerateMail";
 import SettingsPage from "./pages/Settings";
 import AdminPanel from "./pages/AdminPanel";
 import BullhornSyncAdmin from "./pages/BullhornSyncAdmin";
+import DistributionLists from "./pages/DistributionLists";
 import SignalsDashboard from "./pages/SignalsDashboard";
 import NotFound from "./pages/NotFound";
 
@@ -37,6 +38,8 @@ const App = () => (
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin" element={<AdminPanel />} />
           <Route path="/admin/bullhorn-sync" element={<BullhornSyncAdmin />} />
+          <Route path="/crm/contact-sync" element={<BullhornSyncAdmin tableOnly />} />
+          <Route path="/crm/distribution-lists" element={<DistributionLists />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
