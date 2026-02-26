@@ -936,8 +936,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 : ""
             }`}
           >
-            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full crm-grid-shell [&>div]:h-full [&>div]:overflow-y-scroll [&>div]:overflow-x-scroll [&>div]:pr-3" : "overflow-x-auto"}`}>
-            <Table className="w-[2600px] min-w-[2600px] table-fixed text-base">
+            <div ref={tableViewportRef} className={`w-full ${tableOnly ? "h-full overflow-y-scroll overflow-x-scroll crm-grid-shell pr-3" : "overflow-x-auto"}`}>
+            <table className="w-[2600px] min-w-[2600px] table-fixed text-base">
               <TableHeader className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/60" : "[&_tr]:border-0"}>
                 <TableRow className={tableOnly ? "border-b border-border/70 bg-muted/15 hover:bg-muted/15" : "border-0 hover:bg-transparent"}>
                   <TableHead className={`${stickyHeadBaseClass} w-[95px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
@@ -1082,7 +1082,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                   })
                 )}
               </TableBody>
-            </Table>
+            </table>
             </div>
           </div>
 
