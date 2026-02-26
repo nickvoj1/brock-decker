@@ -170,11 +170,11 @@ function parseInvalidFieldNames(errorBody: string): string[] {
 
   const out = new Set<string>();
   const patterns = [
-    /invalid field(?: name)?["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
-    /unknown field["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
-    /no (?:such )?(?:field|property)["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
+    /invalid field(?: name)?["'\s:=-]+([a-zA-Z0-9_]+)/gi,
+    /unknown field["'\s:=-]+([a-zA-Z0-9_]+)/gi,
+    /no (?:such )?(?:field|property)["'\s:=-]+([a-zA-Z0-9_]+)/gi,
     /field["'\s]+([a-zA-Z0-9_]+)["'\s]+(?:is|was) invalid/gi,
-    /cannot resolve field["'\s:=\-]+([a-zA-Z0-9_]+)/gi,
+    /cannot resolve field["'\s:=-]+([a-zA-Z0-9_]+)/gi,
   ];
 
   for (const pattern of patterns) {
