@@ -80,6 +80,13 @@ export function AppSidebar() {
     return stored === "CRM System" ? "CRM System" : "Operator Console";
   });
 
+  const setConsoleModeAndPersist = (mode: ConsoleMode) => {
+    setConsoleMode(mode);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(CONSOLE_MODE_STORAGE_KEY, mode);
+    }
+  };
+
   useEffect(() => {
     if (!viewedKey) {
       setLastViewedAt("");
@@ -89,13 +96,8 @@ export function AppSidebar() {
   }, [viewedKey]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(CONSOLE_MODE_STORAGE_KEY, consoleMode);
-  }, [consoleMode]);
-
-  useEffect(() => {
     if (!location.pathname.startsWith("/crm/")) return;
-    setConsoleMode((prev) => (prev === "CRM System" ? prev : "CRM System"));
+    setConsoleModeAndPersist("CRM System");
   }, [location.pathname]);
 
   useEffect(() => {
@@ -158,7 +160,7 @@ export function AppSidebar() {
 
   const handleConsoleModeChange = (value: string) => {
     const nextMode: ConsoleMode = value === "CRM System" ? "CRM System" : "Operator Console";
-    setConsoleMode(nextMode);
+    setConsoleModeAndPersist(nextMode);
     if (nextMode === "CRM System") {
       navigate("/crm/contact-sync");
       return;
