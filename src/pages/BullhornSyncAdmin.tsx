@@ -189,7 +189,7 @@ type ContactSortKey =
   | "workPhone"
   | "consultant"
   | "address"
-  | "lastVisit"
+  | "lastNote"
   | "dateAdded"
   | "dateLastModified"
   | "skills";
@@ -206,11 +206,11 @@ type ContactDisplayRow = {
   workPhone: string;
   consultant: string;
   address: string;
-  lastVisit: string;
+  lastNote: string;
   dateAdded: string;
   dateLastModified: string;
   skills: string;
-  lastVisitMillis: number | null;
+  lastNoteMillis: number | null;
   dateAddedMillis: number | null;
   dateLastModifiedMillis: number | null;
 };
@@ -335,10 +335,18 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
     (rawRecord.owner as Record<string, unknown> | undefined)?.name ?? contact.owner_name,
   );
   const address = formatMirrorAddress(rawRecord.address, contact.address_city, contact.address_state);
-  const lastVisitRaw = rawRecord.lastVisit;
+  const lastNoteText = formatMirrorValue(
+    rawRecord.lastNote ?? rawRecord.comments ?? rawRecord.notes ?? rawRecord.description,
+  );
+  const lastNoteDate = formatMirrorDate(rawRecord.dateLastComment);
+  const lastNote = lastNoteText !== "-"
+    ? lastNoteText
+    : lastNoteDate !== "-"
+      ? `Updated ${lastNoteDate}`
+      : "-";
+  const lastNoteRaw = rawRecord.dateLastComment ?? rawRecord.dateLastModified;
   const dateAddedRaw = rawRecord.dateAdded;
   const dateLastModifiedRaw = rawRecord.dateLastModified ?? contact.date_last_modified;
-  const lastVisit = formatMirrorDate(lastVisitRaw);
   const dateAdded = formatMirrorDate(dateAddedRaw);
   const dateLastModified = formatMirrorDate(dateLastModifiedRaw);
   const skills = extractSkillsFromRaw(rawRecord);
@@ -353,11 +361,11 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
     workPhone,
     consultant,
     address,
-    lastVisit,
+    lastNote,
     dateAdded,
     dateLastModified,
     skills,
-    lastVisitMillis: toDateMillis(lastVisitRaw),
+    lastNoteMillis: toDateMillis(lastNoteRaw),
     dateAddedMillis: toDateMillis(dateAddedRaw),
     dateLastModifiedMillis: toDateMillis(dateLastModifiedRaw),
   };
@@ -826,8 +834,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         case "address":
           compared = compareSortableText(a.address, b.address);
           break;
-        case "lastVisit":
-          compared = compareNullableNumbers(a.lastVisitMillis, b.lastVisitMillis);
+        case "lastNote":
+          compared = compareNullableNumbers(a.lastNoteMillis, b.lastNoteMillis);
           break;
         case "dateAdded":
           compared = compareNullableNumbers(a.dateAddedMillis, b.dateAddedMillis);
@@ -919,7 +927,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       lastVisit:
         formatMirrorDate(pickFirstDefined(liveContact, ["dateLastVisit", "lastVisit"])) !== "-"
           ? formatMirrorDate(pickFirstDefined(liveContact, ["dateLastVisit", "lastVisit"]))
-          : selectedContactProfile.lastVisit,
+          : formatMirrorDate(readNestedValue(getRawRecord(selectedContactProfile.contact), "lastVisit")),
       skills:
         toNullableDisplay(
           pickFirstDefined(liveContact, [
@@ -1492,9 +1500,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       Address {renderSortIcon("address")}
                     </Button>
                   </TableHead>
-                  <TableHead className={`${stickyHeadBaseClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
-                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("lastVisit")}>
-                      Last Visit {renderSortIcon("lastVisit")}
+                  <TableHead className={`${stickyHeadBaseClass} w-[240px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
+                    <Button variant="ghost" size="sm" className={headerSortButtonClass} onClick={() => toggleSort("lastNote")}>
+                      Last Note {renderSortIcon("lastNote")}
                     </Button>
                   </TableHead>
                   <TableHead className={`${stickyHeadBaseClass} w-[130px] whitespace-nowrap text-sm ${tableOnly ? "border-r border-border/70 last:border-r-0" : ""}`}>
@@ -1533,7 +1541,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       workPhone,
                       consultant,
                       address,
-                      lastVisit,
+                      lastNote,
                       dateAdded,
                       dateLastModified,
                       skills,
@@ -1600,7 +1608,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                         <TableCell className={`w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={address}>
                           <span className="block truncate">{address}</span>
                         </TableCell>
-                        <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{lastVisit}</TableCell>
+                        <TableCell className={`w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={lastNote}>
+                          <span className="block truncate">{lastNote}</span>
+                        </TableCell>
                         <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateAdded}</TableCell>
                         <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateLastModified}</TableCell>
                         <TableCell className={`w-[370px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={skills}>
