@@ -8,6 +8,8 @@ const corsHeaders = {
 };
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
+const BUILD_MARKER = "parser-hardened-v2";
+let bootLogged = false;
 const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
 const DEFAULT_TEST_BATCH_SIZE = 5;
@@ -2833,6 +2835,10 @@ async function processSyncJob(
 }
 
 serve(async (req) => {
+  if (!bootLogged) {
+    console.log(`[BHSYNC] boot ${BUILD_MARKER}`);
+    bootLogged = true;
+  }
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
@@ -2886,7 +2892,7 @@ serve(async (req) => {
       return jsonResponse(
         {
           success: true,
-          marker: "parser-hardened-v2",
+          marker: BUILD_MARKER,
           action,
           bodyType: typeof rawBody,
         },
