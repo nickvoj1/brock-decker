@@ -339,7 +339,7 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
   const lastNoteText = liveLatestNote !== "-"
     ? liveLatestNote
     : formatMirrorValue(rawRecord.lastNote ?? rawRecord.comments ?? rawRecord.notes ?? rawRecord.description);
-  const lastNoteDate = formatMirrorDate(rawRecord.dateLastComment);
+  const lastNoteDate = formatMirrorDate(contact.latest_note_date ?? rawRecord.dateLastComment);
   const lastNote = lastNoteText !== "-"
     ? lastNoteText
     : lastNoteDate !== "-"

@@ -123,6 +123,7 @@ const NOTE_QUERY_FIELD_SELECTORS = [
   "id,comments,dateAdded,targetEntityName,targetEntityID",
   "id,comments,dateAdded",
 ];
+const CONTACT_NOTE_OVERLAY_FIELDS = "id,dateLastComment,dateLastVisit,comments,notes,description";
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type MirrorFilterOperator = "contains" | "equals";
@@ -1420,6 +1421,56 @@ async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Pr
     contact.latest_note = comments && action ? `${action}: ${comments}` : comments || action || null;
     contact.latest_note_action = action || null;
     contact.latest_note_date = normalizeBullhornDate(note.dateAdded);
+  }
+
+  // Fallback for Bullhorn instances where note entity is sparse but ClientContact exposes last-note fields.
+  const stillMissingIds = rows
+    .filter((contact) => {
+      const hasNoteText = typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
+      const hasNoteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
+      return !hasNoteText && !hasNoteDate;
+    })
+    .map((contact) => Number(contact?.bullhorn_id ?? contact?.id))
+    .filter((id) => Number.isFinite(id));
+
+  if (!stillMissingIds.length) return rows;
+
+  const noteOverlayById = await fetchSkillOverlayForIds(
+    tokens.rest_url,
+    tokens.bh_rest_token,
+    stillMissingIds,
+    CONTACT_NOTE_OVERLAY_FIELDS,
+  );
+  if (!noteOverlayById.size) return rows;
+
+  for (const contact of rows) {
+    const id = Number(contact?.bullhorn_id ?? contact?.id);
+    if (!Number.isFinite(id)) continue;
+    const overlay = noteOverlayById.get(id);
+    if (!overlay || typeof overlay !== "object") continue;
+
+    const existingRaw =
+      contact?.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
+        ? (contact.raw as Record<string, unknown>)
+        : {};
+    const overlayRaw = overlay as Record<string, unknown>;
+    contact.raw = { ...existingRaw, ...overlayRaw };
+
+    const comments = typeof overlayRaw.comments === "string" ? overlayRaw.comments.trim() : "";
+    const notes = typeof overlayRaw.notes === "string" ? overlayRaw.notes.trim() : "";
+    const description = typeof overlayRaw.description === "string" ? overlayRaw.description.trim() : "";
+    const overlayText = comments || notes || description;
+    const overlayDate = normalizeBullhornDate(overlayRaw.dateLastComment ?? overlayRaw.dateLastVisit);
+
+    const hasNoteText = typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
+    const hasNoteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
+
+    if (!hasNoteText && overlayText) {
+      contact.latest_note = overlayText;
+    }
+    if (!hasNoteDate && overlayDate) {
+      contact.latest_note_date = overlayDate;
+    }
   }
 
   return rows;
