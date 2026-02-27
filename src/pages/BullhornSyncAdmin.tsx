@@ -587,6 +587,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [liveCompanyDetail, setLiveCompanyDetail] = useState<BullhornLiveCompanyDetail | null>(null);
   const [contactDetailLoading, setContactDetailLoading] = useState(false);
   const [companyDetailLoading, setCompanyDetailLoading] = useState(false);
+  const [liveDetailApiSupported, setLiveDetailApiSupported] = useState(true);
   const contactDetailRequestIdRef = useRef(0);
   const companyDetailRequestIdRef = useRef(0);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1000,6 +1001,10 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     setSelectedCompanyProfile(null);
     setSelectedContactProfile(row);
     setLiveContactDetail(null);
+    if (!liveDetailApiSupported) {
+      setContactDetailLoading(false);
+      return;
+    }
     setContactDetailLoading(true);
 
     const result = await getBullhornLiveContactDetail(ADMIN_PROFILE, row.contact.bullhorn_id);
@@ -1008,10 +1013,15 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     if (result.success && result.data) {
       setLiveContactDetail(result.data);
     } else if (result.error) {
-      toast.error(`Live Bullhorn contact fetch failed: ${result.error}`);
+      if (result.error.toLowerCase().includes("unknown action")) {
+        setLiveDetailApiSupported(false);
+        toast.info("Live Bullhorn detail fetch is not deployed yet. Showing mirrored profile data.");
+      } else {
+        toast.error(`Live Bullhorn contact fetch failed: ${result.error}`);
+      }
     }
     setContactDetailLoading(false);
-  }, []);
+  }, [liveDetailApiSupported]);
 
   const openCompanyProfile = useCallback(async (row: ContactDisplayRow) => {
     const requestId = companyDetailRequestIdRef.current + 1;
@@ -1019,6 +1029,10 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     setSelectedContactProfile(null);
     setSelectedCompanyProfile(row);
     setLiveCompanyDetail(null);
+    if (!liveDetailApiSupported) {
+      setCompanyDetailLoading(false);
+      return;
+    }
     setCompanyDetailLoading(true);
 
     const companyId = extractCompanyIdFromRow(row);
@@ -1033,10 +1047,15 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     if (result.success && result.data) {
       setLiveCompanyDetail(result.data);
     } else if (result.error) {
-      toast.error(`Live Bullhorn company fetch failed: ${result.error}`);
+      if (result.error.toLowerCase().includes("unknown action")) {
+        setLiveDetailApiSupported(false);
+        toast.info("Live Bullhorn detail fetch is not deployed yet. Showing mirrored profile data.");
+      } else {
+        toast.error(`Live Bullhorn company fetch failed: ${result.error}`);
+      }
     }
     setCompanyDetailLoading(false);
-  }, []);
+  }, [liveDetailApiSupported]);
 
   const visibleContactIds = useMemo(
     () => displayedContacts.map(({ contact }) => contact.bullhorn_id),
