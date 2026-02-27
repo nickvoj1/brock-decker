@@ -50,14 +50,8 @@ const DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS = [
   "categories(id,name)",
   "specialties(id,name)",
 ];
-const DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS = Array.from(
-  { length: 5 },
-  (_, idx) => `customTextBlock${idx + 1}`,
-);
-const DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS = Array.from(
-  { length: 20 },
-  (_, idx) => `customText${idx + 1}`,
-);
+const DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS = Array.from({ length: 5 }, (_, idx) => `customTextBlock${idx + 1}`);
+const DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS = Array.from({ length: 20 }, (_, idx) => `customText${idx + 1}`);
 const DEFAULT_CONSERVATIVE_CUSTOM_FIELDS = [
   ...DEFAULT_CONSERVATIVE_CUSTOM_TEXTBLOCK_FIELDS,
   ...DEFAULT_CONSERVATIVE_CUSTOM_TEXT_FIELDS,
@@ -285,12 +279,16 @@ function normalizeFilterRows(input: unknown): MirrorFilterRow[] {
     const rawValues = Array.isArray(record.values)
       ? record.values
       : String(record.values || "")
-        .split(/[\n,;|]+|\s+\bOR\b\s+/i)
-        .map((item) => item.trim())
-        .filter(Boolean);
+          .split(/[\n,;|]+|\s+\bOR\b\s+/i)
+          .map((item) => item.trim())
+          .filter(Boolean);
 
     const values = rawValues
-      .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+      .map((value) =>
+        String(value || "")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
       .filter((value) => value.length > 0)
       .slice(0, 25);
 
@@ -311,8 +309,8 @@ function parseJsonLikeString(value: string): unknown | null {
   const looksJson =
     trimmed.startsWith("{") ||
     trimmed.startsWith("[") ||
-    (trimmed.startsWith("\"{") && trimmed.endsWith("}\"")) ||
-    (trimmed.startsWith("\"[") && trimmed.endsWith("]\""));
+    (trimmed.startsWith('"{') && trimmed.endsWith('}"')) ||
+    (trimmed.startsWith('"[') && trimmed.endsWith(']"'));
   if (!looksJson) return null;
 
   try {
@@ -492,7 +490,12 @@ function getFieldValuesForMirrorFilter(contact: any, field: MirrorFilterField): 
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-function matchFilterValue(fieldValues: string[], filterValue: string, field: MirrorFilterField, operator: MirrorFilterOperator): boolean {
+function matchFilterValue(
+  fieldValues: string[],
+  filterValue: string,
+  field: MirrorFilterField,
+  operator: MirrorFilterOperator,
+): boolean {
   if (!fieldValues.length) return false;
   const target = normalizeToken(filterValue);
   if (!target) return false;
@@ -512,9 +515,7 @@ function matchFilterValue(fieldValues: string[], filterValue: string, field: Mir
 
     const parts = target.split(" ").filter(Boolean);
     if (parts.length > 1) {
-      return parts.every((part) =>
-        Array.from(tokenSet).some((token) => token === part || token.includes(part))
-      );
+      return parts.every((part) => Array.from(tokenSet).some((token) => token === part || token.includes(part)));
     }
 
     if (target.length <= 3) {
@@ -696,9 +697,7 @@ function deriveCanonicalSkills(contact: any): void {
     contact.skills = terms.join(" ; ");
   }
   if (terms.length) {
-    contact.skillsCount = hasNumericSkillsCount
-      ? Math.max(Math.floor(numericSkillsCount), terms.length)
-      : terms.length;
+    contact.skillsCount = hasNumericSkillsCount ? Math.max(Math.floor(numericSkillsCount), terms.length) : terms.length;
   }
 }
 
@@ -721,7 +720,10 @@ function hasSkillsPayload(contact: any): boolean {
   }
   for (const key of Object.keys(contact)) {
     const lower = key.toLowerCase();
-    if ((lower.includes("skill") || lower.includes("special") || lower.includes("categor")) && hasMeaningfulValue(contact[key])) {
+    if (
+      (lower.includes("skill") || lower.includes("special") || lower.includes("categor")) &&
+      hasMeaningfulValue(contact[key])
+    ) {
       return true;
     }
   }
@@ -944,9 +946,7 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
     "linkedIn",
     "linkedInURL",
     "linkedinUrl",
-  ].forEach(
-    add,
-  );
+  ].forEach(add);
 
   if (supportedFields) {
     buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
@@ -1143,11 +1143,14 @@ function deriveCommunicationFlags(contact: Record<string, unknown>) {
   };
 }
 
-function deriveCommunicationStatusLabel(flags: {
-  doNotContact: boolean | null;
-  massMailOptOut: boolean | null;
-  emailBounced: boolean | null;
-}, fallback: unknown): string | null {
+function deriveCommunicationStatusLabel(
+  flags: {
+    doNotContact: boolean | null;
+    massMailOptOut: boolean | null;
+    emailBounced: boolean | null;
+  },
+  fallback: unknown,
+): string | null {
   if (flags.doNotContact === true) return "DO_NOT_CONTACT";
   if (flags.massMailOptOut === true) return "OPT_OUT";
   if (flags.emailBounced === true) return "BOUNCED";
@@ -1175,7 +1178,9 @@ function normalizeBullhornDate(value: unknown): string | null {
 }
 
 function normalizeEmail(email: unknown): string | null {
-  const value = String(email || "").trim().toLowerCase();
+  const value = String(email || "")
+    .trim()
+    .toLowerCase();
   return value && value.includes("@") ? value : null;
 }
 
@@ -1511,13 +1516,10 @@ function toFiniteNumber(value: unknown): number | null {
 
 function normalizeLiveNoteRow(input: any): Record<string, unknown> {
   const base = input && typeof input === "object" ? input : {};
-  const personReference = base.personReference && typeof base.personReference === "object"
-    ? base.personReference
-    : null;
+  const personReference =
+    base.personReference && typeof base.personReference === "object" ? base.personReference : null;
   const targetEntity =
-    base.targetEntity && typeof base.targetEntity === "object"
-      ? (base.targetEntity as Record<string, unknown>)
-      : null;
+    base.targetEntity && typeof base.targetEntity === "object" ? (base.targetEntity as Record<string, unknown>) : null;
   const normalizedAction = base.action ? String(base.action).trim() : "";
   const normalizedComments =
     base.comments !== undefined && base.comments !== null
@@ -1537,16 +1539,19 @@ function normalizeLiveNoteRow(input: any): Record<string, unknown> {
     comments: normalizedComments || null,
     dateAdded: normalizeBullhornDate(base.dateAdded ?? base.dateLastModified ?? base.modDate),
     personName: personReference?.name ? String(personReference.name) : null,
-    targetEntityName:
-      base.targetEntityName
-        ? String(base.targetEntityName)
-        : targetEntity?.entityName
-          ? String(targetEntity.entityName)
-          : targetEntity?.name
-            ? String(targetEntity.name)
-            : null,
+    targetEntityName: base.targetEntityName
+      ? String(base.targetEntityName)
+      : targetEntity?.entityName
+        ? String(targetEntity.entityName)
+        : targetEntity?.name
+          ? String(targetEntity.name)
+          : null,
     targetEntityId: toFiniteNumber(
-      base.targetEntityID ?? base.targetEntityId ?? targetEntity?.id ?? targetEntity?.entityID ?? targetEntity?.entityId,
+      base.targetEntityID ??
+        base.targetEntityId ??
+        targetEntity?.id ??
+        targetEntity?.entityID ??
+        targetEntity?.entityId,
     ),
   };
 }
@@ -1600,8 +1605,12 @@ async function fetchBullhornNotesForEntity(
 }
 
 function normalizeTimelineEventType(source: string, value: unknown, fallbackSummary: unknown): string {
-  const direct = String(value || "").trim().toLowerCase();
-  const summary = String(fallbackSummary || "").trim().toLowerCase();
+  const direct = String(value || "")
+    .trim()
+    .toLowerCase();
+  const summary = String(fallbackSummary || "")
+    .trim()
+    .toLowerCase();
   const combined = `${direct} ${summary}`.trim();
   if (!combined) return source;
   if (combined.includes("email") || combined.includes("mail")) return "email";
@@ -1626,12 +1635,7 @@ function extractContactIdFromActivityRow(row: Record<string, unknown>): number |
     if (value) return value;
   }
 
-  const objectCandidates = [
-    row.clientContact,
-    row.clientContactReference,
-    row.contact,
-    row.targetEntity,
-  ];
+  const objectCandidates = [row.clientContact, row.clientContactReference, row.contact, row.targetEntity];
   for (const candidate of objectCandidates) {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
     const record = candidate as Record<string, unknown>;
@@ -1643,12 +1647,14 @@ function extractContactIdFromActivityRow(row: Record<string, unknown>): number |
 }
 
 function extractActorNameFromActivityRow(row: Record<string, unknown>): string | null {
-  const owner = row.owner && typeof row.owner === "object" && !Array.isArray(row.owner)
-    ? (row.owner as Record<string, unknown>)
-    : null;
-  const personReference = row.personReference && typeof row.personReference === "object" && !Array.isArray(row.personReference)
-    ? (row.personReference as Record<string, unknown>)
-    : null;
+  const owner =
+    row.owner && typeof row.owner === "object" && !Array.isArray(row.owner)
+      ? (row.owner as Record<string, unknown>)
+      : null;
+  const personReference =
+    row.personReference && typeof row.personReference === "object" && !Array.isArray(row.personReference)
+      ? (row.personReference as Record<string, unknown>)
+      : null;
 
   return normalizeOptionalString(owner?.name ?? personReference?.name ?? row.personName ?? row.author);
 }
@@ -1661,12 +1667,8 @@ function normalizeTimelineEventRow(
   const eventAt = normalizeBullhornDate(
     row.dateAdded ?? row.dateBegin ?? row.dateEnd ?? row.dateLastModified ?? row.modDate,
   );
-  const summary = normalizeOptionalString(
-    row.subject ?? row.action ?? row.status ?? row.type ?? row.targetEntityName,
-  );
-  const details = normalizeOptionalString(
-    row.comments ?? row.notes ?? row.description ?? row.note,
-  );
+  const summary = normalizeOptionalString(row.subject ?? row.action ?? row.status ?? row.type ?? row.targetEntityName);
+  const details = normalizeOptionalString(row.comments ?? row.notes ?? row.description ?? row.note);
   const eventType = normalizeTimelineEventType(source, row.type ?? row.action ?? row.status, summary);
   const externalId = normalizeOptionalString(row.id);
   const externalKey = externalId
@@ -1750,10 +1752,7 @@ async function fetchContactTimelineEvents(
       restUrl,
       bhRestToken,
       "Note",
-      [
-        `targetEntityName='ClientContact' AND targetEntityID IN (${inList})`,
-        `targetEntityID IN (${inList})`,
-      ],
+      [`targetEntityName='ClientContact' AND targetEntityID IN (${inList})`, `targetEntityID IN (${inList})`],
       NOTE_QUERY_FIELD_SELECTORS,
     );
     for (const row of noteRows) {
@@ -1767,11 +1766,7 @@ async function fetchContactTimelineEvents(
       restUrl,
       bhRestToken,
       "Task",
-      [
-        `clientContact.id IN (${inList})`,
-        `clientContactReference.id IN (${inList})`,
-        `clientContactID IN (${inList})`,
-      ],
+      [`clientContact.id IN (${inList})`, `clientContactReference.id IN (${inList})`, `clientContactID IN (${inList})`],
       TASK_QUERY_FIELD_SELECTORS,
     );
     for (const row of taskRows) {
@@ -1785,11 +1780,7 @@ async function fetchContactTimelineEvents(
       restUrl,
       bhRestToken,
       "Appointment",
-      [
-        `clientContact.id IN (${inList})`,
-        `clientContactReference.id IN (${inList})`,
-        `clientContactID IN (${inList})`,
-      ],
+      [`clientContact.id IN (${inList})`, `clientContactReference.id IN (${inList})`, `clientContactID IN (${inList})`],
       APPOINTMENT_QUERY_FIELD_SELECTORS,
     );
     for (const row of appointmentRows) {
@@ -1803,18 +1794,16 @@ async function fetchContactTimelineEvents(
       restUrl,
       bhRestToken,
       "ClientCorporationAppointment",
-      [
-        `clientContact.id IN (${inList})`,
-        `clientContactID IN (${inList})`,
-      ],
+      [`clientContact.id IN (${inList})`, `clientContactID IN (${inList})`],
       CLIENT_CORP_APPOINTMENT_SELECTORS,
     );
     for (const row of corpAppointmentRows) {
       const contactId = extractContactIdFromActivityRow(row);
       if (!contactId) continue;
-      const appointment = row.appointment && typeof row.appointment === "object" && !Array.isArray(row.appointment)
-        ? (row.appointment as Record<string, unknown>)
-        : row;
+      const appointment =
+        row.appointment && typeof row.appointment === "object" && !Array.isArray(row.appointment)
+          ? (row.appointment as Record<string, unknown>)
+          : row;
       const normalized = normalizeTimelineEventRow("appointment", contactId, appointment);
       if (normalized) events.push(normalized);
     }
@@ -1823,18 +1812,16 @@ async function fetchContactTimelineEvents(
       restUrl,
       bhRestToken,
       "ClientCorporationTask",
-      [
-        `clientContact.id IN (${inList})`,
-        `clientContactID IN (${inList})`,
-      ],
+      [`clientContact.id IN (${inList})`, `clientContactID IN (${inList})`],
       CLIENT_CORP_TASK_SELECTORS,
     );
     for (const row of corpTaskRows) {
       const contactId = extractContactIdFromActivityRow(row);
       if (!contactId) continue;
-      const task = row.task && typeof row.task === "object" && !Array.isArray(row.task)
-        ? (row.task as Record<string, unknown>)
-        : row;
+      const task =
+        row.task && typeof row.task === "object" && !Array.isArray(row.task)
+          ? (row.task as Record<string, unknown>)
+          : row;
       const normalized = normalizeTimelineEventRow("task", contactId, task);
       if (normalized) events.push(normalized);
     }
@@ -1855,10 +1842,11 @@ async function fetchContactFileAttachments(
   contactId: number,
 ): Promise<Record<string, unknown>[]> {
   const out: Record<string, unknown>[] = [];
-  const selectors = FILE_ATTACHMENT_SELECTORS.map((selector) =>
-    `${restUrl}entity/ClientContact/${contactId}/fileAttachments?BhRestToken=${encodeURIComponent(
-      bhRestToken,
-    )}&fields=${encodeURIComponent(selector)}`
+  const selectors = FILE_ATTACHMENT_SELECTORS.map(
+    (selector) =>
+      `${restUrl}entity/ClientContact/${contactId}/fileAttachments?BhRestToken=${encodeURIComponent(
+        bhRestToken,
+      )}&fields=${encodeURIComponent(selector)}`,
   );
 
   for (const url of selectors) {
@@ -1883,10 +1871,7 @@ async function fetchContactFileAttachments(
   return out;
 }
 
-function normalizeDocumentRow(
-  contactId: number,
-  row: Record<string, unknown>,
-): Record<string, unknown> {
+function normalizeDocumentRow(contactId: number, row: Record<string, unknown>): Record<string, unknown> {
   const fileId = toFiniteNumber(row.id ?? row.fileID ?? row.fileId);
   const name = normalizeOptionalString(row.name ?? row.fileName ?? row.file_name);
   const contentType = normalizeOptionalString(row.contentType ?? row.mimeType);
@@ -1950,10 +1935,7 @@ function applyTimelineEventToParity(
   }
 }
 
-function mergeContactFieldDatesIntoParity(
-  parity: ContactParitySummary,
-  contact: Record<string, unknown>,
-) {
+function mergeContactFieldDatesIntoParity(parity: ContactParitySummary, contact: Record<string, unknown>) {
   const fallbackLastContacted = maxIsoDate(
     contact.dateLastComment,
     contact.dateLastVisit,
@@ -1961,14 +1943,8 @@ function mergeContactFieldDatesIntoParity(
     contact.dateLastModified,
   );
   parity.lastContactedAt = maxIsoDate(parity.lastContactedAt, fallbackLastContacted);
-  parity.lastEmailReceivedAt = maxIsoDate(
-    parity.lastEmailReceivedAt,
-    contact.lastEmailReceivedDate,
-  );
-  parity.lastEmailSentAt = maxIsoDate(
-    parity.lastEmailSentAt,
-    contact.lastEmailSentDate,
-  );
+  parity.lastEmailReceivedAt = maxIsoDate(parity.lastEmailReceivedAt, contact.lastEmailReceivedDate);
+  parity.lastEmailSentAt = maxIsoDate(parity.lastEmailSentAt, contact.lastEmailSentDate);
 }
 
 function buildCommsStatusRow(
@@ -1980,7 +1956,8 @@ function buildCommsStatusRow(
   const flags = deriveCommunicationFlags(contact);
   const statusLabel = deriveCommunicationStatusLabel(flags, contact.emailStatus ?? contact.communicationStatus);
   const emailPrimary = normalizeEmail(contact.email) ?? normalizeOptionalString(contact.email);
-  const emailSecondary = normalizeEmail(contact.email2) ?? normalizeEmail(contact.email3) ?? normalizeOptionalString(contact.email2);
+  const emailSecondary =
+    normalizeEmail(contact.email2) ?? normalizeEmail(contact.email3) ?? normalizeOptionalString(contact.email2);
 
   return {
     bullhorn_contact_id: contactId,
@@ -2045,31 +2022,23 @@ async function fetchDocumentsForContactIds(
   return { rows, summaryByContact };
 }
 
-async function syncCustomFieldDictionary(
-  supabase: any,
-  restUrl: string,
-  bhRestToken: string,
-  jobId: string,
-) {
+async function syncCustomFieldDictionary(supabase: any, restUrl: string, bhRestToken: string, jobId: string) {
   const dictionaryRows: Record<string, unknown>[] = [];
   for (const entityName of CONTACT_PARITY_ENTITY_META) {
     const payload = await fetchEntityMetaPayload(restUrl, bhRestToken, entityName);
     if (!payload) continue;
     const fields = extractMetaFieldEntries(payload);
     for (const field of fields) {
-      const name = normalizeOptionalString(field.name ?? field.dataName ?? field.fieldName ?? field.field_name ?? field.fieldName ?? field.fieldname);
+      const name = normalizeOptionalString(
+        field.name ?? field.dataName ?? field.fieldName ?? field.field_name ?? field.fieldName ?? field.fieldname,
+      );
       if (!name) continue;
       const label = normalizeOptionalString(field.label ?? field.displayLabel ?? field.displayName ?? field.caption);
       const dataType = normalizeOptionalString(field.dataType ?? field.typeName ?? field.valueType);
       const fieldType = normalizeOptionalString(field.type ?? field.fieldType ?? field.controlType);
       const required = normalizeLooseBoolean(field.required);
       const hidden = normalizeLooseBoolean(field.hidden ?? field.private);
-      const options =
-        Array.isArray(field.options)
-          ? field.options
-          : Array.isArray(field.values)
-            ? field.values
-            : [];
+      const options = Array.isArray(field.options) ? field.options : Array.isArray(field.values) ? field.values : [];
       const lower = name.toLowerCase();
       const isCustom = CUSTOM_FIELD_REGEX.test(lower) || lower.startsWith("custom");
       dictionaryRows.push({
@@ -2213,10 +2182,7 @@ function noteDateMillis(note: Record<string, unknown>): number {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-function updateLatestNoteMap(
-  map: Map<number, Record<string, unknown>>,
-  note: Record<string, unknown>,
-) {
+function updateLatestNoteMap(map: Map<number, Record<string, unknown>>, note: Record<string, unknown>) {
   const contactId = toFiniteNumber(note.targetEntityId);
   if (!contactId) return;
 
@@ -2309,10 +2275,8 @@ async function fetchLatestNotesForContactIds(
 }
 
 function hasPersistedLatestNote(contact: any): boolean {
-  const noteText =
-    typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
-  const noteDate =
-    typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
+  const noteText = typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
+  const noteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
   return noteText || noteDate;
 }
 
@@ -2338,9 +2302,9 @@ function deriveLatestNoteFromContactFields(contact: any): {
     contact?.notes,
     contact?.description,
   ];
-  const text = textCandidates
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .find((value) => value.length > 0) || null;
+  const text =
+    textCandidates.map((value) => (typeof value === "string" ? value.trim() : "")).find((value) => value.length > 0) ||
+    null;
 
   const date = normalizeBullhornDate(
     contact?.latest_note_date ?? contact?.dateLastComment ?? contact?.dateLastVisit ?? contact?.dateLastModified,
@@ -2357,9 +2321,7 @@ async function enrichFetchedContactsWithLatestNotes(
   const rows = Array.isArray(contacts) ? contacts : [];
   if (!rows.length) return rows;
 
-  const ids = rows
-    .map((contact) => Number(contact?.id ?? contact?.bullhorn_id))
-    .filter((id) => Number.isFinite(id));
+  const ids = rows.map((contact) => Number(contact?.id ?? contact?.bullhorn_id)).filter((id) => Number.isFinite(id));
   if (!ids.length) return rows;
 
   const latestByContact = await fetchLatestNotesForContactIds(restUrl, bhRestToken, ids);
@@ -2412,9 +2374,7 @@ async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Pr
   const rows = Array.isArray(contacts) ? contacts : [];
   if (!rows.length) return rows;
 
-  const ids = rows
-    .map((contact) => Number(contact?.bullhorn_id ?? contact?.id))
-    .filter((id) => Number.isFinite(id));
+  const ids = rows.map((contact) => Number(contact?.bullhorn_id ?? contact?.id)).filter((id) => Number.isFinite(id));
   if (!ids.length) return rows;
 
   const tokens = await getStoredBullhornTokens(supabase);
@@ -2496,9 +2456,11 @@ async function fetchClientContactsBatch(
         for (const candidate of fallbackCandidates) {
           if (candidate === activeFields || attemptedSelectors.has(candidate)) continue;
           const label =
-            candidate === coreFallbackFields ? "core selector" :
-            candidate === baselineFallbackFields ? "baseline selector" :
-            "skills-aware selector";
+            candidate === coreFallbackFields
+              ? "core selector"
+              : candidate === baselineFallbackFields
+                ? "baseline selector"
+                : "skills-aware selector";
           console.warn(`[bullhorn-sync-clientcontacts] Falling back to ${label} after field error`);
           activeFields = candidate;
           attemptedSelectors.add(candidate);
@@ -2511,11 +2473,7 @@ async function fetchClientContactsBatch(
         continue;
       }
 
-      if (
-        activeFields !== coreFallbackFields &&
-        response.status >= 400 &&
-        response.status < 500
-      ) {
+      if (activeFields !== coreFallbackFields && response.status >= 400 && response.status < 500) {
         console.warn(
           `[bullhorn-sync-clientcontacts] Non-OK ${response.status}, forcing core selector. body=${body.slice(0, 200)}`,
         );
@@ -2591,12 +2549,13 @@ async function fetchClientContactsBatch(
 
     const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
-    const skillKeys = firstRow && typeof firstRow === "object"
-      ? Object.keys(firstRow).filter((key) => {
-        const lower = key.toLowerCase();
-        return lower.includes("skill") || lower.includes("special") || lower.includes("category");
-      })
-      : [];
+    const skillKeys =
+      firstRow && typeof firstRow === "object"
+        ? Object.keys(firstRow).filter((key) => {
+            const lower = key.toLowerCase();
+            return lower.includes("skill") || lower.includes("special") || lower.includes("category");
+          })
+        : [];
     console.log(
       `[bullhorn-sync-clientcontacts] Batch start=${start} count=${rows.length} selectorFields=${
         splitTopLevelFields(activeFields).length
@@ -2619,7 +2578,12 @@ function mapMirrorRow(contact: any, jobId: string, parity?: ContactParitySummary
   const commStatusLabel = deriveCommunicationStatusLabel(flags, record.emailStatus ?? record.communicationStatus);
   const lastEmailReceivedAt = maxIsoDate(parity?.lastEmailReceivedAt, record.lastEmailReceivedDate);
   const lastEmailSentAt = maxIsoDate(parity?.lastEmailSentAt, record.lastEmailSentDate);
-  const fallbackLastContacted = maxIsoDate(record.dateLastComment, record.dateLastVisit, record.lastVisit, record.dateLastModified);
+  const fallbackLastContacted = maxIsoDate(
+    record.dateLastComment,
+    record.dateLastVisit,
+    record.lastVisit,
+    record.dateLastModified,
+  );
   const lastContactedAt = maxIsoDate(parity?.lastContactedAt, fallbackLastContacted);
   const customFieldSummary = extractCustomFieldSummary(record);
 
@@ -2654,9 +2618,7 @@ function mapMirrorRow(contact: any, jobId: string, parity?: ContactParitySummary
       normalizeOptionalString(record.linkedInURL) ??
       normalizeOptionalString(record.linkedinUrl) ??
       normalizeOptionalString(record.linkedIn),
-    work_phone_secondary:
-      normalizeOptionalString(record.phone2) ??
-      normalizeOptionalString(record.phone3),
+    work_phone_secondary: normalizeOptionalString(record.phone2) ?? normalizeOptionalString(record.phone3),
     preferred_contact: normalizeOptionalString(record.preferredContact),
     mass_mail_opt_out: flags.massMailOptOut,
     sms_opt_in: flags.smsOptIn,
@@ -2780,13 +2742,7 @@ async function processSyncJob(
       supportedFields,
     );
     await enrichFetchedContactsWithLatestNotes(tokens.rest_url, tokens.bh_rest_token, rows);
-    const parityById = await syncBatchParityData(
-      supabase,
-      tokens.rest_url,
-      tokens.bh_rest_token,
-      job.id,
-      rows,
-    );
+    const parityById = await syncBatchParityData(supabase, tokens.rest_url, tokens.bh_rest_token, job.id, rows);
 
     if (totalExpected === null && Number.isFinite(Number(total))) {
       totalExpected = Number(total);
@@ -2966,11 +2922,7 @@ serve(async (req) => {
 
       const maxBatchesPerInvocation = normalizeMaxBatches(data?.maxBatchesPerInvocation);
 
-      const { data: job, error } = await supabase
-        .from("bullhorn_sync_jobs")
-        .select("*")
-        .eq("id", jobId)
-        .maybeSingle();
+      const { data: job, error } = await supabase.from("bullhorn_sync_jobs").select("*").eq("id", jobId).maybeSingle();
 
       if (error || !job) return jsonResponse({ success: false, error: "Sync job not found" }, 404);
       if (job.status === "completed" || job.status === "cancelled") {
@@ -3234,7 +3186,9 @@ serve(async (req) => {
       if (customOnly) query = query.eq("is_custom", true);
       if (search) {
         const like = `%${search}%`;
-        query = query.or(`field_name.ilike.${like},field_label.ilike.${like},data_type.ilike.${like},field_type.ilike.${like}`);
+        query = query.or(
+          `field_name.ilike.${like},field_label.ilike.${like},data_type.ilike.${like},field_type.ilike.${like}`,
+        );
       }
 
       const { data: rows, count, error } = await query.range(offset, offset + limit - 1);
@@ -3252,7 +3206,9 @@ serve(async (req) => {
 
     if (action === "sync-contact-parity") {
       const contactIds = Array.isArray(data?.contactIds)
-        ? data.contactIds.map((value: unknown) => toFiniteNumber(value)).filter((id: number | null): id is number => Number.isFinite(id))
+        ? data.contactIds
+            .map((value: unknown) => toFiniteNumber(value))
+            .filter((id: number | null): id is number => Number.isFinite(id))
         : [];
       const uniqueContactIds = Array.from(new Set(contactIds));
       if (!uniqueContactIds.length) {
@@ -3339,11 +3295,7 @@ serve(async (req) => {
       const jobId = String(data?.jobId || "").trim();
       if (!jobId) return jsonResponse({ success: false, error: "jobId is required" }, 400);
 
-      const { data: job, error } = await supabase
-        .from("bullhorn_sync_jobs")
-        .select("*")
-        .eq("id", jobId)
-        .maybeSingle();
+      const { data: job, error } = await supabase.from("bullhorn_sync_jobs").select("*").eq("id", jobId).maybeSingle();
       if (error || !job) return jsonResponse({ success: false, error: "Sync job not found" }, 404);
 
       return jsonResponse({ success: true, data: job });
@@ -3446,9 +3398,7 @@ serve(async (req) => {
         .order("updated_at", { ascending: false });
       if (error) throw error;
 
-      const listIds = (lists || [])
-        .map((row: any) => String(row.id || "").trim())
-        .filter(Boolean);
+      const listIds = (lists || []).map((row: any) => String(row.id || "").trim()).filter(Boolean);
       const countByList = new Map<string, number>();
 
       if (listIds.length) {
@@ -3551,12 +3501,10 @@ serve(async (req) => {
       }));
 
       if (rowsToInsert.length > 0) {
-        const { error: insertError } = await supabase
-          .from("distribution_list_contacts")
-          .upsert(rowsToInsert, {
-            onConflict: "list_id,bullhorn_id",
-            ignoreDuplicates: true,
-          });
+        const { error: insertError } = await supabase.from("distribution_list_contacts").upsert(rowsToInsert, {
+          onConflict: "list_id,bullhorn_id",
+          ignoreDuplicates: true,
+        });
         if (insertError) throw insertError;
       }
 
@@ -3595,9 +3543,7 @@ serve(async (req) => {
 
       if (searchTerm) {
         const like = `%${searchTerm}%`;
-        query = query.or(
-          `name.ilike.${like},email.ilike.${like},company_name.ilike.${like},occupation.ilike.${like}`,
-        );
+        query = query.or(`name.ilike.${like},email.ilike.${like},company_name.ilike.${like},occupation.ilike.${like}`);
       }
 
       const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
