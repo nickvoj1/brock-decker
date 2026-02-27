@@ -23,7 +23,9 @@ import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowDown, ArrowUp, ArrowUpDown, Clock, Database, Plus, RefreshCw, X } from "lucide-react";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowDown, ArrowUp, ArrowUpDown, Briefcase, Building2, Calendar, Clock, Database, Mail, Phone, Plus, RefreshCw, User, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -209,6 +211,24 @@ type ContactDisplayRow = {
   dateLastModifiedMillis: number | null;
 };
 
+type ProfileNoteEntry = {
+  label: string;
+  value: string;
+  date: string | null;
+};
+
+type CompanyProfileData = {
+  id: number | null;
+  name: string;
+  website: string;
+  phone: string;
+  industry: string;
+  location: string;
+  contacts: ContactDisplayRow[];
+  notes: ProfileNoteEntry[];
+  raw: Record<string, unknown>;
+};
+
 type ContactFilterDraftRow = {
   id: string;
   field: BullhornContactFilterField;
@@ -339,6 +359,155 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function getRawRecord(contact: BullhornMirrorContact): Record<string, unknown> {
+  return asRecord(contact.raw) || {};
+}
+
+function toNullableNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractTextChunks(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === "-") return [];
+    return [trimmed];
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return [String(value)];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractTextChunks(item));
+  }
+
+  const record = asRecord(value);
+  if (!record) return [];
+
+  const prioritizedKeys = ["note", "notes", "comment", "comments", "description", "text", "value", "name", "data"];
+  const fromKeys = prioritizedKeys.flatMap((key) => (key in record ? extractTextChunks(record[key]) : []));
+  if (fromKeys.length) return fromKeys;
+
+  try {
+    return [JSON.stringify(record)];
+  } catch {
+    return [];
+  }
+}
+
+function uniqueText(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function extractContactNotes(contact: BullhornMirrorContact): ProfileNoteEntry[] {
+  const raw = getRawRecord(contact);
+  const dateHint = formatMirrorDate(raw.dateLastComment ?? raw.dateLastModified ?? contact.date_last_modified);
+
+  const candidates: Array<{ label: string; value: unknown }> = [
+    { label: "Last Note", value: raw.lastNote },
+    { label: "Comments", value: raw.comments },
+    { label: "Notes", value: raw.notes },
+    { label: "Description", value: raw.description },
+    { label: "Summary", value: raw.summary },
+  ];
+
+  const entries: ProfileNoteEntry[] = [];
+  for (const candidate of candidates) {
+    const chunks = uniqueText(extractTextChunks(candidate.value)).slice(0, 2);
+    for (const chunk of chunks) {
+      entries.push({
+        label: candidate.label,
+        value: chunk,
+        date: dateHint === "-" ? null : dateHint,
+      });
+    }
+  }
+  return entries;
+}
+
+function extractCompanyNotes(companyRaw: Record<string, unknown>, dateHintValue: unknown): ProfileNoteEntry[] {
+  const dateHint = formatMirrorDate(dateHintValue);
+  const candidates: Array<{ label: string; value: unknown }> = [
+    { label: "Company Notes", value: companyRaw.notes },
+    { label: "Company Comments", value: companyRaw.comments },
+    { label: "Company Description", value: companyRaw.companyDescription ?? companyRaw.description },
+  ];
+  const entries: ProfileNoteEntry[] = [];
+  for (const candidate of candidates) {
+    const chunks = uniqueText(extractTextChunks(candidate.value)).slice(0, 2);
+    for (const chunk of chunks) {
+      entries.push({
+        label: candidate.label,
+        value: chunk,
+        date: dateHint === "-" ? null : dateHint,
+      });
+    }
+  }
+  return entries;
+}
+
+function normalizeKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function buildCompanyProfile(anchorRow: ContactDisplayRow, allRows: ContactDisplayRow[]): CompanyProfileData {
+  const anchorRaw = getRawRecord(anchorRow.contact);
+  const companyRaw = asRecord(anchorRaw.clientCorporation) || {};
+  const companyId = toNullableNumber(companyRaw.id ?? anchorRow.contact.client_corporation_id);
+  const companyName = formatMirrorValue(companyRaw.name ?? anchorRow.contact.client_corporation_name);
+  const normalizedName = normalizeKey(companyName);
+
+  const contacts = allRows.filter((row) => {
+    const raw = getRawRecord(row.contact);
+    const rowCompany = asRecord(raw.clientCorporation);
+    const rowCompanyId = toNullableNumber(rowCompany?.id ?? row.contact.client_corporation_id);
+    if (companyId !== null && rowCompanyId !== null) {
+      return companyId === rowCompanyId;
+    }
+    return normalizeKey(row.company) === normalizedName;
+  });
+
+  const location = formatMirrorAddress(
+    {
+      city: companyRaw.city ?? companyRaw.addressCity,
+      state: companyRaw.state ?? companyRaw.addressState,
+      countryName: companyRaw.countryName ?? companyRaw.country,
+    },
+    null,
+    null,
+  );
+
+  return {
+    id: companyId,
+    name: companyName,
+    website: formatMirrorValue(companyRaw.url ?? companyRaw.website),
+    phone: formatMirrorValue(companyRaw.phone ?? companyRaw.mainPhone),
+    industry: formatMirrorValue(companyRaw.industry),
+    location,
+    contacts,
+    notes: extractCompanyNotes(companyRaw, anchorRaw.dateLastComment ?? anchorRaw.dateLastModified),
+    raw: companyRaw,
+  };
+}
+
 export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdminProps) {
   const profileName = useProfileName();
   const navigate = useNavigate();
@@ -360,6 +529,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [sortKey, setSortKey] = useState<ContactSortKey>("id");
   const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
   const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
+  const [selectedContactProfile, setSelectedContactProfile] = useState<ContactDisplayRow | null>(null);
+  const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<ContactDisplayRow | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -615,6 +786,35 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     });
     return rows;
   }, [contacts, sortDirection, sortKey]);
+
+  const allContactRows = useMemo(
+    () => contacts.map((contact) => buildContactDisplayRow(contact)),
+    [contacts],
+  );
+
+  const selectedContactNotes = useMemo(
+    () => (selectedContactProfile ? extractContactNotes(selectedContactProfile.contact) : []),
+    [selectedContactProfile],
+  );
+  const selectedContactRaw = useMemo(
+    () => (selectedContactProfile ? getRawRecord(selectedContactProfile.contact) : null),
+    [selectedContactProfile],
+  );
+
+  const selectedCompanyData = useMemo(
+    () => (selectedCompanyProfile ? buildCompanyProfile(selectedCompanyProfile, allContactRows) : null),
+    [allContactRows, selectedCompanyProfile],
+  );
+
+  const openContactProfile = useCallback((row: ContactDisplayRow) => {
+    setSelectedCompanyProfile(null);
+    setSelectedContactProfile(row);
+  }, []);
+
+  const openCompanyProfile = useCallback((row: ContactDisplayRow) => {
+    setSelectedContactProfile(null);
+    setSelectedCompanyProfile(row);
+  }, []);
 
   const visibleContactIds = useMemo(
     () => displayedContacts.map(({ contact }) => contact.bullhorn_id),
@@ -1118,13 +1318,25 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           </div>
                         </TableCell>
                         <TableCell className={`w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={fullName}>
-                          <span className="block truncate">{fullName}</span>
+                          <button
+                            type="button"
+                            className="block w-full truncate text-left font-medium text-primary hover:underline"
+                            onClick={() => openContactProfile(row)}
+                          >
+                            {fullName}
+                          </button>
                         </TableCell>
                         <TableCell className={`w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={jobTitle}>
                           <span className="block truncate">{jobTitle}</span>
                         </TableCell>
                         <TableCell className={`w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={company}>
-                          <span className="block truncate">{company}</span>
+                          <button
+                            type="button"
+                            className="block w-full truncate text-left text-foreground hover:text-primary hover:underline"
+                            onClick={() => openCompanyProfile(row)}
+                          >
+                            {company}
+                          </button>
                         </TableCell>
                         <TableCell className={`w-[260px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>
                           {workEmail !== "-" ? (
@@ -1174,6 +1386,266 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           )}
         </CardContent>
       </Card>
+
+      <Sheet
+        open={Boolean(selectedContactProfile)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedContactProfile(null);
+        }}
+      >
+        <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-3xl">
+          {selectedContactProfile && (
+            <div className="flex h-full flex-col">
+              <SheetHeader className="border-b px-6 py-4">
+                <SheetTitle className="text-xl">{selectedContactProfile.fullName}</SheetTitle>
+                <SheetDescription>
+                  Contact Profile • Bullhorn ID {selectedContactProfile.contact.bullhorn_id}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                <Tabs defaultValue="overview" className="w-full">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="notes">Last Notes</TabsTrigger>
+                    <TabsTrigger value="raw">Raw</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="overview" className="space-y-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <Briefcase className="h-3.5 w-3.5" />
+                          Job Title
+                        </p>
+                        <p className="text-sm font-medium">{selectedContactProfile.jobTitle}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <Building2 className="h-3.5 w-3.5" />
+                          Company
+                        </p>
+                        <button
+                          type="button"
+                          className="text-left text-sm font-medium text-primary hover:underline"
+                          onClick={() => {
+                            setSelectedContactProfile(null);
+                            setSelectedCompanyProfile(selectedContactProfile);
+                          }}
+                        >
+                          {selectedContactProfile.company}
+                        </button>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <Mail className="h-3.5 w-3.5" />
+                          Work Email
+                        </p>
+                        {selectedContactProfile.workEmail !== "-" ? (
+                          <a href={`mailto:${selectedContactProfile.workEmail}`} className="text-sm font-medium text-primary hover:underline">
+                            {selectedContactProfile.workEmail}
+                          </a>
+                        ) : (
+                          <p className="text-sm font-medium">-</p>
+                        )}
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <Phone className="h-3.5 w-3.5" />
+                          Phone
+                        </p>
+                        <p className="text-sm font-medium">{selectedContactProfile.workPhone}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <User className="h-3.5 w-3.5" />
+                          Consultant
+                        </p>
+                        <p className="text-sm font-medium">{selectedContactProfile.consultant}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          Status
+                        </p>
+                        <p className="text-sm font-medium">{selectedContactProfile.status}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          Address
+                        </p>
+                        <p className="text-sm font-medium">{selectedContactProfile.address}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <Calendar className="h-3.5 w-3.5" />
+                          Dates
+                        </p>
+                        <p className="text-sm font-medium">Added: {selectedContactProfile.dateAdded}</p>
+                        <p className="text-sm font-medium">Modified: {selectedContactProfile.dateLastModified}</p>
+                        <p className="text-sm font-medium">Last Visit: {selectedContactProfile.lastVisit}</p>
+                      </div>
+                    </div>
+                    <div className="rounded-md border p-3">
+                      <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Skills</p>
+                      <p className="text-sm font-medium whitespace-pre-wrap break-words">{selectedContactProfile.skills}</p>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="notes" className="space-y-3">
+                    {selectedContactNotes.length ? (
+                      selectedContactNotes.map((note, index) => (
+                        <div key={`${note.label}-${index}`} className="rounded-md border p-3">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{note.label}</p>
+                            <p className="text-xs text-muted-foreground">{note.date || "Unknown date"}</p>
+                          </div>
+                          <p className="text-sm whitespace-pre-wrap break-words">{note.value}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        No notes found in synced Bullhorn payload for this contact yet.
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="raw">
+                    <div className="rounded-md border bg-muted/30 p-3">
+                      <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
+                        {JSON.stringify(selectedContactRaw || {}, null, 2)}
+                      </pre>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      <Sheet
+        open={Boolean(selectedCompanyProfile)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedCompanyProfile(null);
+        }}
+      >
+        <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-3xl">
+          {selectedCompanyData && (
+            <div className="flex h-full flex-col">
+              <SheetHeader className="border-b px-6 py-4">
+                <SheetTitle className="text-xl">{selectedCompanyData.name}</SheetTitle>
+                <SheetDescription>
+                  Company Profile{selectedCompanyData.id !== null ? ` • Bullhorn ID ${selectedCompanyData.id}` : ""}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                <Tabs defaultValue="overview" className="w-full">
+                  <TabsList className="grid w-full grid-cols-4">
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="contacts">Contacts</TabsTrigger>
+                    <TabsTrigger value="notes">Last Notes</TabsTrigger>
+                    <TabsTrigger value="raw">Raw</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="overview" className="space-y-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          <Building2 className="h-3.5 w-3.5" />
+                          Company
+                        </p>
+                        <p className="text-sm font-medium">{selectedCompanyData.name}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Industry</p>
+                        <p className="text-sm font-medium">{selectedCompanyData.industry}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Website</p>
+                        {selectedCompanyData.website !== "-" ? (
+                          <a
+                            href={selectedCompanyData.website.startsWith("http") ? selectedCompanyData.website : `https://${selectedCompanyData.website}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium text-primary hover:underline"
+                          >
+                            {selectedCompanyData.website}
+                          </a>
+                        ) : (
+                          <p className="text-sm font-medium">-</p>
+                        )}
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Phone</p>
+                        <p className="text-sm font-medium">{selectedCompanyData.phone}</p>
+                      </div>
+                      <div className="rounded-md border p-3 md:col-span-2">
+                        <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Location</p>
+                        <p className="text-sm font-medium">{selectedCompanyData.location}</p>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="contacts" className="space-y-3">
+                    {selectedCompanyData.contacts.length ? (
+                      selectedCompanyData.contacts.map((row) => (
+                        <div key={row.contact.bullhorn_id} className="rounded-md border p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <button
+                              type="button"
+                              className="text-left text-sm font-semibold text-primary hover:underline"
+                              onClick={() => {
+                                setSelectedCompanyProfile(null);
+                                setSelectedContactProfile(row);
+                              }}
+                            >
+                              {row.fullName}
+                            </button>
+                            <span className="text-xs text-muted-foreground">ID {row.contact.bullhorn_id}</span>
+                          </div>
+                          <p className="mt-1 text-sm">{row.jobTitle}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{row.workEmail}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        No contacts for this company in the currently synced batch.
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="notes" className="space-y-3">
+                    {selectedCompanyData.notes.length ? (
+                      selectedCompanyData.notes.map((note, index) => (
+                        <div key={`${note.label}-${index}`} className="rounded-md border p-3">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{note.label}</p>
+                            <p className="text-xs text-muted-foreground">{note.date || "Unknown date"}</p>
+                          </div>
+                          <p className="text-sm whitespace-pre-wrap break-words">{note.value}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        No company notes found in synced Bullhorn payload yet.
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="raw">
+                    <div className="rounded-md border bg-muted/30 p-3">
+                      <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
+                        {JSON.stringify(selectedCompanyData.raw || {}, null, 2)}
+                      </pre>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </AppLayout>
   );
 }
