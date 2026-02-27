@@ -41,6 +41,9 @@ export interface BullhornMirrorContact {
   synced_at: string;
   date_last_modified: string | null;
   is_deleted: boolean;
+  latest_note?: string | null;
+  latest_note_date?: string | null;
+  latest_note_action?: string | null;
   raw: Record<string, unknown> | null;
 }
 

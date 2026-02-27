@@ -1299,6 +1299,109 @@ async function fetchBullhornNotesForEntity(
   return dedupeLiveNotes(results);
 }
 
+function noteDateMillis(note: Record<string, unknown>): number {
+  const dateValue = note.dateAdded;
+  const ts = new Date(String(dateValue || "")).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function updateLatestNoteMap(
+  map: Map<number, Record<string, unknown>>,
+  note: Record<string, unknown>,
+) {
+  const contactId = toFiniteNumber(note.targetEntityId);
+  if (!contactId) return;
+
+  const current = map.get(contactId);
+  if (!current) {
+    map.set(contactId, note);
+    return;
+  }
+  if (noteDateMillis(note) >= noteDateMillis(current)) {
+    map.set(contactId, note);
+  }
+}
+
+async function fetchLatestNotesForContactIds(
+  restUrl: string,
+  bhRestToken: string,
+  contactIds: number[],
+): Promise<Map<number, Record<string, unknown>>> {
+  const latestByContact = new Map<number, Record<string, unknown>>();
+  const uniqueIds = Array.from(new Set(contactIds.filter((id) => Number.isFinite(id))));
+  if (!uniqueIds.length) return latestByContact;
+
+  const chunkSize = 40;
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize);
+    const inWhere = `targetEntityName='ClientContact' AND targetEntityID IN (${chunk.join(",")})`;
+    const inRows = await fetchQueryRowsWithFallback(
+      restUrl,
+      bhRestToken,
+      "Note",
+      inWhere,
+      1200,
+      0,
+      NOTE_QUERY_FIELD_SELECTORS,
+    );
+
+    for (const row of inRows) {
+      updateLatestNoteMap(latestByContact, normalizeLiveNoteRow(row));
+    }
+
+    const missingIds = chunk.filter((id) => !latestByContact.has(id));
+    if (!missingIds.length) continue;
+
+    for (const id of missingIds) {
+      const rows = await fetchQueryRowsWithFallback(
+        restUrl,
+        bhRestToken,
+        "Note",
+        `targetEntityName='ClientContact' AND targetEntityID=${id}`,
+        120,
+        0,
+        NOTE_QUERY_FIELD_SELECTORS,
+      );
+      for (const row of rows) {
+        updateLatestNoteMap(latestByContact, normalizeLiveNoteRow(row));
+      }
+    }
+  }
+
+  return latestByContact;
+}
+
+async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Promise<any[]> {
+  const rows = Array.isArray(contacts) ? contacts : [];
+  if (!rows.length) return rows;
+
+  const ids = rows
+    .map((contact) => Number(contact?.bullhorn_id ?? contact?.id))
+    .filter((id) => Number.isFinite(id));
+  if (!ids.length) return rows;
+
+  const tokens = await getStoredBullhornTokens(supabase);
+  if (!tokens) return rows;
+
+  const latestByContact = await fetchLatestNotesForContactIds(tokens.rest_url, tokens.bh_rest_token, ids);
+  if (!latestByContact.size) return rows;
+
+  for (const contact of rows) {
+    const id = Number(contact?.bullhorn_id ?? contact?.id);
+    if (!Number.isFinite(id)) continue;
+    const note = latestByContact.get(id);
+    if (!note) continue;
+
+    const comments = typeof note.comments === "string" ? note.comments.trim() : "";
+    const action = typeof note.action === "string" ? note.action.trim() : "";
+    contact.latest_note = comments || action || null;
+    contact.latest_note_action = action || null;
+    contact.latest_note_date = normalizeBullhornDate(note.dateAdded);
+  }
+
+  return rows;
+}
+
 async function fetchClientContactsBatch(
   restUrl: string,
   bhRestToken: string,
@@ -2007,10 +2110,11 @@ serve(async (req) => {
         const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
 
         if (error) throw error;
+        const enrichedContacts = await enrichContactsWithLatestNotes(supabase, contacts || []);
         return jsonResponse({
           success: true,
           data: {
-            contacts: contacts || [],
+            contacts: enrichedContacts,
             total: count || 0,
             limit,
             offset,
@@ -2049,10 +2153,11 @@ serve(async (req) => {
         if (rows.length < chunkSize) break;
       }
 
+      const enrichedPagedContacts = await enrichContactsWithLatestNotes(supabase, pagedContacts);
       return jsonResponse({
         success: true,
         data: {
-          contacts: pagedContacts,
+          contacts: enrichedPagedContacts,
           total: matchedTotal,
           limit,
           offset,

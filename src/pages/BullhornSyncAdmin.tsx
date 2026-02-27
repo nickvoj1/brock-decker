@@ -335,16 +335,17 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
     (rawRecord.owner as Record<string, unknown> | undefined)?.name ?? contact.owner_name,
   );
   const address = formatMirrorAddress(rawRecord.address, contact.address_city, contact.address_state);
-  const lastNoteText = formatMirrorValue(
-    rawRecord.lastNote ?? rawRecord.comments ?? rawRecord.notes ?? rawRecord.description,
-  );
+  const liveLatestNote = formatMirrorValue(contact.latest_note ?? contact.latest_note_action);
+  const lastNoteText = liveLatestNote !== "-"
+    ? liveLatestNote
+    : formatMirrorValue(rawRecord.lastNote ?? rawRecord.comments ?? rawRecord.notes ?? rawRecord.description);
   const lastNoteDate = formatMirrorDate(rawRecord.dateLastComment);
   const lastNote = lastNoteText !== "-"
     ? lastNoteText
     : lastNoteDate !== "-"
       ? `Updated ${lastNoteDate}`
       : "-";
-  const lastNoteRaw = rawRecord.dateLastComment ?? rawRecord.dateLastModified;
+  const lastNoteRaw = contact.latest_note_date ?? rawRecord.dateLastComment ?? rawRecord.dateLastModified;
   const dateAddedRaw = rawRecord.dateAdded;
   const dateLastModifiedRaw = rawRecord.dateLastModified ?? contact.date_last_modified;
   const dateAdded = formatMirrorDate(dateAddedRaw);
