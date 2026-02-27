@@ -2840,26 +2840,59 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = await req.json().catch(() => ({}));
-    const nestedAction = typeof body?.data?.action === "string" ? body.data.action : "";
-    const action = String(body?.action || nestedAction || "").trim();
+    const rawBody = await req.json().catch(() => ({}));
+    const parsedBody =
+      typeof rawBody === "string"
+        ? (() => {
+            try {
+              const parsed = JSON.parse(rawBody);
+              return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : {};
+            } catch {
+              return {};
+            }
+          })()
+        : rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+          ? (rawBody as Record<string, unknown>)
+          : {};
+
+    const nestedData = parsedBody?.data;
+    const data =
+      nestedData && typeof nestedData === "object" && !Array.isArray(nestedData)
+        ? (nestedData as Record<string, unknown>)
+        : {};
+
+    const actionCandidates = [
+      parsedBody?.action,
+      data?.action,
+      parsedBody?.payload && typeof parsedBody.payload === "object" && !Array.isArray(parsedBody.payload)
+        ? (parsedBody.payload as Record<string, unknown>)?.action
+        : undefined,
+      parsedBody?.body && typeof parsedBody.body === "object" && !Array.isArray(parsedBody.body)
+        ? (parsedBody.body as Record<string, unknown>)?.action
+        : undefined,
+    ];
+
+    const actionRaw =
+      actionCandidates.find((candidate) => typeof candidate === "string" && String(candidate).trim().length > 0) || "";
+    const action = String(actionRaw)
+      .trim()
+      .replace(/[\u2010-\u2015\u2212]/g, "-")
+      .toLowerCase();
+    const profileName = String(parsedBody?.profileName || data?.profileName || "").trim();
 
     if (action === "__codex_ping") {
       return jsonResponse(
         {
           success: true,
-          marker: "eea4cde-main",
-          receivedAction: action,
-          now: new Date().toISOString(),
+          marker: "parser-hardened-v2",
+          action,
+          bodyType: typeof rawBody,
         },
         200,
       );
     }
-    const profileName = String(body?.profileName || "").trim();
-    const data =
-      body?.data && typeof body.data === "object" && !Array.isArray(body.data)
-        ? (body.data as Record<string, unknown>)
-        : {};
 
     if (!profileName) {
       return jsonResponse({ success: false, error: "Profile name is required" }, 400);
@@ -3605,8 +3638,9 @@ serve(async (req) => {
         error: "Unknown action",
         details: {
           receivedAction: action || null,
-          bodyAction: typeof body?.action === "string" ? body.action : null,
-          nestedAction: nestedAction || null,
+          bodyAction: typeof parsedBody?.action === "string" ? parsedBody.action : null,
+          nestedAction: typeof data?.action === "string" ? data.action : null,
+          bodyType: typeof rawBody,
         },
       },
       400,
