@@ -1238,9 +1238,8 @@ function toFiniteNumber(value: unknown): number | null {
 
 function normalizeLiveNoteRow(input: any): Record<string, unknown> {
   const base = input && typeof input === "object" ? input : {};
-  const personReference = base.personReference && typeof base.personReference === "object"
-    ? base.personReference
-    : null;
+  const personReference =
+    base.personReference && typeof base.personReference === "object" ? base.personReference : null;
   return {
     id: toFiniteNumber(base.id),
     action: base.action ? String(base.action) : null,
