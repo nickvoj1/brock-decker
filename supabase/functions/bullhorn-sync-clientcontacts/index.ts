@@ -2885,9 +2885,13 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json().catch(() => ({}));
-    const action = String(body?.action || "");
+    const nestedAction = typeof body?.data?.action === "string" ? body.data.action : "";
+    const action = String(body?.action || nestedAction || "").trim();
     const profileName = String(body?.profileName || "").trim();
-    const data = body?.data || {};
+    const data =
+      body?.data && typeof body.data === "object" && !Array.isArray(body.data)
+        ? (body.data as Record<string, unknown>)
+        : {};
 
     if (!profileName) {
       return jsonResponse({ success: false, error: "Profile name is required" }, 400);
@@ -3637,7 +3641,15 @@ serve(async (req) => {
       });
     }
 
-    return jsonResponse({ success: false, error: "Unknown action" }, 400);
+    return jsonResponse({
+      success: false,
+      error: "Unknown action",
+      details: {
+        receivedAction: action || null,
+        bodyAction: typeof body?.action === "string" ? body.action : null,
+        nestedAction: nestedAction || null,
+      },
+    }, 400);
   } catch (error: any) {
     console.error("[bullhorn-sync-clientcontacts] Fatal error:", error);
     return jsonResponse({ success: false, error: error?.message || "Unknown error" }, 500);
