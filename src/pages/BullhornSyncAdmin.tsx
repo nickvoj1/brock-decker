@@ -3,7 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
+  BullhornContactCommsStatus,
+  BullhornContactDocument,
   DistributionListSummary,
+  BullhornTimelineEvent,
   addContactsToDistributionList,
   BullhornContactFilterField,
   BullhornContactFilterOperator,
@@ -13,6 +16,9 @@ import {
   BullhornMirrorContact,
   BullhornSyncJob,
   createDistributionList,
+  getBullhornContactCommsStatus,
+  getBullhornContactDocuments,
+  getBullhornContactTimeline,
   getBullhornLiveCompanyDetail,
   getBullhornLiveContactDetail,
   getBullhornMirrorStats,
@@ -213,10 +219,16 @@ type ContactDisplayRow = {
   lastNote: string;
   dateAdded: string;
   dateLastModified: string;
+  lastVisit: string;
+  lastContacted: string;
+  commStatus: string;
+  preferredContact: string;
+  hasResume: string;
   skills: string;
   lastNoteMillis: number | null;
   dateAddedMillis: number | null;
   dateLastModifiedMillis: number | null;
+  lastContactedMillis: number | null;
 };
 
 type ProfileNoteEntry = {
@@ -254,6 +266,11 @@ const FILTER_FIELD_OPTIONS: Array<{ value: BullhornContactFilterField; label: st
   { value: "consultant", label: "Consultant" },
   { value: "status", label: "Status" },
   { value: "skills", label: "Skills" },
+  { value: "preferred_contact", label: "Preferred Contact" },
+  { value: "comm_status", label: "Comms Status" },
+  { value: "last_contacted", label: "Last Contacted" },
+  { value: "has_resume", label: "Has Resume" },
+  { value: "mass_mail_opt_out", label: "Mass Mail Opt-out" },
 ];
 
 const FILTER_OPERATOR_OPTIONS: Array<{ value: BullhornContactFilterOperator; label: string }> = [
@@ -295,6 +312,19 @@ function toDateMillis(value: unknown): number | null {
   }
   const parsed = new Date(String(value)).getTime();
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDateTime(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (Number.isFinite(numeric)) {
+    const millis = numeric > 1e11 ? numeric : numeric * 1000;
+    const date = new Date(millis);
+    if (!Number.isNaN(date.getTime())) return date.toLocaleString();
+  }
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
 }
 
 function normalizeSortableText(value: string): string {
@@ -359,8 +389,22 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
     contact.latest_note_date ?? rawRecord.latest_note_date ?? rawRecord.dateLastComment ?? rawRecord.dateLastModified;
   const dateAddedRaw = rawRecord.dateAdded;
   const dateLastModifiedRaw = rawRecord.dateLastModified ?? contact.date_last_modified;
+  const lastVisitRaw = rawRecord.dateLastVisit ?? rawRecord.lastVisit;
+  const lastContactedRaw = contact.last_contacted_at ?? rawRecord.lastContactedAt ?? rawRecord.dateLastComment ?? lastVisitRaw;
   const dateAdded = formatMirrorDate(dateAddedRaw);
   const dateLastModified = formatMirrorDate(dateLastModifiedRaw);
+  const lastVisit = formatMirrorDate(lastVisitRaw);
+  const lastContacted = formatMirrorDate(lastContactedRaw);
+  const commStatus = formatMirrorValue(
+    contact.comm_status_label ??
+      rawRecord.comm_status_label ??
+      rawRecord.emailStatus ??
+      rawRecord.communicationStatus,
+  );
+  const preferredContact = formatMirrorValue(
+    contact.preferred_contact ?? rawRecord.preferredContact,
+  );
+  const hasResume = contact.has_resume ? "Yes" : "No";
   const skills = extractSkillsFromRaw(rawRecord);
 
   return {
@@ -376,10 +420,16 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
     lastNote,
     dateAdded,
     dateLastModified,
+    lastVisit,
+    lastContacted,
+    commStatus,
+    preferredContact,
+    hasResume,
     skills,
     lastNoteMillis: toDateMillis(lastNoteRaw),
     dateAddedMillis: toDateMillis(dateAddedRaw),
     dateLastModifiedMillis: toDateMillis(dateLastModifiedRaw),
+    lastContactedMillis: toDateMillis(lastContactedRaw),
   };
 }
 
@@ -611,9 +661,16 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<ContactDisplayRow | null>(null);
   const [liveContactDetail, setLiveContactDetail] = useState<BullhornLiveContactDetail | null>(null);
   const [liveCompanyDetail, setLiveCompanyDetail] = useState<BullhornLiveCompanyDetail | null>(null);
+  const [contactTimeline, setContactTimeline] = useState<BullhornTimelineEvent[]>([]);
+  const [contactTimelineLoading, setContactTimelineLoading] = useState(false);
+  const [contactDocuments, setContactDocuments] = useState<BullhornContactDocument[]>([]);
+  const [contactDocumentsLoading, setContactDocumentsLoading] = useState(false);
+  const [contactCommsStatus, setContactCommsStatus] = useState<BullhornContactCommsStatus | null>(null);
+  const [contactCommsLoading, setContactCommsLoading] = useState(false);
   const [contactDetailLoading, setContactDetailLoading] = useState(false);
   const [companyDetailLoading, setCompanyDetailLoading] = useState(false);
   const [liveDetailApiSupported, setLiveDetailApiSupported] = useState(true);
+  const [parityApiSupported, setParityApiSupported] = useState(true);
   const contactDetailRequestIdRef = useRef(0);
   const companyDetailRequestIdRef = useRef(0);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
@@ -921,6 +978,11 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     () => (asRecord(liveContactDetail?.contact) || (selectedContactProfile ? getRawRecord(selectedContactProfile.contact) : null)),
     [liveContactDetail?.contact, selectedContactProfile],
   );
+  const selectedCustomFieldEntries = useMemo(() => {
+    const summary = selectedContactProfile?.contact.custom_field_summary;
+    if (!summary || typeof summary !== "object" || Array.isArray(summary)) return [] as Array<[string, unknown]>;
+    return Object.entries(summary as Record<string, unknown>).slice(0, 40);
+  }, [selectedContactProfile]);
   const selectedLiveContactRecord = useMemo(
     () => asRecord(liveContactDetail?.contact),
     [liveContactDetail?.contact],
@@ -974,6 +1036,66 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         formatMirrorDate(pickFirstDefined(liveContact, ["dateLastVisit", "lastVisit"])) !== "-"
           ? formatMirrorDate(pickFirstDefined(liveContact, ["dateLastVisit", "lastVisit"]))
           : formatMirrorDate(readNestedValue(getRawRecord(selectedContactProfile.contact), "lastVisit")),
+      lastContacted:
+        formatMirrorDate(
+          pickFirstDefined(liveContact, [
+            "last_contacted_at",
+            "lastContactedAt",
+            "dateLastComment",
+            "dateLastVisit",
+            "lastVisit",
+          ]),
+        ) !== "-"
+          ? formatMirrorDate(
+            pickFirstDefined(liveContact, [
+              "last_contacted_at",
+              "lastContactedAt",
+              "dateLastComment",
+              "dateLastVisit",
+              "lastVisit",
+            ]),
+          )
+          : selectedContactProfile.lastContacted,
+      preferredContact:
+        toNullableDisplay(pickFirstDefined(liveContact, ["preferredContact"])) ??
+        selectedContactProfile.preferredContact,
+      commStatus:
+        contactCommsStatus?.status_label ??
+        toNullableDisplay(pickFirstDefined(liveContact, ["emailStatus", "communicationStatus"])) ??
+        selectedContactProfile.commStatus,
+      doNotContact:
+        contactCommsStatus?.do_not_contact ??
+        selectedContactProfile.contact.do_not_contact ??
+        null,
+      massMailOptOut:
+        contactCommsStatus?.mass_mail_opt_out ??
+        selectedContactProfile.contact.mass_mail_opt_out ??
+        null,
+      smsOptIn:
+        contactCommsStatus?.sms_opt_in ??
+        selectedContactProfile.contact.sms_opt_in ??
+        null,
+      emailBounced:
+        contactCommsStatus?.email_bounced ??
+        selectedContactProfile.contact.email_bounced ??
+        null,
+      lastEmailReceived:
+        formatMirrorDate(
+          contactCommsStatus?.last_email_received_at ??
+            selectedContactProfile.contact.last_email_received_at,
+        ),
+      lastEmailSent:
+        formatMirrorDate(
+          contactCommsStatus?.last_email_sent_at ??
+            selectedContactProfile.contact.last_email_sent_at,
+        ),
+      timelineEventCount:
+        Number(selectedContactProfile.contact.timeline_event_count || contactTimeline.length || 0),
+      documentsCount:
+        Number(selectedContactProfile.contact.documents_count || contactDocuments.length || 0),
+      hasResume:
+        selectedContactProfile.contact.has_resume ||
+        contactDocuments.some((doc) => doc.is_resume && !doc.is_deleted),
       skills:
         toNullableDisplay(
           pickFirstDefined(liveContact, [
@@ -986,7 +1108,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           ]),
         ) ?? selectedContactProfile.skills,
     };
-  }, [selectedContactProfile, selectedLiveContactCompanyRecord, selectedLiveContactRecord]);
+  }, [
+    contactCommsStatus,
+    contactDocuments,
+    contactTimeline.length,
+    selectedContactProfile,
+    selectedLiveContactCompanyRecord,
+    selectedLiveContactRecord,
+  ]);
 
   const companyOverview = useMemo(() => {
     if (!selectedCompanyData) return null;
@@ -1055,27 +1184,91 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     setSelectedCompanyProfile(null);
     setSelectedContactProfile(row);
     setLiveContactDetail(null);
+    setContactTimeline([]);
+    setContactDocuments([]);
+    setContactCommsStatus(null);
+    setContactTimelineLoading(true);
+    setContactDocumentsLoading(true);
+    setContactCommsLoading(true);
     if (!liveDetailApiSupported) {
       setContactDetailLoading(false);
-      return;
+    } else {
+      setContactDetailLoading(true);
     }
-    setContactDetailLoading(true);
 
-    const result = await getBullhornLiveContactDetail(ADMIN_PROFILE, row.contact.bullhorn_id);
+    const livePromise = liveDetailApiSupported
+      ? getBullhornLiveContactDetail(ADMIN_PROFILE, row.contact.bullhorn_id)
+      : Promise.resolve({ success: true, data: null } as Awaited<ReturnType<typeof getBullhornLiveContactDetail>>);
+    const timelinePromise = parityApiSupported
+      ? getBullhornContactTimeline(ADMIN_PROFILE, row.contact.bullhorn_id, { limit: 100, offset: 0 })
+      : Promise.resolve({ success: true, data: { rows: [], total: 0, limit: 100, offset: 0 } } as Awaited<
+        ReturnType<typeof getBullhornContactTimeline>
+      >);
+    const documentsPromise = parityApiSupported
+      ? getBullhornContactDocuments(ADMIN_PROFILE, row.contact.bullhorn_id, { limit: 100, offset: 0 })
+      : Promise.resolve({ success: true, data: { rows: [], total: 0, limit: 100, offset: 0 } } as Awaited<
+        ReturnType<typeof getBullhornContactDocuments>
+      >);
+    const commsPromise = parityApiSupported
+      ? getBullhornContactCommsStatus(ADMIN_PROFILE, row.contact.bullhorn_id)
+      : Promise.resolve({ success: true, data: null } as Awaited<
+        ReturnType<typeof getBullhornContactCommsStatus>
+      >);
+
+    const [liveResult, timelineResult, documentsResult, commsResult] = await Promise.all([
+      livePromise,
+      timelinePromise,
+      documentsPromise,
+      commsPromise,
+    ]);
     if (contactDetailRequestIdRef.current !== requestId) return;
 
-    if (result.success && result.data) {
-      setLiveContactDetail(result.data);
-    } else if (result.error) {
-      if (result.error.toLowerCase().includes("unknown action")) {
+    if (liveResult.success && liveResult.data) {
+      setLiveContactDetail(liveResult.data);
+    } else if (liveResult.error) {
+      if (liveResult.error.toLowerCase().includes("unknown action")) {
         setLiveDetailApiSupported(false);
         toast.info("Live Bullhorn detail fetch is not deployed yet. Showing mirrored profile data.");
       } else {
-        toast.error(`Live Bullhorn contact fetch failed: ${result.error}`);
+        toast.error(`Live Bullhorn contact fetch failed: ${liveResult.error}`);
       }
     }
+
+    if (timelineResult.success && timelineResult.data) {
+      setContactTimeline(Array.isArray(timelineResult.data.rows) ? timelineResult.data.rows : []);
+    } else if (timelineResult.error) {
+      if (timelineResult.error.toLowerCase().includes("unknown action")) {
+        setParityApiSupported(false);
+      } else {
+        toast.error(`Contact timeline fetch failed: ${timelineResult.error}`);
+      }
+    }
+
+    if (documentsResult.success && documentsResult.data) {
+      setContactDocuments(Array.isArray(documentsResult.data.rows) ? documentsResult.data.rows : []);
+    } else if (documentsResult.error) {
+      if (documentsResult.error.toLowerCase().includes("unknown action")) {
+        setParityApiSupported(false);
+      } else {
+        toast.error(`Contact documents fetch failed: ${documentsResult.error}`);
+      }
+    }
+
+    if (commsResult.success) {
+      setContactCommsStatus(commsResult.data || null);
+    } else if (commsResult.error) {
+      if (commsResult.error.toLowerCase().includes("unknown action")) {
+        setParityApiSupported(false);
+      } else {
+        toast.error(`Contact communication status fetch failed: ${commsResult.error}`);
+      }
+    }
+
     setContactDetailLoading(false);
-  }, [liveDetailApiSupported]);
+    setContactTimelineLoading(false);
+    setContactDocumentsLoading(false);
+    setContactCommsLoading(false);
+  }, [liveDetailApiSupported, parityApiSupported]);
 
   const openCompanyProfile = useCallback(async (row: ContactDisplayRow) => {
     const requestId = companyDetailRequestIdRef.current + 1;
@@ -1834,7 +2027,13 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
           if (!open) {
             setSelectedContactProfile(null);
             setLiveContactDetail(null);
+            setContactTimeline([]);
+            setContactDocuments([]);
+            setContactCommsStatus(null);
             setContactDetailLoading(false);
+            setContactTimelineLoading(false);
+            setContactDocumentsLoading(false);
+            setContactCommsLoading(false);
           }
         }}
       >
@@ -1851,9 +2050,11 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
               <div className="flex-1 overflow-y-auto px-6 py-4">
                 <Tabs defaultValue="overview" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
+                  <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="timeline">Timeline</TabsTrigger>
                     <TabsTrigger value="notes">Last Notes</TabsTrigger>
+                    <TabsTrigger value="documents">Documents</TabsTrigger>
                     <TabsTrigger value="raw">Raw</TabsTrigger>
                   </TabsList>
 
@@ -1925,13 +2126,82 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                         </p>
                         <p className="text-sm font-medium">Added: {contactOverview?.dateAdded || selectedContactProfile.dateAdded}</p>
                         <p className="text-sm font-medium">Modified: {contactOverview?.dateLastModified || selectedContactProfile.dateLastModified}</p>
-                        <p className="text-sm font-medium">Last Visit: {(contactOverview as any)?.lastVisit || (selectedContactProfile as any).lastVisit}</p>
+                        <p className="text-sm font-medium">Last Visit: {contactOverview?.lastVisit || selectedContactProfile.lastVisit}</p>
+                        <p className="text-sm font-medium">Last Contacted: {contactOverview?.lastContacted || selectedContactProfile.lastContacted}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Communication Status</p>
+                        {contactCommsLoading ? (
+                          <p className="mb-1 text-xs text-muted-foreground">Refreshing communication state...</p>
+                        ) : null}
+                        <p className="text-sm font-medium">Status: {contactOverview?.commStatus || selectedContactProfile.commStatus}</p>
+                        <p className="text-sm font-medium">Preferred Contact: {contactOverview?.preferredContact || selectedContactProfile.preferredContact}</p>
+                        <p className="text-sm font-medium">Do Not Contact: {contactOverview?.doNotContact === null ? "-" : contactOverview?.doNotContact ? "Yes" : "No"}</p>
+                        <p className="text-sm font-medium">Mass Mail Opt-Out: {contactOverview?.massMailOptOut === null ? "-" : contactOverview?.massMailOptOut ? "Yes" : "No"}</p>
+                        <p className="text-sm font-medium">SMS Opt-In: {contactOverview?.smsOptIn === null ? "-" : contactOverview?.smsOptIn ? "Yes" : "No"}</p>
+                        <p className="text-sm font-medium">Email Bounced: {contactOverview?.emailBounced === null ? "-" : contactOverview?.emailBounced ? "Yes" : "No"}</p>
+                        <p className="text-sm font-medium">Last Email Sent: {contactOverview?.lastEmailSent || "-"}</p>
+                        <p className="text-sm font-medium">Last Email Received: {contactOverview?.lastEmailReceived || "-"}</p>
+                      </div>
+                      <div className="rounded-md border p-3">
+                        <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Mirror Parity</p>
+                        <p className="text-sm font-medium">Timeline Events: {(contactOverview?.timelineEventCount ?? 0).toLocaleString()}</p>
+                        <p className="text-sm font-medium">Documents: {(contactOverview?.documentsCount ?? 0).toLocaleString()}</p>
+                        <p className="text-sm font-medium">Has Resume: {contactOverview?.hasResume ? "Yes" : "No"}</p>
                       </div>
                     </div>
                     <div className="rounded-md border p-3">
                       <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Skills</p>
                       <p className="text-sm font-medium whitespace-pre-wrap break-words">{contactOverview?.skills || selectedContactProfile.skills}</p>
                     </div>
+                    <div className="rounded-md border p-3">
+                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Custom Field Snapshot</p>
+                      {selectedCustomFieldEntries.length ? (
+                        <div className="space-y-1.5">
+                          {selectedCustomFieldEntries.map(([key, value]) => (
+                            <p key={key} className="text-xs">
+                              <span className="font-semibold">{key}:</span>{" "}
+                              <span className="text-muted-foreground">{formatMirrorValue(value)}</span>
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No custom field summary synced for this contact yet.</p>
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="timeline" className="space-y-3">
+                    {contactTimelineLoading ? (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        Loading full contact timeline...
+                      </div>
+                    ) : contactTimeline.length ? (
+                      contactTimeline.map((event) => (
+                        <div key={event.external_key || `${event.id}`} className="rounded-md border p-3">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline">{String(event.event_type || "event").toUpperCase()}</Badge>
+                              <Badge variant="secondary">{event.event_source || "source"}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{formatDateTime(event.event_at)}</p>
+                          </div>
+                          <p className="text-sm font-medium">{event.summary || "-"}</p>
+                          {event.details ? (
+                            <p className="mt-1 text-sm whitespace-pre-wrap break-words">{event.details}</p>
+                          ) : null}
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Actor: {event.actor_name || "-"} • Entity: {event.entity_name || "-"} {event.entity_id ? `(${event.entity_id})` : ""}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        {!parityApiSupported
+                          ? "Timeline endpoint is not deployed yet in this environment."
+                          : "No timeline events synced yet for this contact."}
+                      </div>
+                    )}
                   </TabsContent>
 
                   <TabsContent value="notes" className="space-y-3">
@@ -1952,10 +2222,50 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                     )}
                   </TabsContent>
 
+                  <TabsContent value="documents" className="space-y-3">
+                    {contactDocumentsLoading ? (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        Loading contact documents...
+                      </div>
+                    ) : contactDocuments.length ? (
+                      contactDocuments.map((doc) => (
+                        <div key={doc.external_key || `${doc.id}`} className="rounded-md border p-3">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold">{doc.file_name || "Unnamed file"}</p>
+                              {doc.is_resume ? <Badge variant="outline">Resume</Badge> : null}
+                              {doc.is_deleted ? <Badge variant="destructive">Deleted</Badge> : null}
+                            </div>
+                            <p className="text-xs text-muted-foreground">{formatDateTime(doc.date_last_modified || doc.date_added)}</p>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Type: {doc.file_type || doc.content_type || "-"} • Size: {doc.file_size ? `${doc.file_size.toLocaleString()} bytes` : "-"}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        {!parityApiSupported
+                          ? "Documents endpoint is not deployed yet in this environment."
+                          : "No documents synced yet for this contact."}
+                      </div>
+                    )}
+                  </TabsContent>
+
                   <TabsContent value="raw">
                     <div className="rounded-md border bg-muted/30 p-3">
                       <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
-                        {JSON.stringify(selectedContactRaw || {}, null, 2)}
+                        {JSON.stringify(
+                          {
+                            mirror: selectedContactProfile.contact,
+                            liveContact: selectedContactRaw || {},
+                            communicationStatus: contactCommsStatus,
+                            timelineSample: contactTimeline.slice(0, 10),
+                            documentsSample: contactDocuments.slice(0, 10),
+                          },
+                          null,
+                          2,
+                        )}
                       </pre>
                     </div>
                   </TabsContent>
