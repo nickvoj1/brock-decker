@@ -99,6 +99,30 @@ const MIRROR_FILTER_FIELDS = new Set([
   "status",
   "skills",
 ]);
+const CONTACT_DETAIL_FIELD_SELECTORS = [
+  "id,name,firstName,lastName,email,occupation,status,phone,mobile,address(city,state,countryID,countryName),address1,address2,city,state,dateAdded,dateLastModified,dateLastVisit,dateLastComment,skills,skillsCount,skillList,skillIDList,specialty,specialities,expertise,categories(id,name),specialties(id,name),clientCorporation(id,name),owner(id,name),comments,description,notes",
+  DEFAULT_CLIENTCONTACT_SKILLS_FALLBACK_FIELDS.join(","),
+  DEFAULT_CLIENTCONTACT_FALLBACK_FIELDS.join(","),
+  DEFAULT_CLIENTCONTACT_CORE_FIELDS.join(","),
+  "*",
+];
+const COMPANY_DETAIL_FIELD_SELECTORS = [
+  "id,name,status,url,phone,industry,address1,address2,city,state,countryID,countryName,dateAdded,dateLastModified,owner(id,name),companyDescription,comments,notes",
+  "id,name,status,url,phone,industry,address1,address2,city,state,countryID,countryName,dateAdded,dateLastModified,owner(id,name)",
+  "id,name,status,url,phone,industry,city,state,countryID,countryName,dateAdded,dateLastModified",
+  "id,name,url,phone",
+  "*",
+];
+const CONTACTS_BY_COMPANY_FIELD_SELECTORS = [
+  "id,name,firstName,lastName,email,occupation,status,phone,mobile,dateLastModified,dateLastComment,owner(id,name),clientCorporation(id,name)",
+  "id,name,firstName,lastName,email,occupation,status,phone,mobile,dateLastModified,clientCorporation(id,name)",
+  "id,name,email,occupation,status,phone,mobile",
+];
+const NOTE_QUERY_FIELD_SELECTORS = [
+  "id,action,comments,dateAdded,personReference(id,name),targetEntityName,targetEntityID",
+  "id,comments,dateAdded,targetEntityName,targetEntityID",
+  "id,comments,dateAdded",
+];
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type MirrorFilterOperator = "contains" | "equals";
@@ -1102,6 +1126,176 @@ async function fetchEntityOverlayById(
   return null;
 }
 
+async function fetchQueryRowsWithFallback(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+  whereClause: string,
+  count: number,
+  start: number,
+  fieldSelectors: string[],
+): Promise<any[]> {
+  const selectors = fieldSelectors.map((value) => String(value || "").trim()).filter(Boolean);
+  if (!selectors.length) return [];
+
+  for (const selector of selectors) {
+    let activeFields = selector;
+    const attempted = new Set<string>([activeFields]);
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const queryUrl = `${restUrl}query/${entityName}?BhRestToken=${encodeURIComponent(
+        bhRestToken,
+      )}&fields=${encodeURIComponent(activeFields)}&where=${encodeURIComponent(whereClause)}&count=${count}&start=${start}`;
+
+      const response = await fetch(queryUrl);
+      if (response.status === 429) {
+        await new Promise((resolve) => setTimeout(resolve, 550 + attempt * 350));
+        continue;
+      }
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const invalidFields = parseInvalidFieldNames(body);
+        if (invalidFields.length) {
+          const pruned = removeInvalidFields(activeFields, invalidFields);
+          if (pruned && pruned !== activeFields && !attempted.has(pruned)) {
+            activeFields = pruned;
+            attempted.add(pruned);
+            continue;
+          }
+        }
+        break;
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      const rows = Array.isArray(payload?.data) ? payload.data : [];
+      return rows;
+    }
+  }
+
+  return [];
+}
+
+async function fetchEntityByIdWithFallback(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+  entityId: number,
+  fieldSelectors: string[],
+): Promise<Record<string, unknown> | null> {
+  const selectors = fieldSelectors.map((value) => String(value || "").trim()).filter(Boolean);
+  if (!selectors.length) return null;
+
+  for (const selector of selectors) {
+    let activeFields = selector;
+    const attempted = new Set<string>([activeFields]);
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const entityUrl = `${restUrl}entity/${entityName}/${entityId}?BhRestToken=${encodeURIComponent(
+        bhRestToken,
+      )}&fields=${encodeURIComponent(activeFields)}`;
+      const response = await fetch(entityUrl);
+
+      if (response.status === 429) {
+        await new Promise((resolve) => setTimeout(resolve, 550 + attempt * 350));
+        continue;
+      }
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const invalidFields = parseInvalidFieldNames(body);
+        if (invalidFields.length) {
+          const pruned = removeInvalidFields(activeFields, invalidFields);
+          if (pruned && pruned !== activeFields && !attempted.has(pruned)) {
+            activeFields = pruned;
+            attempted.add(pruned);
+            continue;
+          }
+        }
+        break;
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      const resolved = payload?.data && typeof payload.data === "object" ? payload.data : payload;
+      if (resolved && typeof resolved === "object" && !Array.isArray(resolved)) {
+        return resolved as Record<string, unknown>;
+      }
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeLiveNoteRow(input: any): Record<string, unknown> {
+  const base = input && typeof input === "object" ? input : {};
+  const personReference = base.personReference && typeof base.personReference === "object"
+    ? base.personReference
+    : null;
+  return {
+    id: toFiniteNumber(base.id),
+    action: base.action ? String(base.action) : null,
+    comments: base.comments ? String(base.comments) : null,
+    dateAdded: normalizeBullhornDate(base.dateAdded),
+    personName: personReference?.name ? String(personReference.name) : null,
+    targetEntityName: base.targetEntityName ? String(base.targetEntityName) : null,
+    targetEntityId: toFiniteNumber(base.targetEntityID),
+  };
+}
+
+function dedupeLiveNotes(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = `${row.id ?? "none"}|${String(row.dateAdded ?? "")}|${String(row.comments ?? "").slice(0, 180)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  out.sort((a, b) => {
+    const left = toFiniteNumber(new Date(String(a.dateAdded || "")).getTime()) || 0;
+    const right = toFiniteNumber(new Date(String(b.dateAdded || "")).getTime()) || 0;
+    return right - left;
+  });
+  return out.slice(0, 25);
+}
+
+async function fetchBullhornNotesForEntity(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+  entityId: number,
+): Promise<Record<string, unknown>[]> {
+  const whereCandidates = [
+    `targetEntityName='${entityName}' AND targetEntityID=${entityId}`,
+    `targetEntityID=${entityId}`,
+  ];
+
+  const results: Record<string, unknown>[] = [];
+  for (const whereClause of whereCandidates) {
+    const rows = await fetchQueryRowsWithFallback(
+      restUrl,
+      bhRestToken,
+      "Note",
+      whereClause,
+      30,
+      0,
+      NOTE_QUERY_FIELD_SELECTORS,
+    );
+    for (const row of rows) {
+      results.push(normalizeLiveNoteRow(row));
+    }
+    if (results.length) break;
+  }
+
+  return dedupeLiveNotes(results);
+}
+
 async function fetchClientContactsBatch(
   restUrl: string,
   bhRestToken: string,
@@ -1631,6 +1825,146 @@ serve(async (req) => {
         success: true,
         data: { jobId, queued: true },
         message: "Continuation queued.",
+      });
+    }
+
+    if (action === "get-contact-detail") {
+      const contactId = toFiniteNumber(data?.contactId);
+      if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+
+      const tokens = await getStoredBullhornTokens(supabase);
+      if (!tokens) return jsonResponse({ success: false, error: "Bullhorn is not connected" }, 400);
+
+      const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
+      const contactFieldSelectors = Array.from(
+        new Set([buildClientContactFieldSelector(supportedFields), ...CONTACT_DETAIL_FIELD_SELECTORS].filter(Boolean)),
+      );
+
+      let contact = await fetchEntityByIdWithFallback(
+        tokens.rest_url,
+        tokens.bh_rest_token,
+        "ClientContact",
+        contactId,
+        contactFieldSelectors,
+      );
+
+      if (!contact) {
+        const { data: mirrorFallback } = await supabase
+          .from("bullhorn_client_contacts_mirror")
+          .select("*")
+          .eq("bullhorn_id", contactId)
+          .maybeSingle();
+        const rawFallback =
+          mirrorFallback?.raw && typeof mirrorFallback.raw === "object" && !Array.isArray(mirrorFallback.raw)
+            ? (mirrorFallback.raw as Record<string, unknown>)
+            : null;
+        if (rawFallback) contact = rawFallback;
+      }
+
+      if (!contact) return jsonResponse({ success: false, error: "Contact not found in Bullhorn" }, 404);
+
+      deriveCanonicalSkills(contact);
+
+      const companyId =
+        toFiniteNumber((contact.clientCorporation as any)?.id) ??
+        toFiniteNumber((contact as any).clientCorporationID) ??
+        null;
+
+      let company: Record<string, unknown> | null = null;
+      if (companyId) {
+        company = await fetchEntityByIdWithFallback(
+          tokens.rest_url,
+          tokens.bh_rest_token,
+          "ClientCorporation",
+          companyId,
+          COMPANY_DETAIL_FIELD_SELECTORS,
+        );
+      }
+
+      const notes = await fetchBullhornNotesForEntity(
+        tokens.rest_url,
+        tokens.bh_rest_token,
+        "ClientContact",
+        contactId,
+      );
+
+      return jsonResponse({
+        success: true,
+        data: {
+          contact,
+          company,
+          notes,
+        },
+      });
+    }
+
+    if (action === "get-company-detail") {
+      const companyId = toFiniteNumber(data?.companyId);
+      if (!companyId) return jsonResponse({ success: false, error: "companyId is required" }, 400);
+
+      const tokens = await getStoredBullhornTokens(supabase);
+      if (!tokens) return jsonResponse({ success: false, error: "Bullhorn is not connected" }, 400);
+
+      let company = await fetchEntityByIdWithFallback(
+        tokens.rest_url,
+        tokens.bh_rest_token,
+        "ClientCorporation",
+        companyId,
+        COMPANY_DETAIL_FIELD_SELECTORS,
+      );
+
+      if (!company) {
+        const { data: mirrorContact } = await supabase
+          .from("bullhorn_client_contacts_mirror")
+          .select("raw")
+          .eq("client_corporation_id", companyId)
+          .order("synced_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const raw =
+          mirrorContact?.raw && typeof mirrorContact.raw === "object" && !Array.isArray(mirrorContact.raw)
+            ? (mirrorContact.raw as Record<string, unknown>)
+            : null;
+        const fromRaw =
+          raw?.clientCorporation && typeof raw.clientCorporation === "object" && !Array.isArray(raw.clientCorporation)
+            ? (raw.clientCorporation as Record<string, unknown>)
+            : null;
+        if (fromRaw) company = fromRaw;
+      }
+
+      const liveContacts = await fetchQueryRowsWithFallback(
+        tokens.rest_url,
+        tokens.bh_rest_token,
+        "ClientContact",
+        `clientCorporation.id=${companyId}`,
+        50,
+        0,
+        CONTACTS_BY_COMPANY_FIELD_SELECTORS,
+      );
+
+      const contacts = liveContacts
+        .filter((row) => !(row && typeof row === "object" && (row as any).isDeleted))
+        .map((row) => {
+          if (row && typeof row === "object") {
+            deriveCanonicalSkills(row);
+          }
+          return row;
+        });
+
+      const notes = await fetchBullhornNotesForEntity(
+        tokens.rest_url,
+        tokens.bh_rest_token,
+        "ClientCorporation",
+        companyId,
+      );
+
+      return jsonResponse({
+        success: true,
+        data: {
+          company: company || null,
+          contacts,
+          notes,
+        },
       });
     }
 

@@ -44,6 +44,28 @@ export interface BullhornMirrorContact {
   raw: Record<string, unknown> | null;
 }
 
+export interface BullhornLiveNote {
+  id: number | null;
+  action: string | null;
+  comments: string | null;
+  dateAdded: string | null;
+  personName: string | null;
+  targetEntityName: string | null;
+  targetEntityId: number | null;
+}
+
+export interface BullhornLiveContactDetail {
+  contact: Record<string, unknown> | null;
+  company: Record<string, unknown> | null;
+  notes: BullhornLiveNote[];
+}
+
+export interface BullhornLiveCompanyDetail {
+  company: Record<string, unknown> | null;
+  contacts: Record<string, unknown>[];
+  notes: BullhornLiveNote[];
+}
+
 export type BullhornContactFilterField =
   | "name"
   | "company"
@@ -135,4 +157,12 @@ export async function listBullhornMirrorContacts(
     limit: number;
     offset: number;
   }>("list-mirror-contacts", profileName, options);
+}
+
+export async function getBullhornLiveContactDetail(profileName: string, contactId: number) {
+  return callBullhornSync<BullhornLiveContactDetail>("get-contact-detail", profileName, { contactId });
+}
+
+export async function getBullhornLiveCompanyDetail(profileName: string, companyId: number) {
+  return callBullhornSync<BullhornLiveCompanyDetail>("get-company-detail", profileName, { companyId });
 }

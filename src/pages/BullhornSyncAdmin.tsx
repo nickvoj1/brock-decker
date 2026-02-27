@@ -6,8 +6,12 @@ import {
   BullhornContactFilterField,
   BullhornContactFilterOperator,
   BullhornContactFilterRow,
+  BullhornLiveCompanyDetail,
+  BullhornLiveContactDetail,
   BullhornMirrorContact,
   BullhornSyncJob,
+  getBullhornLiveCompanyDetail,
+  getBullhornLiveContactDetail,
   getBullhornMirrorStats,
   listBullhornMirrorContacts,
   listBullhornSyncJobs,
@@ -508,6 +512,54 @@ function buildCompanyProfile(anchorRow: ContactDisplayRow, allRows: ContactDispl
   };
 }
 
+function readNestedValue(record: Record<string, unknown> | null, path: string): unknown {
+  if (!record) return null;
+  const parts = path.split(".");
+  let current: unknown = record;
+  for (const part of parts) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function pickFirstDefined(record: Record<string, unknown> | null, paths: string[]): unknown {
+  for (const path of paths) {
+    const value = readNestedValue(record, path);
+    if (value !== null && value !== undefined && value !== "") return value;
+  }
+  return null;
+}
+
+function extractCompanyIdFromRow(row: ContactDisplayRow): number | null {
+  const raw = getRawRecord(row.contact);
+  const fromRaw = toNullableNumber((asRecord(raw.clientCorporation) || {}).id);
+  if (fromRaw !== null) return fromRaw;
+  return row.contact.client_corporation_id ?? null;
+}
+
+function mapLiveNotesToProfileEntries(notes: unknown): ProfileNoteEntry[] {
+  if (!Array.isArray(notes)) return [];
+  return notes
+    .map((entry) => {
+      const record = asRecord(entry);
+      if (!record) return null;
+      const comments = formatMirrorValue(record.comments);
+      if (comments === "-") return null;
+      return {
+        label: formatMirrorValue(record.action) !== "-" ? formatMirrorValue(record.action) : "Bullhorn Note",
+        value: comments,
+        date: formatMirrorDate(record.dateAdded) === "-" ? null : formatMirrorDate(record.dateAdded),
+      } satisfies ProfileNoteEntry;
+    })
+    .filter((entry): entry is ProfileNoteEntry => Boolean(entry));
+}
+
+function toNullableDisplay(value: unknown): string | null {
+  const rendered = formatMirrorValue(value);
+  return rendered === "-" ? null : rendered;
+}
+
 export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdminProps) {
   const profileName = useProfileName();
   const navigate = useNavigate();
@@ -531,6 +583,12 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
   const [selectedContactProfile, setSelectedContactProfile] = useState<ContactDisplayRow | null>(null);
   const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<ContactDisplayRow | null>(null);
+  const [liveContactDetail, setLiveContactDetail] = useState<BullhornLiveContactDetail | null>(null);
+  const [liveCompanyDetail, setLiveCompanyDetail] = useState<BullhornLiveCompanyDetail | null>(null);
+  const [contactDetailLoading, setContactDetailLoading] = useState(false);
+  const [companyDetailLoading, setCompanyDetailLoading] = useState(false);
+  const contactDetailRequestIdRef = useRef(0);
+  const companyDetailRequestIdRef = useRef(0);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -791,29 +849,193 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     () => contacts.map((contact) => buildContactDisplayRow(contact)),
     [contacts],
   );
+  const allContactRowsById = useMemo(
+    () => new Map(allContactRows.map((row) => [row.contact.bullhorn_id, row])),
+    [allContactRows],
+  );
 
   const selectedContactNotes = useMemo(
     () => (selectedContactProfile ? extractContactNotes(selectedContactProfile.contact) : []),
     [selectedContactProfile],
   );
+  const selectedLiveContactNotes = useMemo(
+    () => mapLiveNotesToProfileEntries(liveContactDetail?.notes),
+    [liveContactDetail?.notes],
+  );
   const selectedContactRaw = useMemo(
-    () => (selectedContactProfile ? getRawRecord(selectedContactProfile.contact) : null),
-    [selectedContactProfile],
+    () => (asRecord(liveContactDetail?.contact) || (selectedContactProfile ? getRawRecord(selectedContactProfile.contact) : null)),
+    [liveContactDetail?.contact, selectedContactProfile],
+  );
+  const selectedLiveContactRecord = useMemo(
+    () => asRecord(liveContactDetail?.contact),
+    [liveContactDetail?.contact],
+  );
+  const selectedLiveContactCompanyRecord = useMemo(
+    () => asRecord(liveContactDetail?.company),
+    [liveContactDetail?.company],
   );
 
   const selectedCompanyData = useMemo(
     () => (selectedCompanyProfile ? buildCompanyProfile(selectedCompanyProfile, allContactRows) : null),
     [allContactRows, selectedCompanyProfile],
   );
+  const selectedLiveCompanyRecord = useMemo(
+    () => asRecord(liveCompanyDetail?.company),
+    [liveCompanyDetail?.company],
+  );
+  const selectedLiveCompanyNotes = useMemo(
+    () => mapLiveNotesToProfileEntries(liveCompanyDetail?.notes),
+    [liveCompanyDetail?.notes],
+  );
 
-  const openContactProfile = useCallback((row: ContactDisplayRow) => {
+  const contactOverview = useMemo(() => {
+    if (!selectedContactProfile) return null;
+    const liveContact = selectedLiveContactRecord;
+    const liveCompany = selectedLiveContactCompanyRecord;
+    const liveAddress = formatMirrorAddress(
+      pickFirstDefined(liveContact, ["address"]),
+      toNullableDisplay(pickFirstDefined(liveContact, ["city"])) ?? selectedContactProfile.contact.address_city,
+      toNullableDisplay(pickFirstDefined(liveContact, ["state"])) ?? selectedContactProfile.contact.address_state,
+    );
+
+    return {
+      jobTitle: toNullableDisplay(pickFirstDefined(liveContact, ["occupation"])) ?? selectedContactProfile.jobTitle,
+      company: toNullableDisplay(pickFirstDefined(liveCompany, ["name"])) ?? selectedContactProfile.company,
+      workEmail: toNullableDisplay(pickFirstDefined(liveContact, ["email"])) ?? selectedContactProfile.workEmail,
+      phone: toNullableDisplay(pickFirstDefined(liveContact, ["phone", "mobile"])) ?? selectedContactProfile.workPhone,
+      consultant:
+        toNullableDisplay(pickFirstDefined(liveContact, ["owner.name", "ownerName"])) ?? selectedContactProfile.consultant,
+      status: toNullableDisplay(pickFirstDefined(liveContact, ["status"])) ?? selectedContactProfile.status,
+      address: liveAddress === "-" ? selectedContactProfile.address : liveAddress,
+      dateAdded:
+        formatMirrorDate(pickFirstDefined(liveContact, ["dateAdded"])) !== "-"
+          ? formatMirrorDate(pickFirstDefined(liveContact, ["dateAdded"]))
+          : selectedContactProfile.dateAdded,
+      dateLastModified:
+        formatMirrorDate(pickFirstDefined(liveContact, ["dateLastModified"])) !== "-"
+          ? formatMirrorDate(pickFirstDefined(liveContact, ["dateLastModified"]))
+          : selectedContactProfile.dateLastModified,
+      lastVisit:
+        formatMirrorDate(pickFirstDefined(liveContact, ["dateLastVisit", "lastVisit"])) !== "-"
+          ? formatMirrorDate(pickFirstDefined(liveContact, ["dateLastVisit", "lastVisit"]))
+          : selectedContactProfile.lastVisit,
+      skills:
+        toNullableDisplay(
+          pickFirstDefined(liveContact, [
+            "skills",
+            "skillList",
+            "skillIDList",
+            "specialty",
+            "specialities",
+            "expertise",
+          ]),
+        ) ?? selectedContactProfile.skills,
+    };
+  }, [selectedContactProfile, selectedLiveContactCompanyRecord, selectedLiveContactRecord]);
+
+  const companyOverview = useMemo(() => {
+    if (!selectedCompanyData) return null;
+    const liveCompany = selectedLiveCompanyRecord;
+    const liveLocation = formatMirrorAddress(
+      pickFirstDefined(liveCompany, ["address"]),
+      toNullableDisplay(pickFirstDefined(liveCompany, ["city", "addressCity"])),
+      toNullableDisplay(pickFirstDefined(liveCompany, ["state", "addressState"])),
+    );
+
+    return {
+      id: toNullableNumber(pickFirstDefined(liveCompany, ["id"])) ?? selectedCompanyData.id,
+      name: toNullableDisplay(pickFirstDefined(liveCompany, ["name"])) ?? selectedCompanyData.name,
+      industry: toNullableDisplay(pickFirstDefined(liveCompany, ["industry"])) ?? selectedCompanyData.industry,
+      website: toNullableDisplay(pickFirstDefined(liveCompany, ["url", "website"])) ?? selectedCompanyData.website,
+      phone: toNullableDisplay(pickFirstDefined(liveCompany, ["phone", "mainPhone"])) ?? selectedCompanyData.phone,
+      location: liveLocation === "-" ? selectedCompanyData.location : liveLocation,
+      raw: liveCompany || selectedCompanyData.raw,
+    };
+  }, [selectedCompanyData, selectedLiveCompanyRecord]);
+
+  const companyContactsView = useMemo(() => {
+    const liveRows = Array.isArray(liveCompanyDetail?.contacts) ? liveCompanyDetail.contacts : [];
+    if (liveRows.length) {
+      return liveRows.map((row, index) => {
+        const record = asRecord(row) || {};
+        const bullhornId = toNullableNumber(record.id);
+        const mapped = bullhornId ? allContactRowsById.get(bullhornId) : null;
+        const name =
+          toNullableDisplay(
+            pickFirstDefined(record, [
+              "name",
+              "firstName",
+            ]),
+          ) ||
+          [toNullableDisplay(pickFirstDefined(record, ["firstName"])), toNullableDisplay(pickFirstDefined(record, ["lastName"]))]
+            .filter(Boolean)
+            .join(" ") ||
+          "Unknown";
+
+        return {
+          key: `live-${bullhornId || index}`,
+          bullhornId,
+          name,
+          title: toNullableDisplay(pickFirstDefined(record, ["occupation"])) || "-",
+          email: toNullableDisplay(pickFirstDefined(record, ["email"])) || "-",
+          mappedRow: mapped || null,
+        };
+      });
+    }
+
+    if (!selectedCompanyData) return [];
+    return selectedCompanyData.contacts.map((row) => ({
+      key: `mirror-${row.contact.bullhorn_id}`,
+      bullhornId: row.contact.bullhorn_id,
+      name: row.fullName,
+      title: row.jobTitle,
+      email: row.workEmail,
+      mappedRow: row,
+    }));
+  }, [allContactRowsById, liveCompanyDetail?.contacts, selectedCompanyData]);
+
+  const openContactProfile = useCallback(async (row: ContactDisplayRow) => {
+    const requestId = contactDetailRequestIdRef.current + 1;
+    contactDetailRequestIdRef.current = requestId;
     setSelectedCompanyProfile(null);
     setSelectedContactProfile(row);
+    setLiveContactDetail(null);
+    setContactDetailLoading(true);
+
+    const result = await getBullhornLiveContactDetail(ADMIN_PROFILE, row.contact.bullhorn_id);
+    if (contactDetailRequestIdRef.current !== requestId) return;
+
+    if (result.success && result.data) {
+      setLiveContactDetail(result.data);
+    } else if (result.error) {
+      toast.error(`Live Bullhorn contact fetch failed: ${result.error}`);
+    }
+    setContactDetailLoading(false);
   }, []);
 
-  const openCompanyProfile = useCallback((row: ContactDisplayRow) => {
+  const openCompanyProfile = useCallback(async (row: ContactDisplayRow) => {
+    const requestId = companyDetailRequestIdRef.current + 1;
+    companyDetailRequestIdRef.current = requestId;
     setSelectedContactProfile(null);
     setSelectedCompanyProfile(row);
+    setLiveCompanyDetail(null);
+    setCompanyDetailLoading(true);
+
+    const companyId = extractCompanyIdFromRow(row);
+    if (companyId === null) {
+      setCompanyDetailLoading(false);
+      return;
+    }
+
+    const result = await getBullhornLiveCompanyDetail(ADMIN_PROFILE, companyId);
+    if (companyDetailRequestIdRef.current !== requestId) return;
+
+    if (result.success && result.data) {
+      setLiveCompanyDetail(result.data);
+    } else if (result.error) {
+      toast.error(`Live Bullhorn company fetch failed: ${result.error}`);
+    }
+    setCompanyDetailLoading(false);
   }, []);
 
   const visibleContactIds = useMemo(
@@ -1321,7 +1543,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           <button
                             type="button"
                             className="block w-full truncate text-left font-medium text-primary hover:underline"
-                            onClick={() => openContactProfile(row)}
+                            onClick={() => void openContactProfile(row)}
                           >
                             {fullName}
                           </button>
@@ -1333,7 +1555,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           <button
                             type="button"
                             className="block w-full truncate text-left text-foreground hover:text-primary hover:underline"
-                            onClick={() => openCompanyProfile(row)}
+                            onClick={() => void openCompanyProfile(row)}
                           >
                             {company}
                           </button>
@@ -1390,7 +1612,11 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       <Sheet
         open={Boolean(selectedContactProfile)}
         onOpenChange={(open) => {
-          if (!open) setSelectedContactProfile(null);
+          if (!open) {
+            setSelectedContactProfile(null);
+            setLiveContactDetail(null);
+            setContactDetailLoading(false);
+          }
         }}
       >
         <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-3xl">
@@ -1400,6 +1626,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 <SheetTitle className="text-xl">{selectedContactProfile.fullName}</SheetTitle>
                 <SheetDescription>
                   Contact Profile • Bullhorn ID {selectedContactProfile.contact.bullhorn_id}
+                  {contactDetailLoading ? " • Loading live Bullhorn data..." : liveContactDetail ? " • Live data loaded" : ""}
                 </SheetDescription>
               </SheetHeader>
 
@@ -1418,7 +1645,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           <Briefcase className="h-3.5 w-3.5" />
                           Job Title
                         </p>
-                        <p className="text-sm font-medium">{selectedContactProfile.jobTitle}</p>
+                        <p className="text-sm font-medium">{contactOverview?.jobTitle || selectedContactProfile.jobTitle}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1428,12 +1655,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                         <button
                           type="button"
                           className="text-left text-sm font-medium text-primary hover:underline"
-                          onClick={() => {
-                            setSelectedContactProfile(null);
-                            setSelectedCompanyProfile(selectedContactProfile);
-                          }}
+                          onClick={() => void openCompanyProfile(selectedContactProfile)}
                         >
-                          {selectedContactProfile.company}
+                          {contactOverview?.company || selectedContactProfile.company}
                         </button>
                       </div>
                       <div className="rounded-md border p-3">
@@ -1441,9 +1665,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           <Mail className="h-3.5 w-3.5" />
                           Work Email
                         </p>
-                        {selectedContactProfile.workEmail !== "-" ? (
-                          <a href={`mailto:${selectedContactProfile.workEmail}`} className="text-sm font-medium text-primary hover:underline">
-                            {selectedContactProfile.workEmail}
+                        {(contactOverview?.workEmail || selectedContactProfile.workEmail) !== "-" ? (
+                          <a href={`mailto:${contactOverview?.workEmail || selectedContactProfile.workEmail}`} className="text-sm font-medium text-primary hover:underline">
+                            {contactOverview?.workEmail || selectedContactProfile.workEmail}
                           </a>
                         ) : (
                           <p className="text-sm font-medium">-</p>
@@ -1454,46 +1678,46 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           <Phone className="h-3.5 w-3.5" />
                           Phone
                         </p>
-                        <p className="text-sm font-medium">{selectedContactProfile.workPhone}</p>
+                        <p className="text-sm font-medium">{contactOverview?.phone || selectedContactProfile.workPhone}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
                           <User className="h-3.5 w-3.5" />
                           Consultant
                         </p>
-                        <p className="text-sm font-medium">{selectedContactProfile.consultant}</p>
+                        <p className="text-sm font-medium">{contactOverview?.consultant || selectedContactProfile.consultant}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
                           Status
                         </p>
-                        <p className="text-sm font-medium">{selectedContactProfile.status}</p>
+                        <p className="text-sm font-medium">{contactOverview?.status || selectedContactProfile.status}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
                           Address
                         </p>
-                        <p className="text-sm font-medium">{selectedContactProfile.address}</p>
+                        <p className="text-sm font-medium">{contactOverview?.address || selectedContactProfile.address}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
                           <Calendar className="h-3.5 w-3.5" />
                           Dates
                         </p>
-                        <p className="text-sm font-medium">Added: {selectedContactProfile.dateAdded}</p>
-                        <p className="text-sm font-medium">Modified: {selectedContactProfile.dateLastModified}</p>
-                        <p className="text-sm font-medium">Last Visit: {selectedContactProfile.lastVisit}</p>
+                        <p className="text-sm font-medium">Added: {contactOverview?.dateAdded || selectedContactProfile.dateAdded}</p>
+                        <p className="text-sm font-medium">Modified: {contactOverview?.dateLastModified || selectedContactProfile.dateLastModified}</p>
+                        <p className="text-sm font-medium">Last Visit: {contactOverview?.lastVisit || selectedContactProfile.lastVisit}</p>
                       </div>
                     </div>
                     <div className="rounded-md border p-3">
                       <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Skills</p>
-                      <p className="text-sm font-medium whitespace-pre-wrap break-words">{selectedContactProfile.skills}</p>
+                      <p className="text-sm font-medium whitespace-pre-wrap break-words">{contactOverview?.skills || selectedContactProfile.skills}</p>
                     </div>
                   </TabsContent>
 
                   <TabsContent value="notes" className="space-y-3">
-                    {selectedContactNotes.length ? (
-                      selectedContactNotes.map((note, index) => (
+                    {(selectedLiveContactNotes.length ? selectedLiveContactNotes : selectedContactNotes).length ? (
+                      (selectedLiveContactNotes.length ? selectedLiveContactNotes : selectedContactNotes).map((note, index) => (
                         <div key={`${note.label}-${index}`} className="rounded-md border p-3">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{note.label}</p>
@@ -1504,7 +1728,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       ))
                     ) : (
                       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                        No notes found in synced Bullhorn payload for this contact yet.
+                        {contactDetailLoading ? "Loading notes from Bullhorn..." : "No notes found in synced or live Bullhorn payload for this contact."}
                       </div>
                     )}
                   </TabsContent>
@@ -1526,16 +1750,21 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       <Sheet
         open={Boolean(selectedCompanyProfile)}
         onOpenChange={(open) => {
-          if (!open) setSelectedCompanyProfile(null);
+          if (!open) {
+            setSelectedCompanyProfile(null);
+            setLiveCompanyDetail(null);
+            setCompanyDetailLoading(false);
+          }
         }}
       >
         <SheetContent side="right" className="w-full max-w-none p-0 sm:max-w-3xl">
           {selectedCompanyData && (
             <div className="flex h-full flex-col">
               <SheetHeader className="border-b px-6 py-4">
-                <SheetTitle className="text-xl">{selectedCompanyData.name}</SheetTitle>
+                <SheetTitle className="text-xl">{companyOverview?.name || selectedCompanyData.name}</SheetTitle>
                 <SheetDescription>
-                  Company Profile{selectedCompanyData.id !== null ? ` • Bullhorn ID ${selectedCompanyData.id}` : ""}
+                  Company Profile{(companyOverview?.id ?? selectedCompanyData.id) !== null ? ` • Bullhorn ID ${companyOverview?.id ?? selectedCompanyData.id}` : ""}
+                  {companyDetailLoading ? " • Loading live Bullhorn data..." : liveCompanyDetail ? " • Live data loaded" : ""}
                 </SheetDescription>
               </SheetHeader>
 
@@ -1555,22 +1784,22 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                           <Building2 className="h-3.5 w-3.5" />
                           Company
                         </p>
-                        <p className="text-sm font-medium">{selectedCompanyData.name}</p>
+                        <p className="text-sm font-medium">{companyOverview?.name || selectedCompanyData.name}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Industry</p>
-                        <p className="text-sm font-medium">{selectedCompanyData.industry}</p>
+                        <p className="text-sm font-medium">{companyOverview?.industry || selectedCompanyData.industry}</p>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Website</p>
-                        {selectedCompanyData.website !== "-" ? (
+                        {(companyOverview?.website || selectedCompanyData.website) !== "-" ? (
                           <a
-                            href={selectedCompanyData.website.startsWith("http") ? selectedCompanyData.website : `https://${selectedCompanyData.website}`}
+                            href={(companyOverview?.website || selectedCompanyData.website).startsWith("http") ? (companyOverview?.website || selectedCompanyData.website) : `https://${companyOverview?.website || selectedCompanyData.website}`}
                             target="_blank"
                             rel="noreferrer"
                             className="text-sm font-medium text-primary hover:underline"
                           >
-                            {selectedCompanyData.website}
+                            {companyOverview?.website || selectedCompanyData.website}
                           </a>
                         ) : (
                           <p className="text-sm font-medium">-</p>
@@ -1578,46 +1807,48 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Phone</p>
-                        <p className="text-sm font-medium">{selectedCompanyData.phone}</p>
+                        <p className="text-sm font-medium">{companyOverview?.phone || selectedCompanyData.phone}</p>
                       </div>
                       <div className="rounded-md border p-3 md:col-span-2">
                         <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Location</p>
-                        <p className="text-sm font-medium">{selectedCompanyData.location}</p>
+                        <p className="text-sm font-medium">{companyOverview?.location || selectedCompanyData.location}</p>
                       </div>
                     </div>
                   </TabsContent>
 
                   <TabsContent value="contacts" className="space-y-3">
-                    {selectedCompanyData.contacts.length ? (
-                      selectedCompanyData.contacts.map((row) => (
-                        <div key={row.contact.bullhorn_id} className="rounded-md border p-3">
+                    {companyContactsView.length ? (
+                      companyContactsView.map((row) => (
+                        <div key={row.key} className="rounded-md border p-3">
                           <div className="flex items-start justify-between gap-3">
                             <button
                               type="button"
                               className="text-left text-sm font-semibold text-primary hover:underline"
                               onClick={() => {
-                                setSelectedCompanyProfile(null);
-                                setSelectedContactProfile(row);
+                                if (row.mappedRow) {
+                                  void openContactProfile(row.mappedRow);
+                                }
                               }}
+                              disabled={!row.mappedRow}
                             >
-                              {row.fullName}
+                              {row.name}
                             </button>
-                            <span className="text-xs text-muted-foreground">ID {row.contact.bullhorn_id}</span>
+                            <span className="text-xs text-muted-foreground">ID {row.bullhornId ?? "-"}</span>
                           </div>
-                          <p className="mt-1 text-sm">{row.jobTitle}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{row.workEmail}</p>
+                          <p className="mt-1 text-sm">{row.title}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{row.email}</p>
                         </div>
                       ))
                     ) : (
                       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                        No contacts for this company in the currently synced batch.
+                        {companyDetailLoading ? "Loading company contacts from Bullhorn..." : "No contacts for this company in the current dataset."}
                       </div>
                     )}
                   </TabsContent>
 
                   <TabsContent value="notes" className="space-y-3">
-                    {selectedCompanyData.notes.length ? (
-                      selectedCompanyData.notes.map((note, index) => (
+                    {(selectedLiveCompanyNotes.length ? selectedLiveCompanyNotes : selectedCompanyData.notes).length ? (
+                      (selectedLiveCompanyNotes.length ? selectedLiveCompanyNotes : selectedCompanyData.notes).map((note, index) => (
                         <div key={`${note.label}-${index}`} className="rounded-md border p-3">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{note.label}</p>
@@ -1628,7 +1859,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       ))
                     ) : (
                       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                        No company notes found in synced Bullhorn payload yet.
+                        {companyDetailLoading ? "Loading company notes from Bullhorn..." : "No company notes found in synced or live Bullhorn payload."}
                       </div>
                     )}
                   </TabsContent>
@@ -1636,7 +1867,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                   <TabsContent value="raw">
                     <div className="rounded-md border bg-muted/30 p-3">
                       <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap break-words text-xs leading-5">
-                        {JSON.stringify(selectedCompanyData.raw || {}, null, 2)}
+                        {JSON.stringify(companyOverview?.raw || selectedCompanyData.raw || {}, null, 2)}
                       </pre>
                     </div>
                   </TabsContent>
