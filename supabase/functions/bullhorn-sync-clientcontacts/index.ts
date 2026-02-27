@@ -1434,6 +1434,106 @@ async function fetchLatestNotesForContactIds(
   return latestByContact;
 }
 
+function hasPersistedLatestNote(contact: any): boolean {
+  const noteText =
+    typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
+  const noteDate =
+    typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
+  return noteText || noteDate;
+}
+
+function overlayNoteFieldsIntoContact(contact: any, overlay: Record<string, unknown>) {
+  if (!contact || typeof contact !== "object") return;
+  if (!overlay || typeof overlay !== "object") return;
+  const noteKeys = ["comments", "notes", "description", "dateLastComment", "dateLastVisit"];
+  for (const key of noteKeys) {
+    if (!hasMeaningfulValue(contact[key]) && hasMeaningfulValue(overlay[key])) {
+      contact[key] = overlay[key];
+    }
+  }
+}
+
+function deriveLatestNoteFromContactFields(contact: any): {
+  text: string | null;
+  date: string | null;
+} {
+  const textCandidates = [
+    contact?.latest_note,
+    contact?.lastNote,
+    contact?.comments,
+    contact?.notes,
+    contact?.description,
+  ];
+  const text = textCandidates
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .find((value) => value.length > 0) || null;
+
+  const date = normalizeBullhornDate(
+    contact?.latest_note_date ?? contact?.dateLastComment ?? contact?.dateLastVisit ?? contact?.dateLastModified,
+  );
+
+  return { text, date };
+}
+
+async function enrichFetchedContactsWithLatestNotes(
+  restUrl: string,
+  bhRestToken: string,
+  contacts: any[],
+): Promise<any[]> {
+  const rows = Array.isArray(contacts) ? contacts : [];
+  if (!rows.length) return rows;
+
+  const ids = rows
+    .map((contact) => Number(contact?.id ?? contact?.bullhorn_id))
+    .filter((id) => Number.isFinite(id));
+  if (!ids.length) return rows;
+
+  const latestByContact = await fetchLatestNotesForContactIds(restUrl, bhRestToken, ids);
+  for (const contact of rows) {
+    const id = Number(contact?.id ?? contact?.bullhorn_id);
+    if (!Number.isFinite(id)) continue;
+    const note = latestByContact.get(id);
+    if (!note) continue;
+    const comments = typeof note.comments === "string" ? note.comments.trim() : "";
+    const action = typeof note.action === "string" ? note.action.trim() : "";
+    if (comments || action) {
+      contact.latest_note = comments && action ? `${action}: ${comments}` : comments || action;
+    }
+    const noteDate = normalizeBullhornDate(note.dateAdded);
+    if (noteDate) {
+      contact.latest_note_date = noteDate;
+    }
+    if (action) {
+      contact.latest_note_action = action;
+    }
+  }
+
+  const missingIds = rows
+    .filter((contact) => !hasPersistedLatestNote(contact))
+    .map((contact) => Number(contact?.id ?? contact?.bullhorn_id))
+    .filter((id) => Number.isFinite(id));
+  if (!missingIds.length) return rows;
+
+  const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds, CONTACT_NOTE_OVERLAY_FIELDS);
+  for (const contact of rows) {
+    const id = Number(contact?.id ?? contact?.bullhorn_id);
+    if (!Number.isFinite(id)) continue;
+    const overlay = overlayById.get(id);
+    if (!overlay || typeof overlay !== "object") continue;
+
+    overlayNoteFieldsIntoContact(contact, overlay as Record<string, unknown>);
+    const derived = deriveLatestNoteFromContactFields(contact);
+    if (!hasPersistedLatestNote(contact)) {
+      if (derived.text) contact.latest_note = derived.text;
+      if (derived.date) contact.latest_note_date = derived.date;
+    } else if (!contact.latest_note_date && derived.date) {
+      contact.latest_note_date = derived.date;
+    }
+  }
+
+  return rows;
+}
+
 async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Promise<any[]> {
   const rows = Array.isArray(contacts) ? contacts : [];
   if (!rows.length) return rows;
@@ -1446,73 +1546,7 @@ async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Pr
   const tokens = await getStoredBullhornTokens(supabase);
   if (!tokens) return rows;
 
-  const latestByContact = await fetchLatestNotesForContactIds(tokens.rest_url, tokens.bh_rest_token, ids);
-  if (!latestByContact.size) return rows;
-
-  for (const contact of rows) {
-    const id = Number(contact?.bullhorn_id ?? contact?.id);
-    if (!Number.isFinite(id)) continue;
-    const note = latestByContact.get(id);
-    if (!note) continue;
-
-    const comments = typeof note.comments === "string" ? note.comments.trim() : "";
-    const action = typeof note.action === "string" ? note.action.trim() : "";
-    contact.latest_note = comments && action ? `${action}: ${comments}` : comments || action || null;
-    contact.latest_note_action = action || null;
-    contact.latest_note_date = normalizeBullhornDate(note.dateAdded);
-  }
-
-  // Fallback for Bullhorn instances where note entity is sparse but ClientContact exposes last-note fields.
-  const stillMissingIds = rows
-    .filter((contact) => {
-      const hasNoteText = typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
-      const hasNoteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
-      return !hasNoteText && !hasNoteDate;
-    })
-    .map((contact) => Number(contact?.bullhorn_id ?? contact?.id))
-    .filter((id) => Number.isFinite(id));
-
-  if (!stillMissingIds.length) return rows;
-
-  const noteOverlayById = await fetchSkillOverlayForIds(
-    tokens.rest_url,
-    tokens.bh_rest_token,
-    stillMissingIds,
-    CONTACT_NOTE_OVERLAY_FIELDS,
-  );
-  if (!noteOverlayById.size) return rows;
-
-  for (const contact of rows) {
-    const id = Number(contact?.bullhorn_id ?? contact?.id);
-    if (!Number.isFinite(id)) continue;
-    const overlay = noteOverlayById.get(id);
-    if (!overlay || typeof overlay !== "object") continue;
-
-    const existingRaw =
-      contact?.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
-        ? (contact.raw as Record<string, unknown>)
-        : {};
-    const overlayRaw = overlay as Record<string, unknown>;
-    contact.raw = { ...existingRaw, ...overlayRaw };
-
-    const comments = typeof overlayRaw.comments === "string" ? overlayRaw.comments.trim() : "";
-    const notes = typeof overlayRaw.notes === "string" ? overlayRaw.notes.trim() : "";
-    const description = typeof overlayRaw.description === "string" ? overlayRaw.description.trim() : "";
-    const overlayText = comments || notes || description;
-    const overlayDate = normalizeBullhornDate(overlayRaw.dateLastComment ?? overlayRaw.dateLastVisit);
-
-    const hasNoteText = typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
-    const hasNoteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
-
-    if (!hasNoteText && overlayText) {
-      contact.latest_note = overlayText;
-    }
-    if (!hasNoteDate && overlayDate) {
-      contact.latest_note_date = overlayDate;
-    }
-  }
-
-  return rows;
+  return await enrichFetchedContactsWithLatestNotes(tokens.rest_url, tokens.bh_rest_token, rows);
 }
 
 async function fetchClientContactsBatch(
@@ -1833,6 +1867,7 @@ async function processSyncJob(
       preferredFieldSelector,
       supportedFields,
     );
+    await enrichFetchedContactsWithLatestNotes(tokens.rest_url, tokens.bh_rest_token, rows);
 
     if (totalExpected === null && Number.isFinite(Number(total))) {
       totalExpected = Number(total);
