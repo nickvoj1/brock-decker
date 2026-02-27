@@ -98,6 +98,11 @@ const MIRROR_FILTER_FIELDS = new Set([
   "consultant",
   "status",
   "skills",
+  "preferred_contact",
+  "comm_status",
+  "last_contacted",
+  "has_resume",
+  "mass_mail_opt_out",
 ]);
 const CONTACT_DETAIL_FIELD_SELECTORS = [
   "id,name,firstName,lastName,email,occupation,status,phone,mobile,address(city,state,countryID,countryName),address1,address2,city,state,dateAdded,dateLastModified,dateLastVisit,dateLastComment,skills,skillsCount,skillList,skillIDList,specialty,specialities,expertise,categories(id,name),specialties(id,name),clientCorporation(id,name),owner(id,name),comments,description,notes",
@@ -124,6 +129,33 @@ const NOTE_QUERY_FIELD_SELECTORS = [
   "id,comments,dateAdded",
 ];
 const CONTACT_NOTE_OVERLAY_FIELDS = "id,dateLastComment,dateLastVisit,comments,notes,description";
+const TASK_QUERY_FIELD_SELECTORS = [
+  "id,subject,comments,status,type,dateAdded,dateLastModified,dateBegin,dateEnd,owner(id,name),clientContact(id,name),clientContactReference(id,name)",
+  "id,subject,comments,status,type,dateAdded,dateLastModified,clientContact(id),clientContactReference(id)",
+  "id,subject,comments,status,type,dateAdded,dateLastModified",
+];
+const APPOINTMENT_QUERY_FIELD_SELECTORS = [
+  "id,subject,comments,status,type,dateAdded,dateLastModified,dateBegin,dateEnd,owner(id,name),clientContact(id,name),clientContactReference(id,name)",
+  "id,subject,comments,status,type,dateAdded,dateLastModified,clientContact(id),clientContactReference(id)",
+  "id,subject,comments,status,type,dateAdded,dateLastModified",
+];
+const CLIENT_CORP_APPOINTMENT_SELECTORS = [
+  "id,dateAdded,dateLastModified,appointment(id,subject,comments,status,type,dateBegin,dateEnd),clientContact(id,name),owner(id,name)",
+  "id,dateAdded,dateLastModified,appointment(id,subject,status,type,dateBegin,dateEnd),clientContact(id)",
+  "id,dateAdded,dateLastModified,appointment(id,subject)",
+];
+const CLIENT_CORP_TASK_SELECTORS = [
+  "id,dateAdded,dateLastModified,task(id,subject,comments,status,type,dateBegin,dateEnd),clientContact(id,name),owner(id,name)",
+  "id,dateAdded,dateLastModified,task(id,subject,status,type,dateBegin,dateEnd),clientContact(id)",
+  "id,dateAdded,dateLastModified,task(id,subject)",
+];
+const FILE_ATTACHMENT_SELECTORS = [
+  "id,fileType,name,type,fileSize,contentType,isDeleted,dateAdded,dateLastModified,isResume",
+  "*",
+];
+const CONTACT_PARITY_ENTITY_META = ["ClientContact", "ClientCorporation", "Note", "Task", "Appointment"];
+const CONTACT_TIMELINE_PAGE_SIZE = 200;
+const CONTACT_TIMELINE_MAX_PAGES_PER_QUERY = 10;
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type MirrorFilterOperator = "contains" | "equals";
@@ -136,7 +168,12 @@ type MirrorFilterField =
   | "country"
   | "consultant"
   | "status"
-  | "skills";
+  | "skills"
+  | "preferred_contact"
+  | "comm_status"
+  | "last_contacted"
+  | "has_resume"
+  | "mass_mail_opt_out";
 type MirrorFilterRow = {
   field: MirrorFilterField;
   operator: MirrorFilterOperator;
@@ -163,6 +200,18 @@ type SyncJob = {
   batches_processed: number;
   last_batch_size: number;
   metadata: Record<string, unknown> | null;
+};
+
+type ContactParitySummary = {
+  eventCount: number;
+  lastContactedAt: string | null;
+  lastNoteAt: string | null;
+  lastTaskAt: string | null;
+  lastCallAt: string | null;
+  lastEmailSentAt: string | null;
+  lastEmailReceivedAt: string | null;
+  documentsCount: number;
+  hasResume: boolean;
 };
 
 function jsonResponse(payload: unknown, status = 200) {
@@ -416,6 +465,28 @@ function getFieldValuesForMirrorFilter(contact: any, field: MirrorFilterField): 
       break;
     case "skills":
       return extractSkillTermsFromMirrorContact(contact);
+    case "preferred_contact":
+      addValue(contact?.preferred_contact);
+      addValue(rawRecord.preferredContact);
+      break;
+    case "comm_status":
+      addValue(contact?.comm_status_label);
+      addValue(rawRecord.emailStatus);
+      addValue(rawRecord.communicationStatus);
+      break;
+    case "last_contacted":
+      addValue(contact?.last_contacted_at);
+      addValue(rawRecord.lastContactedAt);
+      addValue(rawRecord.dateLastComment);
+      addValue(rawRecord.dateLastVisit);
+      break;
+    case "has_resume":
+      addValue(contact?.has_resume);
+      break;
+    case "mass_mail_opt_out":
+      addValue(contact?.mass_mail_opt_out);
+      addValue(rawRecord.massMailOptOut);
+      break;
   }
 
   return Array.from(new Set(values.filter(Boolean)));
@@ -728,17 +799,52 @@ function extractMetaFieldNames(metaPayload: any): Set<string> {
   return names;
 }
 
-async function getClientContactMetaFields(restUrl: string, bhRestToken: string): Promise<Set<string> | null> {
-  const metaUrl = `${restUrl}meta/ClientContact?BhRestToken=${encodeURIComponent(bhRestToken)}`;
+function extractMetaFieldEntries(metaPayload: any): Record<string, unknown>[] {
+  const candidates = [
+    metaPayload?.fields,
+    metaPayload?.data?.fields,
+    metaPayload?.entity?.fields,
+    metaPayload?.data?.entity?.fields,
+  ];
+
+  for (const source of candidates) {
+    if (!source) continue;
+    if (Array.isArray(source)) {
+      return source.filter((entry) => entry && typeof entry === "object");
+    }
+    if (typeof source === "object") {
+      return Object.entries(source).map(([fieldName, value]) => {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          return { fieldName, ...(value as Record<string, unknown>) };
+        }
+        return { fieldName, rawValue: value };
+      });
+    }
+  }
+  return [];
+}
+
+async function fetchEntityMetaPayload(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+): Promise<Record<string, unknown> | null> {
+  const metaUrl = `${restUrl}meta/${entityName}?BhRestToken=${encodeURIComponent(bhRestToken)}`;
   try {
     const response = await fetch(metaUrl);
     if (!response.ok) return null;
     const payload = await response.json();
-    const fieldNames = extractMetaFieldNames(payload);
-    return fieldNames.size ? fieldNames : null;
+    return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
+
+async function getClientContactMetaFields(restUrl: string, bhRestToken: string): Promise<Set<string> | null> {
+  const payload = await fetchEntityMetaPayload(restUrl, bhRestToken, "ClientContact");
+  if (!payload) return null;
+  const fieldNames = extractMetaFieldNames(payload);
+  return fieldNames.size ? fieldNames : null;
 }
 
 function buildClientContactFieldSelector(supportedFields: Set<string> | null): string {
@@ -758,10 +864,28 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
     "firstName",
     "lastName",
     "email",
+    "email2",
+    "email3",
     "occupation",
     "status",
     "phone",
+    "phone2",
+    "phone3",
     "mobile",
+    "linkedIn",
+    "linkedInURL",
+    "linkedinUrl",
+    "preferredContact",
+    "massMailOptOut",
+    "smsOptIn",
+    "doNotCall",
+    "doNotContact",
+    "emailBounced",
+    "emailInvalid",
+    "isEmailInvalid",
+    "emailStatus",
+    "lastEmailSentDate",
+    "lastEmailReceivedDate",
     "dateAdded",
     "dateLastModified",
     "isDeleted",
@@ -790,7 +914,37 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
   ["skills", "skillList", "skillIDList", "skill", "specialty", "specialities", "expertise"].forEach(addSimple);
   // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
   // We always include them and let invalid-field pruning remove unsupported fields safely.
-  ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "comments", "notes", "description", "address1", "address2", "city", "state"].forEach(
+  [
+    "skills",
+    "skillsCount",
+    "dateLastVisit",
+    "dateLastComment",
+    "comments",
+    "notes",
+    "description",
+    "address1",
+    "address2",
+    "city",
+    "state",
+    "preferredContact",
+    "massMailOptOut",
+    "smsOptIn",
+    "doNotCall",
+    "doNotContact",
+    "emailBounced",
+    "emailInvalid",
+    "isEmailInvalid",
+    "emailStatus",
+    "lastEmailSentDate",
+    "lastEmailReceivedDate",
+    "email2",
+    "email3",
+    "phone2",
+    "phone3",
+    "linkedIn",
+    "linkedInURL",
+    "linkedinUrl",
+  ].forEach(
     add,
   );
 
@@ -905,6 +1059,99 @@ function buildEntitySkillFieldSelector(supportedFields: Set<string> | null): str
   }
 
   return Array.from(new Set(result)).join(",");
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  const out = String(value ?? "").trim();
+  return out.length ? out : null;
+}
+
+function normalizeLooseBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (["true", "1", "yes", "y", "active", "enabled"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", "inactive", "disabled"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function maxIsoDate(...values: Array<unknown>): string | null {
+  let maxTs = 0;
+  let hasAny = false;
+  for (const value of values) {
+    const iso = normalizeBullhornDate(value);
+    if (!iso) continue;
+    const ts = Date.parse(iso);
+    if (!Number.isFinite(ts)) continue;
+    hasAny = true;
+    if (ts > maxTs) maxTs = ts;
+  }
+  return hasAny ? new Date(maxTs).toISOString() : null;
+}
+
+function extractCustomFieldSummary(contact: Record<string, unknown>): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  const keys = Object.keys(contact)
+    .filter((key) => CUSTOM_FIELD_REGEX.test(key.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+  for (const key of keys) {
+    if (!hasMeaningfulValue(contact[key])) continue;
+    summary[key] = contact[key];
+  }
+  return summary;
+}
+
+function extractBooleanByKeyHints(contact: Record<string, unknown>, hints: string[]): boolean | null {
+  const loweredHints = hints.map((hint) => hint.toLowerCase());
+  const keys = Object.keys(contact);
+  for (const key of keys) {
+    const lower = key.toLowerCase();
+    if (!loweredHints.some((hint) => lower.includes(hint))) continue;
+    const normalized = normalizeLooseBoolean(contact[key]);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function deriveCommunicationFlags(contact: Record<string, unknown>) {
+  const massMailOptOut =
+    normalizeLooseBoolean(contact.massMailOptOut) ??
+    normalizeLooseBoolean(contact.massmailoptout) ??
+    extractBooleanByKeyHints(contact, ["massmailoptout", "emailoptout", "optout"]);
+  const smsOptIn =
+    normalizeLooseBoolean(contact.smsOptIn) ??
+    normalizeLooseBoolean(contact.smsoptin) ??
+    extractBooleanByKeyHints(contact, ["smsoptin", "sms_opt"]);
+  const doNotContact =
+    normalizeLooseBoolean(contact.doNotContact) ??
+    normalizeLooseBoolean(contact.doNotCall) ??
+    extractBooleanByKeyHints(contact, ["donotcontact", "donotcall", "do_not_contact", "do_not_call"]);
+  const emailBounced =
+    normalizeLooseBoolean(contact.emailBounced) ??
+    normalizeLooseBoolean(contact.emailInvalid) ??
+    normalizeLooseBoolean(contact.isEmailInvalid) ??
+    extractBooleanByKeyHints(contact, ["emailbounced", "emailinvalid", "bounce", "undeliverable"]);
+
+  return {
+    massMailOptOut,
+    smsOptIn,
+    doNotContact,
+    emailBounced,
+  };
+}
+
+function deriveCommunicationStatusLabel(flags: {
+  doNotContact: boolean | null;
+  massMailOptOut: boolean | null;
+  emailBounced: boolean | null;
+}, fallback: unknown): string | null {
+  if (flags.doNotContact === true) return "DO_NOT_CONTACT";
+  if (flags.massMailOptOut === true) return "OPT_OUT";
+  if (flags.emailBounced === true) return "BOUNCED";
+  return normalizeOptionalString(fallback) || "ACTIVE";
 }
 
 function normalizeBullhornDate(value: unknown): string | null {
@@ -1352,6 +1599,614 @@ async function fetchBullhornNotesForEntity(
   return dedupeLiveNotes(results);
 }
 
+function normalizeTimelineEventType(source: string, value: unknown, fallbackSummary: unknown): string {
+  const direct = String(value || "").trim().toLowerCase();
+  const summary = String(fallbackSummary || "").trim().toLowerCase();
+  const combined = `${direct} ${summary}`.trim();
+  if (!combined) return source;
+  if (combined.includes("email") || combined.includes("mail")) return "email";
+  if (combined.includes("call") || combined.includes("phone")) return "call";
+  if (combined.includes("meeting") || combined.includes("appointment")) return "meeting";
+  if (combined.includes("task") || combined.includes("to-do") || combined.includes("todo")) return "task";
+  if (combined.includes("note")) return "note";
+  return source;
+}
+
+function extractContactIdFromActivityRow(row: Record<string, unknown>): number | null {
+  const directCandidates = [
+    row.targetEntityID,
+    row.targetEntityId,
+    row.clientContactID,
+    row.clientContactId,
+    row.contactID,
+    row.contactId,
+  ];
+  for (const candidate of directCandidates) {
+    const value = toFiniteNumber(candidate);
+    if (value) return value;
+  }
+
+  const objectCandidates = [
+    row.clientContact,
+    row.clientContactReference,
+    row.contact,
+    row.targetEntity,
+  ];
+  for (const candidate of objectCandidates) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const record = candidate as Record<string, unknown>;
+    const value = toFiniteNumber(record.id ?? record.entityID ?? record.entityId);
+    if (value) return value;
+  }
+
+  return null;
+}
+
+function extractActorNameFromActivityRow(row: Record<string, unknown>): string | null {
+  const owner = row.owner && typeof row.owner === "object" && !Array.isArray(row.owner)
+    ? (row.owner as Record<string, unknown>)
+    : null;
+  const personReference = row.personReference && typeof row.personReference === "object" && !Array.isArray(row.personReference)
+    ? (row.personReference as Record<string, unknown>)
+    : null;
+
+  return normalizeOptionalString(owner?.name ?? personReference?.name ?? row.personName ?? row.author);
+}
+
+function normalizeTimelineEventRow(
+  source: string,
+  contactId: number,
+  row: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const eventAt = normalizeBullhornDate(
+    row.dateAdded ?? row.dateBegin ?? row.dateEnd ?? row.dateLastModified ?? row.modDate,
+  );
+  const summary = normalizeOptionalString(
+    row.subject ?? row.action ?? row.status ?? row.type ?? row.targetEntityName,
+  );
+  const details = normalizeOptionalString(
+    row.comments ?? row.notes ?? row.description ?? row.note,
+  );
+  const eventType = normalizeTimelineEventType(source, row.type ?? row.action ?? row.status, summary);
+  const externalId = normalizeOptionalString(row.id);
+  const externalKey = externalId
+    ? `${source}:${externalId}:${contactId}`
+    : `${source}:${contactId}:${eventAt || "na"}:${(summary || "").slice(0, 80)}`;
+
+  return {
+    bullhorn_contact_id: contactId,
+    event_source: source,
+    event_type: eventType,
+    event_at: eventAt,
+    summary,
+    details,
+    actor_name: extractActorNameFromActivityRow(row),
+    entity_name: normalizeOptionalString(row.targetEntityName),
+    entity_id: toFiniteNumber(row.targetEntityID ?? row.targetEntityId),
+    external_key: externalKey,
+    payload: row,
+  };
+}
+
+async function fetchQueryRowsPaged(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+  whereClause: string,
+  fieldSelectors: string[],
+  maxPages = CONTACT_TIMELINE_MAX_PAGES_PER_QUERY,
+): Promise<any[]> {
+  const rows: any[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const start = page * CONTACT_TIMELINE_PAGE_SIZE;
+    const batch = await fetchQueryRowsWithFallback(
+      restUrl,
+      bhRestToken,
+      entityName,
+      whereClause,
+      CONTACT_TIMELINE_PAGE_SIZE,
+      start,
+      fieldSelectors,
+    );
+    if (!batch.length) break;
+    rows.push(...batch);
+    if (batch.length < CONTACT_TIMELINE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function fetchTimelineRowsByWhereCandidates(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+  whereCandidates: string[],
+  fieldSelectors: string[],
+): Promise<Record<string, unknown>[]> {
+  for (const whereClause of whereCandidates) {
+    const rows = await fetchQueryRowsPaged(restUrl, bhRestToken, entityName, whereClause, fieldSelectors);
+    const normalized = rows
+      .filter((row) => row && typeof row === "object")
+      .map((row) => row as Record<string, unknown>);
+    if (normalized.length) return normalized;
+  }
+  return [];
+}
+
+async function fetchContactTimelineEvents(
+  restUrl: string,
+  bhRestToken: string,
+  contactIds: number[],
+): Promise<Record<string, unknown>[]> {
+  const events: Record<string, unknown>[] = [];
+  const uniqueIds = Array.from(new Set(contactIds.filter((id) => Number.isFinite(id))));
+  if (!uniqueIds.length) return events;
+
+  const chunkSize = 30;
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize);
+    const inList = chunk.join(",");
+
+    const noteRows = await fetchTimelineRowsByWhereCandidates(
+      restUrl,
+      bhRestToken,
+      "Note",
+      [
+        `targetEntityName='ClientContact' AND targetEntityID IN (${inList})`,
+        `targetEntityID IN (${inList})`,
+      ],
+      NOTE_QUERY_FIELD_SELECTORS,
+    );
+    for (const row of noteRows) {
+      const contactId = extractContactIdFromActivityRow(row);
+      if (!contactId) continue;
+      const normalized = normalizeTimelineEventRow("note", contactId, row);
+      if (normalized) events.push(normalized);
+    }
+
+    const taskRows = await fetchTimelineRowsByWhereCandidates(
+      restUrl,
+      bhRestToken,
+      "Task",
+      [
+        `clientContact.id IN (${inList})`,
+        `clientContactReference.id IN (${inList})`,
+        `clientContactID IN (${inList})`,
+      ],
+      TASK_QUERY_FIELD_SELECTORS,
+    );
+    for (const row of taskRows) {
+      const contactId = extractContactIdFromActivityRow(row);
+      if (!contactId) continue;
+      const normalized = normalizeTimelineEventRow("task", contactId, row);
+      if (normalized) events.push(normalized);
+    }
+
+    const appointmentRows = await fetchTimelineRowsByWhereCandidates(
+      restUrl,
+      bhRestToken,
+      "Appointment",
+      [
+        `clientContact.id IN (${inList})`,
+        `clientContactReference.id IN (${inList})`,
+        `clientContactID IN (${inList})`,
+      ],
+      APPOINTMENT_QUERY_FIELD_SELECTORS,
+    );
+    for (const row of appointmentRows) {
+      const contactId = extractContactIdFromActivityRow(row);
+      if (!contactId) continue;
+      const normalized = normalizeTimelineEventRow("appointment", contactId, row);
+      if (normalized) events.push(normalized);
+    }
+
+    const corpAppointmentRows = await fetchTimelineRowsByWhereCandidates(
+      restUrl,
+      bhRestToken,
+      "ClientCorporationAppointment",
+      [
+        `clientContact.id IN (${inList})`,
+        `clientContactID IN (${inList})`,
+      ],
+      CLIENT_CORP_APPOINTMENT_SELECTORS,
+    );
+    for (const row of corpAppointmentRows) {
+      const contactId = extractContactIdFromActivityRow(row);
+      if (!contactId) continue;
+      const appointment = row.appointment && typeof row.appointment === "object" && !Array.isArray(row.appointment)
+        ? (row.appointment as Record<string, unknown>)
+        : row;
+      const normalized = normalizeTimelineEventRow("appointment", contactId, appointment);
+      if (normalized) events.push(normalized);
+    }
+
+    const corpTaskRows = await fetchTimelineRowsByWhereCandidates(
+      restUrl,
+      bhRestToken,
+      "ClientCorporationTask",
+      [
+        `clientContact.id IN (${inList})`,
+        `clientContactID IN (${inList})`,
+      ],
+      CLIENT_CORP_TASK_SELECTORS,
+    );
+    for (const row of corpTaskRows) {
+      const contactId = extractContactIdFromActivityRow(row);
+      if (!contactId) continue;
+      const task = row.task && typeof row.task === "object" && !Array.isArray(row.task)
+        ? (row.task as Record<string, unknown>)
+        : row;
+      const normalized = normalizeTimelineEventRow("task", contactId, task);
+      if (normalized) events.push(normalized);
+    }
+  }
+
+  const deduped = new Map<string, Record<string, unknown>>();
+  for (const event of events) {
+    const key = String(event.external_key || "");
+    if (!key) continue;
+    deduped.set(key, event);
+  }
+  return Array.from(deduped.values());
+}
+
+async function fetchContactFileAttachments(
+  restUrl: string,
+  bhRestToken: string,
+  contactId: number,
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  const selectors = FILE_ATTACHMENT_SELECTORS.map((selector) =>
+    `${restUrl}entity/ClientContact/${contactId}/fileAttachments?BhRestToken=${encodeURIComponent(
+      bhRestToken,
+    )}&fields=${encodeURIComponent(selector)}`
+  );
+
+  for (const url of selectors) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+      const payload = await response.json().catch(() => ({}));
+      const rows = Array.isArray((payload as any)?.data)
+        ? (payload as any).data
+        : Array.isArray(payload)
+          ? payload
+          : [];
+      for (const row of rows) {
+        if (row && typeof row === "object") out.push(row as Record<string, unknown>);
+      }
+      if (out.length) return out;
+    } catch {
+      continue;
+    }
+  }
+
+  return out;
+}
+
+function normalizeDocumentRow(
+  contactId: number,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const fileId = toFiniteNumber(row.id ?? row.fileID ?? row.fileId);
+  const name = normalizeOptionalString(row.name ?? row.fileName ?? row.file_name);
+  const contentType = normalizeOptionalString(row.contentType ?? row.mimeType);
+  const fileType = normalizeOptionalString(row.fileType ?? row.type);
+  const size = toFiniteNumber(row.fileSize ?? row.size);
+  const isResume = normalizeLooseBoolean(row.isResume ?? row.resume ?? row.primaryResume) === true;
+  const isDeleted = normalizeLooseBoolean(row.isDeleted) === true;
+  const externalKey = fileId
+    ? `file:${contactId}:${fileId}`
+    : `file:${contactId}:${name || "unnamed"}:${normalizeBullhornDate(row.dateAdded) || "na"}`;
+
+  return {
+    bullhorn_contact_id: contactId,
+    bullhorn_file_id: fileId,
+    file_name: name,
+    file_type: fileType,
+    content_type: contentType,
+    file_size: size,
+    is_resume: isResume,
+    is_deleted: isDeleted,
+    date_added: normalizeBullhornDate(row.dateAdded),
+    date_last_modified: normalizeBullhornDate(row.dateLastModified ?? row.dateAdded),
+    external_key: externalKey,
+    payload: row,
+  };
+}
+
+function buildDefaultContactParitySummary(): ContactParitySummary {
+  return {
+    eventCount: 0,
+    lastContactedAt: null,
+    lastNoteAt: null,
+    lastTaskAt: null,
+    lastCallAt: null,
+    lastEmailSentAt: null,
+    lastEmailReceivedAt: null,
+    documentsCount: 0,
+    hasResume: false,
+  };
+}
+
+function applyTimelineEventToParity(
+  parity: ContactParitySummary,
+  eventType: string,
+  eventSource: string,
+  eventAt: string | null,
+) {
+  if (!eventAt) return;
+  parity.lastContactedAt = maxIsoDate(parity.lastContactedAt, eventAt);
+  if (eventSource === "note") {
+    parity.lastNoteAt = maxIsoDate(parity.lastNoteAt, eventAt);
+  }
+  if (eventSource === "task") {
+    parity.lastTaskAt = maxIsoDate(parity.lastTaskAt, eventAt);
+  }
+  if (eventType === "call") {
+    parity.lastCallAt = maxIsoDate(parity.lastCallAt, eventAt);
+  }
+  if (eventType === "email") {
+    parity.lastEmailSentAt = maxIsoDate(parity.lastEmailSentAt, eventAt);
+  }
+}
+
+function mergeContactFieldDatesIntoParity(
+  parity: ContactParitySummary,
+  contact: Record<string, unknown>,
+) {
+  const fallbackLastContacted = maxIsoDate(
+    contact.dateLastComment,
+    contact.dateLastVisit,
+    contact.lastVisit,
+    contact.dateLastModified,
+  );
+  parity.lastContactedAt = maxIsoDate(parity.lastContactedAt, fallbackLastContacted);
+  parity.lastEmailReceivedAt = maxIsoDate(
+    parity.lastEmailReceivedAt,
+    contact.lastEmailReceivedDate,
+  );
+  parity.lastEmailSentAt = maxIsoDate(
+    parity.lastEmailSentAt,
+    contact.lastEmailSentDate,
+  );
+}
+
+function buildCommsStatusRow(
+  contact: Record<string, unknown>,
+  contactId: number,
+  jobId: string,
+  parity: ContactParitySummary,
+): Record<string, unknown> {
+  const flags = deriveCommunicationFlags(contact);
+  const statusLabel = deriveCommunicationStatusLabel(flags, contact.emailStatus ?? contact.communicationStatus);
+  const emailPrimary = normalizeEmail(contact.email) ?? normalizeOptionalString(contact.email);
+  const emailSecondary = normalizeEmail(contact.email2) ?? normalizeEmail(contact.email3) ?? normalizeOptionalString(contact.email2);
+
+  return {
+    bullhorn_contact_id: contactId,
+    email_primary: emailPrimary,
+    email_secondary: emailSecondary,
+    preferred_contact: normalizeOptionalString(contact.preferredContact),
+    mass_mail_opt_out: flags.massMailOptOut,
+    sms_opt_in: flags.smsOptIn,
+    do_not_contact: flags.doNotContact,
+    email_bounced: flags.emailBounced,
+    status_label: statusLabel,
+    last_email_received_at: maxIsoDate(parity.lastEmailReceivedAt, contact.lastEmailReceivedDate),
+    last_email_sent_at: maxIsoDate(parity.lastEmailSentAt, contact.lastEmailSentDate),
+    last_call_at: parity.lastCallAt,
+    last_task_at: parity.lastTaskAt,
+    last_note_at: parity.lastNoteAt,
+    last_contacted_at: parity.lastContactedAt,
+    raw: {
+      emailStatus: contact.emailStatus ?? null,
+      communicationStatus: contact.communicationStatus ?? null,
+      preferredContact: contact.preferredContact ?? null,
+    },
+    last_synced_job_id: jobId,
+  };
+}
+
+async function fetchDocumentsForContactIds(
+  restUrl: string,
+  bhRestToken: string,
+  contactIds: number[],
+): Promise<{ rows: Record<string, unknown>[]; summaryByContact: Map<number, { count: number; hasResume: boolean }> }> {
+  const rows: Record<string, unknown>[] = [];
+  const summaryByContact = new Map<number, { count: number; hasResume: boolean }>();
+  const uniqueIds = Array.from(new Set(contactIds.filter((id) => Number.isFinite(id))));
+  if (!uniqueIds.length) return { rows, summaryByContact };
+
+  const queue = [...uniqueIds];
+  const workerCount = Math.min(6, queue.length);
+  const workers: Promise<void>[] = [];
+
+  const worker = async () => {
+    while (queue.length) {
+      const contactId = queue.shift();
+      if (!contactId) continue;
+      const docs = await fetchContactFileAttachments(restUrl, bhRestToken, contactId);
+      let count = 0;
+      let hasResume = false;
+      for (const doc of docs) {
+        const normalized = normalizeDocumentRow(contactId, doc);
+        rows.push(normalized);
+        if (normalized.is_deleted !== true) {
+          count += 1;
+          if (normalized.is_resume === true) hasResume = true;
+        }
+      }
+      summaryByContact.set(contactId, { count, hasResume });
+    }
+  };
+
+  for (let i = 0; i < workerCount; i++) workers.push(worker());
+  await Promise.all(workers);
+  return { rows, summaryByContact };
+}
+
+async function syncCustomFieldDictionary(
+  supabase: any,
+  restUrl: string,
+  bhRestToken: string,
+  jobId: string,
+) {
+  const dictionaryRows: Record<string, unknown>[] = [];
+  for (const entityName of CONTACT_PARITY_ENTITY_META) {
+    const payload = await fetchEntityMetaPayload(restUrl, bhRestToken, entityName);
+    if (!payload) continue;
+    const fields = extractMetaFieldEntries(payload);
+    for (const field of fields) {
+      const name = normalizeOptionalString(field.name ?? field.dataName ?? field.fieldName ?? field.field_name ?? field.fieldName ?? field.fieldname);
+      if (!name) continue;
+      const label = normalizeOptionalString(field.label ?? field.displayLabel ?? field.displayName ?? field.caption);
+      const dataType = normalizeOptionalString(field.dataType ?? field.typeName ?? field.valueType);
+      const fieldType = normalizeOptionalString(field.type ?? field.fieldType ?? field.controlType);
+      const required = normalizeLooseBoolean(field.required);
+      const hidden = normalizeLooseBoolean(field.hidden ?? field.private);
+      const options =
+        Array.isArray(field.options)
+          ? field.options
+          : Array.isArray(field.values)
+            ? field.values
+            : [];
+      const lower = name.toLowerCase();
+      const isCustom = CUSTOM_FIELD_REGEX.test(lower) || lower.startsWith("custom");
+      dictionaryRows.push({
+        entity_name: entityName,
+        field_name: name,
+        field_label: label,
+        data_type: dataType,
+        field_type: fieldType,
+        required,
+        hidden,
+        is_custom: isCustom,
+        options,
+        raw: field,
+        last_synced_job_id: jobId,
+        synced_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (!dictionaryRows.length) return;
+  const { error } = await supabase
+    .from("bullhorn_custom_field_dictionary")
+    .upsert(dictionaryRows, { onConflict: "entity_name,field_name" });
+  if (error) {
+    console.warn("[bullhorn-sync-clientcontacts] Failed to upsert custom field dictionary:", error.message);
+  }
+}
+
+async function syncBatchParityData(
+  supabase: any,
+  restUrl: string,
+  bhRestToken: string,
+  jobId: string,
+  contacts: Record<string, unknown>[],
+): Promise<Map<number, ContactParitySummary>> {
+  const parityById = new Map<number, ContactParitySummary>();
+  const contactIds = contacts
+    .map((contact) => toFiniteNumber(contact.id))
+    .filter((id): id is number => Number.isFinite(id));
+  if (!contactIds.length) return parityById;
+
+  for (const id of contactIds) parityById.set(id, buildDefaultContactParitySummary());
+
+  const timelineRowsRaw = await fetchContactTimelineEvents(restUrl, bhRestToken, contactIds);
+  const timelineRows = timelineRowsRaw.map((row) => ({
+    ...row,
+    last_synced_job_id: jobId,
+  }));
+
+  if (timelineRows.length) {
+    const { error: timelineError } = await supabase
+      .from("bullhorn_contact_timeline_events")
+      .upsert(timelineRows, { onConflict: "external_key" });
+    if (timelineError) {
+      console.warn("[bullhorn-sync-clientcontacts] Failed to upsert timeline rows:", timelineError.message);
+    }
+  }
+
+  for (const event of timelineRows) {
+    const contactId = toFiniteNumber(event.bullhorn_contact_id);
+    if (!contactId) continue;
+    const parity = parityById.get(contactId) || buildDefaultContactParitySummary();
+    parity.eventCount += 1;
+    applyTimelineEventToParity(
+      parity,
+      String(event.event_type || ""),
+      String(event.event_source || ""),
+      normalizeBullhornDate(event.event_at),
+    );
+    parityById.set(contactId, parity);
+  }
+
+  const { rows: documentRowsRaw, summaryByContact: documentsSummary } = await fetchDocumentsForContactIds(
+    restUrl,
+    bhRestToken,
+    contactIds,
+  );
+  const documentRows = documentRowsRaw.map((row) => ({
+    ...row,
+    last_synced_job_id: jobId,
+  }));
+  if (documentRows.length) {
+    const { error: docsError } = await supabase
+      .from("bullhorn_contact_documents")
+      .upsert(documentRows, { onConflict: "external_key" });
+    if (docsError) {
+      console.warn("[bullhorn-sync-clientcontacts] Failed to upsert document rows:", docsError.message);
+    }
+  }
+
+  const commStatusRows: Record<string, unknown>[] = [];
+  const mirrorParityRows: Record<string, unknown>[] = [];
+  for (const contact of contacts) {
+    const contactId = toFiniteNumber(contact.id);
+    if (!contactId) continue;
+    const parity = parityById.get(contactId) || buildDefaultContactParitySummary();
+    const docs = documentsSummary.get(contactId) || { count: 0, hasResume: false };
+    parity.documentsCount = docs.count;
+    parity.hasResume = docs.hasResume;
+    mergeContactFieldDatesIntoParity(parity, contact);
+    parityById.set(contactId, parity);
+
+    commStatusRows.push(buildCommsStatusRow(contact, contactId, jobId, parity));
+    mirrorParityRows.push({
+      bullhorn_id: contactId,
+      last_contacted_at: parity.lastContactedAt,
+      timeline_event_count: parity.eventCount,
+      documents_count: parity.documentsCount,
+      has_resume: parity.hasResume,
+      last_email_received_at: parity.lastEmailReceivedAt,
+      last_email_sent_at: parity.lastEmailSentAt,
+      last_synced_job_id: jobId,
+      synced_at: new Date().toISOString(),
+    });
+  }
+
+  if (commStatusRows.length) {
+    const { error: commsError } = await supabase
+      .from("bullhorn_contact_comms_status")
+      .upsert(commStatusRows, { onConflict: "bullhorn_contact_id" });
+    if (commsError) {
+      console.warn("[bullhorn-sync-clientcontacts] Failed to upsert comm status rows:", commsError.message);
+    }
+  }
+
+  if (mirrorParityRows.length) {
+    const { error: mirrorParityError } = await supabase
+      .from("bullhorn_client_contacts_mirror")
+      .upsert(mirrorParityRows, { onConflict: "bullhorn_id" });
+    if (mirrorParityError) {
+      console.warn("[bullhorn-sync-clientcontacts] Failed to upsert mirror parity rows:", mirrorParityError.message);
+    }
+  }
+
+  return parityById;
+}
+
 function noteDateMillis(note: Record<string, unknown>): number {
   const dateValue = note.dateAdded;
   const ts = new Date(String(dateValue || "")).getTime();
@@ -1755,36 +2610,70 @@ async function fetchClientContactsBatch(
   throw new Error(lastError || "Bullhorn query failed after retries");
 }
 
-function mapMirrorRow(contact: any, jobId: string) {
-  const email = normalizeEmail(contact?.email);
+function mapMirrorRow(contact: any, jobId: string, parity?: ContactParitySummary) {
+  const record = contact && typeof contact === "object" ? (contact as Record<string, unknown>) : {};
+  const email = normalizeEmail(record.email);
+  const secondaryEmail =
+    normalizeEmail(record.email2) ?? normalizeEmail(record.email3) ?? normalizeOptionalString(record.email2);
+  const flags = deriveCommunicationFlags(record);
+  const commStatusLabel = deriveCommunicationStatusLabel(flags, record.emailStatus ?? record.communicationStatus);
+  const lastEmailReceivedAt = maxIsoDate(parity?.lastEmailReceivedAt, record.lastEmailReceivedDate);
+  const lastEmailSentAt = maxIsoDate(parity?.lastEmailSentAt, record.lastEmailSentDate);
+  const fallbackLastContacted = maxIsoDate(record.dateLastComment, record.dateLastVisit, record.lastVisit, record.dateLastModified);
+  const lastContactedAt = maxIsoDate(parity?.lastContactedAt, fallbackLastContacted);
+  const customFieldSummary = extractCustomFieldSummary(record);
+
   return {
-    bullhorn_id: Number(contact?.id),
+    bullhorn_id: Number(record.id),
     synced_at: new Date().toISOString(),
     last_synced_job_id: jobId,
-    name: contact?.name || null,
-    first_name: contact?.firstName || null,
-    last_name: contact?.lastName || null,
+    name: record.name || null,
+    first_name: record.firstName || null,
+    last_name: record.lastName || null,
     email,
     email_normalized: email,
-    occupation: contact?.occupation || null,
-    status: contact?.status || null,
-    phone: contact?.phone || null,
-    mobile: contact?.mobile || null,
-    address_city: contact?.address?.city || contact?.city || null,
-    address_state: contact?.address?.state || contact?.state || null,
-    address_country_id: Number.isFinite(Number(contact?.address?.countryID))
-      ? Number(contact.address.countryID)
+    occupation: record.occupation || null,
+    status: record.status || null,
+    phone: record.phone || null,
+    mobile: record.mobile || null,
+    address_city: (record.address as any)?.city || record.city || null,
+    address_state: (record.address as any)?.state || record.state || null,
+    address_country_id: Number.isFinite(Number((record.address as any)?.countryID))
+      ? Number((record.address as any).countryID)
       : null,
-    client_corporation_id: Number.isFinite(Number(contact?.clientCorporation?.id))
-      ? Number(contact.clientCorporation.id)
+    client_corporation_id: Number.isFinite(Number((record.clientCorporation as any)?.id))
+      ? Number((record.clientCorporation as any).id)
       : null,
-    client_corporation_name: contact?.clientCorporation?.name || null,
-    owner_id: Number.isFinite(Number(contact?.owner?.id)) ? Number(contact.owner.id) : null,
-    owner_name: contact?.owner?.name || null,
-    date_added: normalizeBullhornDate(contact?.dateAdded),
-    date_last_modified: normalizeBullhornDate(contact?.dateLastModified),
-    is_deleted: Boolean(contact?.isDeleted),
-    raw: contact,
+    client_corporation_name: (record.clientCorporation as any)?.name || null,
+    owner_id: Number.isFinite(Number((record.owner as any)?.id)) ? Number((record.owner as any).id) : null,
+    owner_name: (record.owner as any)?.name || null,
+    date_added: normalizeBullhornDate(record.dateAdded),
+    date_last_modified: normalizeBullhornDate(record.dateLastModified),
+    is_deleted: Boolean(record.isDeleted),
+    linkedin_url:
+      normalizeOptionalString(record.linkedInURL) ??
+      normalizeOptionalString(record.linkedinUrl) ??
+      normalizeOptionalString(record.linkedIn),
+    work_phone_secondary:
+      normalizeOptionalString(record.phone2) ??
+      normalizeOptionalString(record.phone3),
+    preferred_contact: normalizeOptionalString(record.preferredContact),
+    mass_mail_opt_out: flags.massMailOptOut,
+    sms_opt_in: flags.smsOptIn,
+    do_not_contact: flags.doNotContact,
+    email_bounced: flags.emailBounced,
+    comm_status_label: commStatusLabel,
+    last_email_received_at: lastEmailReceivedAt,
+    last_email_sent_at: lastEmailSentAt,
+    last_contacted_at: lastContactedAt,
+    timeline_event_count: parity?.eventCount ?? 0,
+    documents_count: parity?.documentsCount ?? 0,
+    has_resume: parity?.hasResume ?? false,
+    custom_field_summary: customFieldSummary,
+    raw: {
+      ...(record as Record<string, unknown>),
+      email_secondary: secondaryEmail,
+    },
   };
 }
 
@@ -1859,6 +2748,7 @@ async function processSyncJob(
   }
   const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
   const preferredFieldSelector = buildClientContactFieldSelector(supportedFields);
+  await syncCustomFieldDictionary(supabase, tokens.rest_url, tokens.bh_rest_token, job.id);
 
   await supabase
     .from("bullhorn_sync_jobs")
@@ -1890,6 +2780,13 @@ async function processSyncJob(
       supportedFields,
     );
     await enrichFetchedContactsWithLatestNotes(tokens.rest_url, tokens.bh_rest_token, rows);
+    const parityById = await syncBatchParityData(
+      supabase,
+      tokens.rest_url,
+      tokens.bh_rest_token,
+      job.id,
+      rows,
+    );
 
     if (totalExpected === null && Number.isFinite(Number(total))) {
       totalExpected = Number(total);
@@ -1901,7 +2798,11 @@ async function processSyncJob(
     }
 
     const mapped = rows
-      .map((c) => mapMirrorRow(c, job.id))
+      .map((c) => {
+        const contactId = toFiniteNumber((c as any)?.id);
+        const parity = contactId ? parityById.get(contactId) : undefined;
+        return mapMirrorRow(c, job.id, parity);
+      })
       .filter((row) => Number.isFinite(Number(row.bullhorn_id)));
 
     if (mapped.length) {
@@ -2237,6 +3138,199 @@ serve(async (req) => {
           company: company || null,
           contacts,
           notes,
+        },
+      });
+    }
+
+    if (action === "get-contact-timeline") {
+      const contactId = toFiniteNumber(data?.contactId);
+      if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+
+      const limit = normalizeListLimit(data?.limit);
+      const offset = normalizeListOffset(data?.offset);
+      const source = normalizeOptionalString(data?.source);
+
+      let query = supabase
+        .from("bullhorn_contact_timeline_events")
+        .select("*", { count: "exact" })
+        .eq("bullhorn_contact_id", contactId)
+        .order("event_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false });
+
+      if (source) query = query.eq("event_source", source.toLowerCase());
+
+      const { data: rows, count, error } = await query.range(offset, offset + limit - 1);
+      if (error) throw error;
+
+      return jsonResponse({
+        success: true,
+        data: {
+          rows: rows || [],
+          total: count || 0,
+          limit,
+          offset,
+        },
+      });
+    }
+
+    if (action === "get-contact-documents") {
+      const contactId = toFiniteNumber(data?.contactId);
+      if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+
+      const limit = normalizeListLimit(data?.limit);
+      const offset = normalizeListOffset(data?.offset);
+      const includeDeleted = Boolean(data?.includeDeleted);
+
+      let query = supabase
+        .from("bullhorn_contact_documents")
+        .select("*", { count: "exact" })
+        .eq("bullhorn_contact_id", contactId)
+        .order("date_last_modified", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false });
+
+      if (!includeDeleted) query = query.eq("is_deleted", false);
+
+      const { data: rows, count, error } = await query.range(offset, offset + limit - 1);
+      if (error) throw error;
+
+      return jsonResponse({
+        success: true,
+        data: {
+          rows: rows || [],
+          total: count || 0,
+          limit,
+          offset,
+        },
+      });
+    }
+
+    if (action === "get-contact-comms-status") {
+      const contactId = toFiniteNumber(data?.contactId);
+      if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+
+      const { data: row, error } = await supabase
+        .from("bullhorn_contact_comms_status")
+        .select("*")
+        .eq("bullhorn_contact_id", contactId)
+        .maybeSingle();
+      if (error) throw error;
+      return jsonResponse({ success: true, data: row || null });
+    }
+
+    if (action === "list-custom-field-dictionary") {
+      const limit = Math.max(10, Math.min(500, Number(data?.limit) || 200));
+      const offset = normalizeListOffset(data?.offset);
+      const entityName = normalizeOptionalString(data?.entityName);
+      const search = normalizeSearchTerm(data?.search);
+      const customOnly = Boolean(data?.customOnly);
+
+      let query = supabase
+        .from("bullhorn_custom_field_dictionary")
+        .select("*", { count: "exact" })
+        .order("entity_name", { ascending: true })
+        .order("field_name", { ascending: true });
+
+      if (entityName) query = query.eq("entity_name", entityName);
+      if (customOnly) query = query.eq("is_custom", true);
+      if (search) {
+        const like = `%${search}%`;
+        query = query.or(`field_name.ilike.${like},field_label.ilike.${like},data_type.ilike.${like},field_type.ilike.${like}`);
+      }
+
+      const { data: rows, count, error } = await query.range(offset, offset + limit - 1);
+      if (error) throw error;
+      return jsonResponse({
+        success: true,
+        data: {
+          rows: rows || [],
+          total: count || 0,
+          limit,
+          offset,
+        },
+      });
+    }
+
+    if (action === "sync-contact-parity") {
+      const contactIds = Array.isArray(data?.contactIds)
+        ? data.contactIds.map((value: unknown) => toFiniteNumber(value)).filter((id: number | null): id is number => Number.isFinite(id))
+        : [];
+      const uniqueContactIds = Array.from(new Set(contactIds));
+      if (!uniqueContactIds.length) {
+        return jsonResponse({ success: false, error: "contactIds is required" }, 400);
+      }
+
+      const tokens = await getStoredBullhornTokens(supabase);
+      if (!tokens) return jsonResponse({ success: false, error: "Bullhorn is not connected" }, 400);
+
+      const { data: mirrorRows, error: mirrorError } = await supabase
+        .from("bullhorn_client_contacts_mirror")
+        .select("*")
+        .in("bullhorn_id", uniqueContactIds);
+      if (mirrorError) throw mirrorError;
+
+      const contactsById = new Map<number, Record<string, unknown>>();
+      for (const row of mirrorRows || []) {
+        const id = toFiniteNumber((row as any)?.bullhorn_id);
+        if (!id) continue;
+        const raw = (row as any)?.raw;
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+          contactsById.set(id, { ...(raw as Record<string, unknown>), id });
+        }
+      }
+
+      const missingIds = uniqueContactIds.filter((id) => !contactsById.has(id));
+      if (missingIds.length) {
+        const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
+        const selector = buildClientContactFieldSelector(supportedFields);
+        const selectors = [selector, ...CONTACT_DETAIL_FIELD_SELECTORS];
+        for (const id of missingIds) {
+          const liveContact = await fetchEntityByIdWithFallback(
+            tokens.rest_url,
+            tokens.bh_rest_token,
+            "ClientContact",
+            id,
+            selectors,
+          );
+          if (liveContact) contactsById.set(id, { ...liveContact, id });
+        }
+      }
+
+      const contacts = Array.from(contactsById.values());
+      if (!contacts.length) {
+        return jsonResponse({ success: false, error: "No matching contacts found for parity sync" }, 404);
+      }
+
+      const pseudoJobId = String(data?.jobId || "00000000-0000-0000-0000-000000000000");
+      await enrichFetchedContactsWithLatestNotes(tokens.rest_url, tokens.bh_rest_token, contacts);
+      await syncCustomFieldDictionary(supabase, tokens.rest_url, tokens.bh_rest_token, pseudoJobId);
+      const parityById = await syncBatchParityData(
+        supabase,
+        tokens.rest_url,
+        tokens.bh_rest_token,
+        pseudoJobId,
+        contacts,
+      );
+
+      const mappedRows = contacts
+        .map((contact) => {
+          const id = toFiniteNumber(contact.id);
+          const parity = id ? parityById.get(id) : undefined;
+          return mapMirrorRow(contact, pseudoJobId, parity);
+        })
+        .filter((row) => Number.isFinite(Number(row.bullhorn_id)));
+
+      if (mappedRows.length) {
+        const { error: upsertError } = await supabase
+          .from("bullhorn_client_contacts_mirror")
+          .upsert(mappedRows, { onConflict: "bullhorn_id" });
+        if (upsertError) throw upsertError;
+      }
+
+      return jsonResponse({
+        success: true,
+        data: {
+          contactCount: mappedRows.length,
+          contactIds: mappedRows.map((row) => row.bullhorn_id),
         },
       });
     }
