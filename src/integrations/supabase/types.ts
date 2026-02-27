@@ -286,6 +286,74 @@ export type Database = {
         }
         Relationships: []
       }
+      distribution_list_contacts: {
+        Row: {
+          added_at: string
+          added_by: string
+          bullhorn_id: number
+          company_name: string | null
+          contact_snapshot: Json
+          email: string | null
+          list_id: string
+          name: string | null
+          occupation: string | null
+        }
+        Insert: {
+          added_at?: string
+          added_by: string
+          bullhorn_id: number
+          company_name?: string | null
+          contact_snapshot?: Json
+          email?: string | null
+          list_id: string
+          name?: string | null
+          occupation?: string | null
+        }
+        Update: {
+          added_at?: string
+          added_by?: string
+          bullhorn_id?: number
+          company_name?: string | null
+          contact_snapshot?: Json
+          email?: string | null
+          list_id?: string
+          name?: string | null
+          occupation?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "distribution_list_contacts_list_id_fkey"
+            columns: ["list_id"]
+            isOneToOne: false
+            referencedRelation: "distribution_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      distribution_lists: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       enrichment_runs: {
         Row: {
           bullhorn_enabled: boolean
