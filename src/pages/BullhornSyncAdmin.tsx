@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
+  DistributionListSummary,
+  addContactsToDistributionList,
   BullhornContactFilterField,
   BullhornContactFilterOperator,
   BullhornContactFilterRow,
@@ -10,9 +12,11 @@ import {
   BullhornLiveContactDetail,
   BullhornMirrorContact,
   BullhornSyncJob,
+  createDistributionList,
   getBullhornLiveCompanyDetail,
   getBullhornLiveContactDetail,
   getBullhornMirrorStats,
+  listDistributionLists,
   listBullhornMirrorContacts,
   listBullhornSyncJobs,
   startBullhornClientContactSync,
@@ -275,7 +279,7 @@ function buildAppliedFilters(rows: ContactFilterDraftRow[]): BullhornContactFilt
       field: row.field,
       operator: row.operator,
       values: row.valueInput
-        .split(/[\n,;|]+/)
+        .split(/[\n,;|]+|\s+\bOR\b\s+/i)
         .map((value) => value.trim())
         .filter(Boolean),
     }))
@@ -594,6 +598,12 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [filterRows, setFilterRows] = useState<ContactFilterDraftRow[]>([]);
   const [appliedFilters, setAppliedFilters] = useState<BullhornContactFilterRow[]>([]);
   const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
+  const [distributionLists, setDistributionLists] = useState<DistributionListSummary[]>([]);
+  const [distributionListsLoading, setDistributionListsLoading] = useState(false);
+  const [isAddToListDialogOpen, setIsAddToListDialogOpen] = useState(false);
+  const [targetDistributionListId, setTargetDistributionListId] = useState("");
+  const [newDistributionListName, setNewDistributionListName] = useState("");
+  const [addToListLoading, setAddToListLoading] = useState(false);
   const [sortKey, setSortKey] = useState<ContactSortKey>("id");
   const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
   const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
@@ -653,6 +663,22 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       if (!options.silent) setSyncJobLoading(false);
     }
   };
+
+  const loadDistributionLists = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setDistributionListsLoading(true);
+    try {
+      const result = await listDistributionLists(ADMIN_PROFILE);
+      if (result.success && Array.isArray(result.data)) {
+        setDistributionLists(result.data);
+      } else if (!options.silent) {
+        toast.error(result.error || "Failed to load distribution lists");
+      }
+    } catch {
+      if (!options.silent) toast.error("Failed to load distribution lists");
+    } finally {
+      if (!options.silent) setDistributionListsLoading(false);
+    }
+  }, []);
 
   const loadBullhornMirrorContacts = useCallback(async (
     options: {
@@ -723,6 +749,18 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       loadBullhornMirrorContacts({ reset: true });
     }
   }, [profileName, contactsSearch, appliedFilters, loadBullhornMirrorContacts]);
+
+  useEffect(() => {
+    if (profileName === ADMIN_PROFILE) {
+      void loadDistributionLists({ silent: true });
+    }
+  }, [profileName, loadDistributionLists]);
+
+  useEffect(() => {
+    if (!targetDistributionListId && distributionLists.length > 0) {
+      setTargetDistributionListId(distributionLists[0].id);
+    }
+  }, [distributionLists, targetDistributionListId]);
 
   useEffect(() => {
     if (profileName !== ADMIN_PROFILE) return;
@@ -1116,6 +1154,80 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     });
   }, []);
 
+  const openAddToListDialog = useCallback(() => {
+    if (selectedContactIds.size === 0) {
+      toast.error("Select at least one contact first");
+      return;
+    }
+    setNewDistributionListName("");
+    if (!targetDistributionListId && distributionLists.length > 0) {
+      setTargetDistributionListId(distributionLists[0].id);
+    }
+    setIsAddToListDialogOpen(true);
+    if (distributionLists.length === 0) {
+      void loadDistributionLists();
+    }
+  }, [distributionLists, loadDistributionLists, selectedContactIds, targetDistributionListId]);
+
+  const addSelectedContactsToList = useCallback(async () => {
+    if (selectedContactIds.size === 0) {
+      toast.error("Select at least one contact first");
+      return;
+    }
+
+    setAddToListLoading(true);
+    try {
+      let listId = targetDistributionListId.trim();
+      const createName = newDistributionListName.trim();
+
+      if (createName) {
+        const createResult = await createDistributionList(ADMIN_PROFILE, createName);
+        if (!createResult.success || !createResult.data) {
+          toast.error(createResult.error || "Failed to create distribution list");
+          return;
+        }
+        listId = createResult.data.id;
+      }
+
+      if (!listId) {
+        toast.error("Choose a distribution list or create a new one");
+        return;
+      }
+
+      const addResult = await addContactsToDistributionList(
+        ADMIN_PROFILE,
+        listId,
+        Array.from(selectedContactIds),
+      );
+
+      if (!addResult.success || !addResult.data) {
+        toast.error(addResult.error || "Failed to add contacts to distribution list");
+        return;
+      }
+
+      const inserted = Number(addResult.data.inserted || 0);
+      const skipped = Number(addResult.data.skipped || 0);
+      toast.success(
+        skipped > 0
+          ? `Added ${inserted} contacts (${skipped} already in list)`
+          : `Added ${inserted} contacts to distribution list`,
+      );
+
+      setSelectedContactIds(new Set());
+      setIsAddToListDialogOpen(false);
+      setTargetDistributionListId(listId);
+      setNewDistributionListName("");
+      await loadDistributionLists({ silent: true });
+    } finally {
+      setAddToListLoading(false);
+    }
+  }, [
+    loadDistributionLists,
+    newDistributionListName,
+    selectedContactIds,
+    targetDistributionListId,
+  ]);
+
   const toggleSort = (key: ContactSortKey) => {
     if (sortKey === key) {
       setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -1283,6 +1395,15 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </Button>
               <Button
                 size="sm"
+                variant="default"
+                className="h-8 bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={openAddToListDialog}
+                disabled={selectedContactIds.size === 0}
+              >
+                Add to List ({selectedContactIds.size})
+              </Button>
+              <Button
+                size="sm"
                 variant="outline"
                 className="h-8"
                 onClick={() => {
@@ -1395,7 +1516,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                             prev.map((item) => (item.id === row.id ? { ...item, valueInput: e.target.value } : item)),
                           )
                         }
-                        placeholder="Values (comma separated for OR)"
+                        placeholder="Values (comma or OR-separated)"
                       />
                     </div>
                     <div className="col-span-1 md:col-span-1">
@@ -1434,6 +1555,67 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 }}
               >
                 Apply Filters
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={isAddToListDialogOpen} onOpenChange={setIsAddToListDialogOpen}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Add Contacts to Distribution List</DialogTitle>
+              <DialogDescription>
+                Selected contacts: {selectedContactIds.size}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Choose existing list</p>
+                <div className="flex items-center gap-2">
+                  <Select value={targetDistributionListId} onValueChange={setTargetDistributionListId}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder={distributionListsLoading ? "Loading lists..." : "Select a list"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {distributionLists.map((list) => (
+                        <SelectItem key={list.id} value={list.id}>
+                          {list.name} ({list.contact_count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9"
+                    onClick={() => loadDistributionLists()}
+                    disabled={distributionListsLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${distributionListsLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Or create new list</p>
+                <Input
+                  className="h-9"
+                  value={newDistributionListName}
+                  onChange={(e) => setNewDistributionListName(e.target.value)}
+                  placeholder="e.g. PE London shortlist"
+                />
+                <p className="text-xs text-muted-foreground">
+                  If you fill this field, a new list will be created and used automatically.
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddToListDialogOpen(false)} disabled={addToListLoading}>
+                Cancel
+              </Button>
+              <Button onClick={addSelectedContactsToList} disabled={addToListLoading}>
+                {addToListLoading ? "Adding..." : "Add Selected Contacts"}
               </Button>
             </DialogFooter>
           </DialogContent>

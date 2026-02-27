@@ -69,6 +69,27 @@ export interface BullhornLiveCompanyDetail {
   notes: BullhornLiveNote[];
 }
 
+export interface DistributionListSummary {
+  id: string;
+  name: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  contact_count: number;
+}
+
+export interface DistributionListContact {
+  list_id: string;
+  bullhorn_id: number;
+  added_at: string;
+  added_by: string;
+  name: string | null;
+  email: string | null;
+  occupation: string | null;
+  company_name: string | null;
+  contact_snapshot: Record<string, unknown> | null;
+}
+
 export type BullhornContactFilterField =
   | "name"
   | "company"
@@ -168,4 +189,42 @@ export async function getBullhornLiveContactDetail(profileName: string, contactI
 
 export async function getBullhornLiveCompanyDetail(profileName: string, companyId: number) {
   return callBullhornSync<BullhornLiveCompanyDetail>("get-company-detail", profileName, { companyId });
+}
+
+export async function listDistributionLists(profileName: string) {
+  return callBullhornSync<DistributionListSummary[]>("list-distribution-lists", profileName);
+}
+
+export async function createDistributionList(profileName: string, name: string) {
+  return callBullhornSync<DistributionListSummary>("create-distribution-list", profileName, { name });
+}
+
+export async function addContactsToDistributionList(
+  profileName: string,
+  listId: string,
+  contactIds: number[],
+) {
+  return callBullhornSync<{
+    listId: string;
+    inserted: number;
+    skipped: number;
+    totalInList: number;
+  }>("add-contacts-to-distribution-list", profileName, { listId, contactIds });
+}
+
+export async function listDistributionListContacts(
+  profileName: string,
+  listId: string,
+  options: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+  } = {},
+) {
+  return callBullhornSync<{
+    contacts: DistributionListContact[];
+    total: number;
+    limit: number;
+    offset: number;
+  }>("list-distribution-list-contacts", profileName, { listId, ...options });
 }

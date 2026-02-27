@@ -212,6 +212,13 @@ function normalizeSearchTerm(input: unknown): string {
     .slice(0, 80);
 }
 
+function normalizeDistributionListName(input: unknown): string {
+  return String(input || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
 function normalizeFilterOperator(input: unknown): MirrorFilterOperator {
   return String(input || "").toLowerCase() === "equals" ? "equals" : "contains";
 }
@@ -229,7 +236,7 @@ function normalizeFilterRows(input: unknown): MirrorFilterRow[] {
     const rawValues = Array.isArray(record.values)
       ? record.values
       : String(record.values || "")
-        .split(/[\n,;|]+/)
+        .split(/[\n,;|]+|\s+\bOR\b\s+/i)
         .map((item) => item.trim())
         .filter(Boolean);
 
@@ -299,6 +306,12 @@ function findAddressRecord(contact: any): Record<string, unknown> {
   const rawAddress = rawRecord.address;
   if (rawAddress && typeof rawAddress === "object" && !Array.isArray(rawAddress)) {
     return rawAddress as Record<string, unknown>;
+  }
+  if (typeof rawAddress === "string") {
+    const parsed = parseJsonLikeString(rawAddress);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
   }
   return {};
 }
@@ -372,6 +385,7 @@ function getFieldValuesForMirrorFilter(contact: any, field: MirrorFilterField): 
     case "company":
       addValue(contact?.client_corporation_name);
       addValue(rawRecord.clientCorporation);
+      addValue(rawRecord.clientCorporationName);
       break;
     case "title":
       addValue(contact?.occupation);
@@ -389,6 +403,8 @@ function getFieldValuesForMirrorFilter(contact: any, field: MirrorFilterField): 
     case "country":
       addValue(addressRecord.countryName);
       addValue(addressRecord.country);
+      addValue(rawRecord.countryName);
+      addValue(rawRecord.country);
       break;
     case "consultant":
       addValue(contact?.owner_name);
@@ -418,16 +434,25 @@ function matchFilterValue(fieldValues: string[], filterValue: string, field: Mir
       return tokenSet.has(target);
     }
 
-    const parts = target.split(" ").filter(Boolean);
-    if (parts.length > 1) {
-      return parts.every((part) => tokenSet.has(part));
-    }
-    if (target.length <= 3) {
-      return tokenSet.has(target);
-    }
+    if (tokenSet.has(target)) return true;
     for (const token of tokenSet) {
       if (token.includes(target)) return true;
     }
+
+    const parts = target.split(" ").filter(Boolean);
+    if (parts.length > 1) {
+      return parts.every((part) =>
+        Array.from(tokenSet).some((token) => token === part || token.includes(part))
+      );
+    }
+
+    if (target.length <= 3) {
+      if (tokenSet.has(target)) return true;
+      for (const token of tokenSet) {
+        if (token.split(" ").includes(target)) return true;
+      }
+    }
+
     return false;
   }
 
@@ -2314,6 +2339,181 @@ serve(async (req) => {
         data: {
           contacts: enrichedPagedContacts,
           total: matchedTotal,
+          limit,
+          offset,
+        },
+      });
+    }
+
+    if (action === "list-distribution-lists") {
+      const { data: lists, error } = await supabase
+        .from("distribution_lists")
+        .select("id,name,created_by,created_at,updated_at")
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
+
+      const listIds = (lists || [])
+        .map((row: any) => String(row.id || "").trim())
+        .filter(Boolean);
+      const countByList = new Map<string, number>();
+
+      if (listIds.length) {
+        const { data: countRows, error: countError } = await supabase
+          .from("distribution_list_contacts")
+          .select("list_id")
+          .in("list_id", listIds);
+        if (countError) throw countError;
+        for (const row of countRows || []) {
+          const listId = String((row as any)?.list_id || "").trim();
+          if (!listId) continue;
+          countByList.set(listId, (countByList.get(listId) || 0) + 1);
+        }
+      }
+
+      const result = (lists || []).map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        created_by: row.created_by,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        contact_count: countByList.get(String(row.id || "")) || 0,
+      }));
+
+      return jsonResponse({ success: true, data: result });
+    }
+
+    if (action === "create-distribution-list") {
+      const name = normalizeDistributionListName(data?.name);
+      if (!name) return jsonResponse({ success: false, error: "Distribution list name is required" }, 400);
+
+      const { data: created, error } = await supabase
+        .from("distribution_lists")
+        .insert({
+          name,
+          created_by: profileName,
+        })
+        .select("id,name,created_by,created_at,updated_at")
+        .single();
+
+      if (error) {
+        if ((error as any)?.code === "23505") {
+          return jsonResponse({ success: false, error: "Distribution list with this name already exists" }, 409);
+        }
+        throw error;
+      }
+
+      return jsonResponse({
+        success: true,
+        data: {
+          ...created,
+          contact_count: 0,
+        },
+      });
+    }
+
+    if (action === "add-contacts-to-distribution-list") {
+      const listId = String(data?.listId || "").trim();
+      if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
+
+      const contactIds = Array.isArray(data?.contactIds)
+        ? data.contactIds
+            .map((value: unknown) => toFiniteNumber(value))
+            .filter((id: number | null): id is number => Number.isFinite(id))
+        : [];
+      const uniqueContactIds = Array.from(new Set(contactIds));
+      if (!uniqueContactIds.length) {
+        return jsonResponse({ success: false, error: "contactIds is required" }, 400);
+      }
+
+      const { data: existingList, error: listError } = await supabase
+        .from("distribution_lists")
+        .select("id")
+        .eq("id", listId)
+        .maybeSingle();
+      if (listError) throw listError;
+      if (!existingList) return jsonResponse({ success: false, error: "Distribution list not found" }, 404);
+
+      const { count: beforeCount, error: beforeCountError } = await supabase
+        .from("distribution_list_contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("list_id", listId);
+      if (beforeCountError) throw beforeCountError;
+
+      const { data: contacts, error: contactsError } = await supabase
+        .from("bullhorn_client_contacts_mirror")
+        .select("*")
+        .in("bullhorn_id", uniqueContactIds);
+      if (contactsError) throw contactsError;
+
+      const rowsToInsert = (contacts || []).map((contact: any) => ({
+        list_id: listId,
+        bullhorn_id: contact.bullhorn_id,
+        added_by: profileName,
+        name: contact.name,
+        email: contact.email,
+        occupation: contact.occupation,
+        company_name: contact.client_corporation_name,
+        contact_snapshot: contact,
+      }));
+
+      if (rowsToInsert.length > 0) {
+        const { error: insertError } = await supabase
+          .from("distribution_list_contacts")
+          .upsert(rowsToInsert, {
+            onConflict: "list_id,bullhorn_id",
+            ignoreDuplicates: true,
+          });
+        if (insertError) throw insertError;
+      }
+
+      const { count: afterCount, error: afterCountError } = await supabase
+        .from("distribution_list_contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("list_id", listId);
+      if (afterCountError) throw afterCountError;
+
+      const inserted = Math.max(0, Number(afterCount || 0) - Number(beforeCount || 0));
+      const skipped = Math.max(0, uniqueContactIds.length - inserted);
+
+      return jsonResponse({
+        success: true,
+        data: {
+          listId,
+          inserted,
+          skipped,
+          totalInList: Number(afterCount || 0),
+        },
+      });
+    }
+
+    if (action === "list-distribution-list-contacts") {
+      const listId = String(data?.listId || "").trim();
+      if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
+      const limit = normalizeListLimit(data?.limit);
+      const offset = normalizeListOffset(data?.offset);
+      const searchTerm = normalizeSearchTerm(data?.search);
+
+      let query = supabase
+        .from("distribution_list_contacts")
+        .select("*", { count: "exact" })
+        .eq("list_id", listId)
+        .order("added_at", { ascending: false });
+
+      if (searchTerm) {
+        const like = `%${searchTerm}%`;
+        query = query.or(
+          `name.ilike.${like},email.ilike.${like},company_name.ilike.${like},occupation.ilike.${like}`,
+        );
+      }
+
+      const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
+      if (error) throw error;
+
+      return jsonResponse({
+        success: true,
+        data: {
+          contacts: contacts || [],
+          total: count || 0,
           limit,
           offset,
         },
