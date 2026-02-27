@@ -741,6 +741,11 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
     "dateLastModified",
     "isDeleted",
     "lastVisit",
+    "dateLastVisit",
+    "dateLastComment",
+    "comments",
+    "notes",
+    "description",
   ].forEach(addSimple);
 
   if (hasField("address")) add("address(city,state,countryID,countryName)");
@@ -758,12 +763,11 @@ function buildClientContactFieldSelector(supportedFields: Set<string> | null): s
   if (hasField("specialties")) add("specialties(id,name)");
 
   ["skills", "skillList", "skillIDList", "skill", "specialty", "specialities", "expertise"].forEach(addSimple);
-  if (supportedFields) {
-    // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
-    ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "address1", "address2", "city", "state"].forEach(
-      add,
-    );
-  }
+  // Some Bullhorn instances expose these as computed/export fields even if meta is inconsistent.
+  // We always include them and let invalid-field pruning remove unsupported fields safely.
+  ["skills", "skillsCount", "dateLastVisit", "dateLastComment", "comments", "notes", "description", "address1", "address2", "city", "state"].forEach(
+    add,
+  );
 
   if (supportedFields) {
     buildCustomFieldNames("customTextBlock", 20).forEach(addSimple);
@@ -1376,7 +1380,22 @@ async function fetchLatestNotesForContactIds(
     const missingIds = chunk.filter((id) => !latestByContact.has(id));
     if (!missingIds.length) continue;
 
-    for (const id of missingIds) {
+    // Fallback pass for portals where targetEntityName differs or is missing.
+    const anyEntityRows = await fetchQueryRowsWithFallback(
+      restUrl,
+      bhRestToken,
+      "Note",
+      `targetEntityID IN (${missingIds.join(",")})`,
+      1200,
+      0,
+      NOTE_QUERY_FIELD_SELECTORS,
+    );
+    for (const row of anyEntityRows) {
+      updateLatestNoteMap(latestByContact, normalizeLiveNoteRow(row));
+    }
+
+    const stillMissing = chunk.filter((id) => !latestByContact.has(id));
+    for (const id of stillMissing) {
       const rows = await fetchQueryRowsWithFallback(
         restUrl,
         bhRestToken,
@@ -1387,6 +1406,20 @@ async function fetchLatestNotesForContactIds(
         NOTE_QUERY_FIELD_SELECTORS,
       );
       for (const row of rows) {
+        updateLatestNoteMap(latestByContact, normalizeLiveNoteRow(row));
+      }
+
+      if (latestByContact.has(id)) continue;
+      const fallbackRows = await fetchQueryRowsWithFallback(
+        restUrl,
+        bhRestToken,
+        "Note",
+        `targetEntityID=${id}`,
+        120,
+        0,
+        NOTE_QUERY_FIELD_SELECTORS,
+      );
+      for (const row of fallbackRows) {
         updateLatestNoteMap(latestByContact, normalizeLiveNoteRow(row));
       }
     }
@@ -2185,7 +2218,7 @@ serve(async (req) => {
         let query = supabase
           .from("bullhorn_client_contacts_mirror")
           .select("*", { count: "exact" })
-          .order("synced_at", { ascending: false });
+          .order("bullhorn_id", { ascending: false });
 
         if (searchTerm) {
           const like = `%${searchTerm}%`;
@@ -2219,7 +2252,7 @@ serve(async (req) => {
         const { data: batch, error } = await supabase
           .from("bullhorn_client_contacts_mirror")
           .select("*")
-          .order("synced_at", { ascending: false })
+          .order("bullhorn_id", { ascending: false })
           .range(cursor, cursor + chunkSize - 1);
 
         if (error) throw error;
