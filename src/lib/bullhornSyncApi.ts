@@ -28,12 +28,19 @@ export interface BullhornMirrorContact {
   email: string | null;
   occupation: string | null;
   status: string | null;
+  phone: string | null;
+  mobile: string | null;
   address_city: string | null;
   address_state: string | null;
+  address_country_id: number | null;
+  client_corporation_id: number | null;
   client_corporation_name: string | null;
+  owner_id: number | null;
   owner_name: string | null;
+  date_added: string | null;
   synced_at: string;
   date_last_modified: string | null;
+  is_deleted: boolean;
   raw: Record<string, unknown> | null;
 }
 
