@@ -1238,16 +1238,43 @@ function toFiniteNumber(value: unknown): number | null {
 
 function normalizeLiveNoteRow(input: any): Record<string, unknown> {
   const base = input && typeof input === "object" ? input : {};
-  const personReference =
-    base.personReference && typeof base.personReference === "object" ? base.personReference : null;
+  const personReference = base.personReference && typeof base.personReference === "object"
+    ? base.personReference
+    : null;
+  const targetEntity =
+    base.targetEntity && typeof base.targetEntity === "object"
+      ? (base.targetEntity as Record<string, unknown>)
+      : null;
+  const normalizedAction = base.action ? String(base.action).trim() : "";
+  const normalizedComments =
+    base.comments !== undefined && base.comments !== null
+      ? String(base.comments).trim()
+      : base.comment !== undefined && base.comment !== null
+        ? String(base.comment).trim()
+        : base.notes !== undefined && base.notes !== null
+          ? String(base.notes).trim()
+          : base.note !== undefined && base.note !== null
+            ? String(base.note).trim()
+            : base.description !== undefined && base.description !== null
+              ? String(base.description).trim()
+              : "";
   return {
     id: toFiniteNumber(base.id),
-    action: base.action ? String(base.action) : null,
-    comments: base.comments ? String(base.comments) : null,
-    dateAdded: normalizeBullhornDate(base.dateAdded),
+    action: normalizedAction || null,
+    comments: normalizedComments || null,
+    dateAdded: normalizeBullhornDate(base.dateAdded ?? base.dateLastModified ?? base.modDate),
     personName: personReference?.name ? String(personReference.name) : null,
-    targetEntityName: base.targetEntityName ? String(base.targetEntityName) : null,
-    targetEntityId: toFiniteNumber(base.targetEntityID),
+    targetEntityName:
+      base.targetEntityName
+        ? String(base.targetEntityName)
+        : targetEntity?.entityName
+          ? String(targetEntity.entityName)
+          : targetEntity?.name
+            ? String(targetEntity.name)
+            : null,
+    targetEntityId: toFiniteNumber(
+      base.targetEntityID ?? base.targetEntityId ?? targetEntity?.id ?? targetEntity?.entityID ?? targetEntity?.entityId,
+    ),
   };
 }
 
@@ -1394,7 +1421,7 @@ async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Pr
 
     const comments = typeof note.comments === "string" ? note.comments.trim() : "";
     const action = typeof note.action === "string" ? note.action.trim() : "";
-    contact.latest_note = comments || action || null;
+    contact.latest_note = comments && action ? `${action}: ${comments}` : comments || action || null;
     contact.latest_note_action = action || null;
     contact.latest_note_date = normalizeBullhornDate(note.dateAdded);
   }
