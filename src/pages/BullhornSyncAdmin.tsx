@@ -1609,8 +1609,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                         <TableCell className={`w-[220px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={address}>
                           <span className="block truncate">{address}</span>
                         </TableCell>
-                        <TableCell className={`w-[240px] py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={lastNote}>
-                          <span className="block truncate">{lastNote}</span>
+                        <TableCell className={`w-[320px] py-3 text-sm align-top ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`} title={lastNote}>
+                          <span className="block whitespace-pre-wrap break-words">{lastNote}</span>
                         </TableCell>
                         <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateAdded}</TableCell>
                         <TableCell className={`w-[130px] whitespace-nowrap py-3 text-sm ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}>{dateLastModified}</TableCell>
