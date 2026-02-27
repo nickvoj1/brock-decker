@@ -2843,6 +2843,18 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const nestedAction = typeof body?.data?.action === "string" ? body.data.action : "";
     const action = String(body?.action || nestedAction || "").trim();
+
+    if (action === "__codex_ping") {
+      return jsonResponse(
+        {
+          success: true,
+          marker: "eea4cde-main",
+          receivedAction: action,
+          now: new Date().toISOString(),
+        },
+        200,
+      );
+    }
     const profileName = String(body?.profileName || "").trim();
     const data =
       body?.data && typeof body.data === "object" && !Array.isArray(body.data)
