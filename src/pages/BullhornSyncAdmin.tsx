@@ -1736,7 +1736,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                         </p>
                         <p className="text-sm font-medium">Added: {contactOverview?.dateAdded || selectedContactProfile.dateAdded}</p>
                         <p className="text-sm font-medium">Modified: {contactOverview?.dateLastModified || selectedContactProfile.dateLastModified}</p>
-                        <p className="text-sm font-medium">Last Visit: {contactOverview?.lastVisit || selectedContactProfile.lastVisit}</p>
+                        <p className="text-sm font-medium">Last Visit: {(contactOverview as any)?.lastVisit || (selectedContactProfile as any).lastVisit}</p>
                       </div>
                     </div>
                     <div className="rounded-md border p-3">
