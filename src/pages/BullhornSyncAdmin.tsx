@@ -877,10 +877,6 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
   };
 
-  if (profileName !== ADMIN_PROFILE) {
-    return null;
-  }
-
   const latestSyncJob = syncJobs[0] || null;
   const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
   const latestExpectedTotal = getExpectedTotal(latestSyncJob);
@@ -1443,6 +1439,10 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const stickyHeadBaseClass = tableOnly
     ? "sticky top-0 z-30 h-11 bg-card text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]"
     : "";
+
+  if (profileName !== ADMIN_PROFILE) {
+    return null;
+  }
 
   return (
     <AppLayout
