@@ -863,10 +863,7 @@ function toTitleLabel(fieldName: string): string {
     .join(" ");
 }
 
-function addDictionaryRow(
-  rowMap: Map<string, Record<string, unknown>>,
-  row: Record<string, unknown>,
-) {
+function addDictionaryRow(rowMap: Map<string, Record<string, unknown>>, row: Record<string, unknown>) {
   const entity = normalizeOptionalString(row.entity_name);
   const field = normalizeOptionalString(row.field_name);
   if (!entity || !field) return;
@@ -895,9 +892,10 @@ async function inferDictionaryRowsFromSampleData(
       0,
       config.selectors,
     );
-    const sample = Array.isArray(sampleRows) && sampleRows[0] && typeof sampleRows[0] === "object"
-      ? (sampleRows[0] as Record<string, unknown>)
-      : null;
+    const sample =
+      Array.isArray(sampleRows) && sampleRows[0] && typeof sampleRows[0] === "object"
+        ? (sampleRows[0] as Record<string, unknown>)
+        : null;
     if (!sample) continue;
 
     for (const [fieldName, value] of Object.entries(sample)) {
@@ -1747,8 +1745,7 @@ async function fetchBullhornNotesViaAssociation(
       const payload = await response.json().catch(() => ({}));
       const rows = Array.isArray(payload?.data) ? payload.data : [];
       if (!rows.length) return [];
-      // deno-lint-ignore no-explicit-any
-      return dedupeLiveNotes(rows.map((row: any) => normalizeLiveNoteRow(row)));
+      return dedupeLiveNotes(rows.map((row) => normalizeLiveNoteRow(row)));
     }
   }
 
@@ -1765,13 +1762,7 @@ async function fetchBullhornNotesByIds(
 
   const results: Record<string, unknown>[] = [];
   for (const noteId of uniqueIds) {
-    const note = await fetchEntityByIdWithFallback(
-      restUrl,
-      bhRestToken,
-      "Note",
-      noteId,
-      NOTE_ENTITY_FIELD_SELECTORS,
-    );
+    const note = await fetchEntityByIdWithFallback(restUrl, bhRestToken, "Note", noteId, NOTE_ENTITY_FIELD_SELECTORS);
     if (!note) continue;
     results.push(normalizeLiveNoteRow(note));
   }
@@ -2240,12 +2231,7 @@ async function fetchDocumentsForContactIds(
   return { rows, summaryByContact };
 }
 
-async function syncCustomFieldDictionary(
-  supabase: any,
-  restUrl: string,
-  bhRestToken: string,
-  jobId: string,
-) {
+async function syncCustomFieldDictionary(supabase: any, restUrl: string, bhRestToken: string, jobId: string) {
   const dictionaryRowMap = new Map<string, Record<string, unknown>>();
   for (const entityName of CONTACT_PARITY_ENTITY_META) {
     const payload = await fetchEntityMetaPayload(restUrl, bhRestToken, entityName);
@@ -2363,8 +2349,7 @@ async function syncBatchParityData(
   for (const id of contactIds) parityById.set(id, buildDefaultContactParitySummary());
 
   const timelineRowsRaw = await fetchContactTimelineEvents(restUrl, bhRestToken, contactIds);
-  // deno-lint-ignore no-explicit-any
-  const timelineRows: any[] = timelineRowsRaw.map((row) => ({
+  const timelineRows = timelineRowsRaw.map((row) => ({
     ...row,
     last_synced_job_id: jobId,
   }));
@@ -2557,8 +2542,7 @@ async function fetchLatestNotesForContactIds(
 
 function hasPersistedLatestNote(contact: any): boolean {
   const noteText = sanitizeLatestNoteText(contact?.latest_note);
-  const noteDate =
-    typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
+  const noteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
   return Boolean(noteText || noteDate);
 }
 
@@ -2584,9 +2568,7 @@ function deriveLatestNoteFromContactFields(contact: any): {
     contact?.notes,
     contact?.description,
   ];
-  const text = textCandidates
-    .map((value) => sanitizeLatestNoteText(value))
-    .find((value) => Boolean(value)) || null;
+  const text = textCandidates.map((value) => sanitizeLatestNoteText(value)).find((value) => Boolean(value)) || null;
 
   const date = normalizeBullhornDate(
     contact?.latest_note_date ?? contact?.dateLastComment ?? contact?.dateLastVisit ?? contact?.dateLastModified,
@@ -2821,8 +2803,7 @@ async function fetchClientContactsBatch(
     const totalRaw = payload?.total;
     const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
 
-    // deno-lint-ignore no-explicit-any
-    const rowsWithSkillsBefore = rows.filter((row: any) => hasSkillsPayload(row)).length;
+    const rowsWithSkillsBefore = rows.filter((row) => hasSkillsPayload(row)).length;
     if (rows.length && rowsWithSkillsBefore < rows.length) {
       const wildcardOverlay = await fetchWildcardOverlayBatch(restUrl, bhRestToken, start, count, includeDeleted);
       if (wildcardOverlay.size) {
@@ -2836,9 +2817,9 @@ async function fetchClientContactsBatch(
       }
 
       const missingIds = rows
-        .filter((row: any) => !hasSkillsPayload(row))
-        .map((row: any) => Number(row?.id))
-        .filter((id: any) => Number.isFinite(id));
+        .filter((row) => !hasSkillsPayload(row))
+        .map((row) => Number(row?.id))
+        .filter((id) => Number.isFinite(id));
       if (missingIds.length) {
         const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds, skillOverlaySelector);
         if (overlayById.size) {
@@ -2853,9 +2834,9 @@ async function fetchClientContactsBatch(
       }
 
       const stillMissingIds = rows
-        .filter((row: any) => !hasSkillsPayload(row))
-        .map((row: any) => Number(row?.id))
-        .filter((id: any) => Number.isFinite(id))
+        .filter((row) => !hasSkillsPayload(row))
+        .map((row) => Number(row?.id))
+        .filter((id) => Number.isFinite(id))
         .slice(0, 50);
       if (stillMissingIds.length) {
         const rowById = new Map<number, any>();
@@ -2878,8 +2859,7 @@ async function fetchClientContactsBatch(
       deriveCanonicalSkills(row);
     }
 
-    // deno-lint-ignore no-explicit-any
-    const rowsWithSkillsAfter = rows.filter((row: any) => hasSkillsPayload(row)).length;
+    const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
     const skillKeys =
       firstRow && typeof firstRow === "object"
@@ -3581,12 +3561,7 @@ serve(async (req) => {
       const { data: rows, count, error } = await query.range(offset, offset + limit - 1);
       if (error) throw error;
 
-      const needsAutoHydrate =
-        offset === 0 &&
-        !entityName &&
-        !search &&
-        !customOnly &&
-        (count || 0) === 0;
+      const needsAutoHydrate = offset === 0 && !entityName && !search && !customOnly && (count || 0) === 0;
 
       if (needsAutoHydrate) {
         const tokens = await getStoredBullhornTokens(supabase);
@@ -3598,7 +3573,11 @@ serve(async (req) => {
           );
           await syncCustomFieldDictionary(supabase, tokens.rest_url, tokens.bh_rest_token, hydrationJobId);
 
-          const { data: hydratedRows, count: hydratedCount, error: hydratedError } = await supabase
+          const {
+            data: hydratedRows,
+            count: hydratedCount,
+            error: hydratedError,
+          } = await supabase
             .from("bullhorn_custom_field_dictionary")
             .select("*", { count: "exact" })
             .order("entity_name", { ascending: true })
@@ -4013,16 +3992,19 @@ serve(async (req) => {
       });
     }
 
-    return jsonResponse({
-      success: false,
-      error: "Unknown action",
-      details: {
-        receivedAction: action || null,
-        bodyAction: typeof parsedBody?.action === "string" ? parsedBody.action : null,
-        nestedAction: typeof data?.action === "string" ? data.action : null,
-        bodyType: typeof rawBody,
+    return jsonResponse(
+      {
+        success: false,
+        error: "Unknown action",
+        details: {
+          receivedAction: action || null,
+          bodyAction: typeof parsedBody?.action === "string" ? parsedBody.action : null,
+          nestedAction: typeof data?.action === "string" ? data.action : null,
+          bodyType: typeof rawBody,
+        },
       },
-    }, 400);
+      400,
+    );
   } catch (error: any) {
     console.error("[bullhorn-sync-clientcontacts] Fatal error:", error);
     return jsonResponse({ success: false, error: error?.message || "Unknown error" }, 500);
