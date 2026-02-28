@@ -1653,7 +1653,8 @@ async function fetchBullhornNotesViaAssociation(
       const payload = await response.json().catch(() => ({}));
       const rows = Array.isArray(payload?.data) ? payload.data : [];
       if (!rows.length) return [];
-      return dedupeLiveNotes(rows.map((row) => normalizeLiveNoteRow(row)));
+      // deno-lint-ignore no-explicit-any
+      return dedupeLiveNotes(rows.map((row: any) => normalizeLiveNoteRow(row)));
     }
   }
 
@@ -2206,7 +2207,8 @@ async function syncBatchParityData(
   for (const id of contactIds) parityById.set(id, buildDefaultContactParitySummary());
 
   const timelineRowsRaw = await fetchContactTimelineEvents(restUrl, bhRestToken, contactIds);
-  const timelineRows = timelineRowsRaw.map((row) => ({
+  // deno-lint-ignore no-explicit-any
+  const timelineRows: any[] = timelineRowsRaw.map((row) => ({
     ...row,
     last_synced_job_id: jobId,
   }));
@@ -2663,7 +2665,8 @@ async function fetchClientContactsBatch(
     const totalRaw = payload?.total;
     const total = Number.isFinite(Number(totalRaw)) ? Number(totalRaw) : null;
 
-    const rowsWithSkillsBefore = rows.filter((row) => hasSkillsPayload(row)).length;
+    // deno-lint-ignore no-explicit-any
+    const rowsWithSkillsBefore = rows.filter((row: any) => hasSkillsPayload(row)).length;
     if (rows.length && rowsWithSkillsBefore < rows.length) {
       const wildcardOverlay = await fetchWildcardOverlayBatch(restUrl, bhRestToken, start, count, includeDeleted);
       if (wildcardOverlay.size) {
@@ -2677,9 +2680,9 @@ async function fetchClientContactsBatch(
       }
 
       const missingIds = rows
-        .filter((row) => !hasSkillsPayload(row))
-        .map((row) => Number(row?.id))
-        .filter((id) => Number.isFinite(id));
+        .filter((row: any) => !hasSkillsPayload(row))
+        .map((row: any) => Number(row?.id))
+        .filter((id: any) => Number.isFinite(id));
       if (missingIds.length) {
         const overlayById = await fetchSkillOverlayForIds(restUrl, bhRestToken, missingIds, skillOverlaySelector);
         if (overlayById.size) {
@@ -2694,9 +2697,9 @@ async function fetchClientContactsBatch(
       }
 
       const stillMissingIds = rows
-        .filter((row) => !hasSkillsPayload(row))
-        .map((row) => Number(row?.id))
-        .filter((id) => Number.isFinite(id))
+        .filter((row: any) => !hasSkillsPayload(row))
+        .map((row: any) => Number(row?.id))
+        .filter((id: any) => Number.isFinite(id))
         .slice(0, 50);
       if (stillMissingIds.length) {
         const rowById = new Map<number, any>();
@@ -2719,7 +2722,8 @@ async function fetchClientContactsBatch(
       deriveCanonicalSkills(row);
     }
 
-    const rowsWithSkillsAfter = rows.filter((row) => hasSkillsPayload(row)).length;
+    // deno-lint-ignore no-explicit-any
+    const rowsWithSkillsAfter = rows.filter((row: any) => hasSkillsPayload(row)).length;
     const firstRow = rows[0];
     const skillKeys =
       firstRow && typeof firstRow === "object"
