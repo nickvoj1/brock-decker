@@ -1641,7 +1641,13 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         </Card>
       )}
 
-      <Card className={tableOnly ? "border-0 bg-transparent shadow-none -mx-4 md:-mx-6 lg:-mx-7 h-[calc(100dvh-6rem)] md:h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-8rem)] flex flex-col overflow-hidden" : undefined}>
+      <Card
+        className={
+          tableOnly
+            ? "border-0 bg-transparent shadow-none -mx-4 -mb-4 md:-mx-6 md:-mb-6 lg:-mx-7 lg:-mb-7 h-[calc(100dvh-5rem)] md:h-[calc(100dvh-6rem)] lg:h-[calc(100dvh-6.25rem)] flex flex-col overflow-hidden"
+            : undefined
+        }
+      >
         <CardHeader
           className={tableOnly ? "border-b bg-background px-3 py-2" : undefined}
         >
