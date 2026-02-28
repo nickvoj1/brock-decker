@@ -2398,9 +2398,10 @@ async function fetchLatestNotesForContactIds(
 }
 
 function hasPersistedLatestNote(contact: any): boolean {
-  const noteText = typeof contact?.latest_note === "string" && contact.latest_note.trim().length > 0;
-  const noteDate = typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
-  return noteText || noteDate;
+  const noteText = sanitizeLatestNoteText(contact?.latest_note);
+  const noteDate =
+    typeof contact?.latest_note_date === "string" && contact.latest_note_date.trim().length > 0;
+  return Boolean(noteText || noteDate);
 }
 
 function overlayNoteFieldsIntoContact(contact: any, overlay: Record<string, unknown>) {
@@ -2425,9 +2426,9 @@ function deriveLatestNoteFromContactFields(contact: any): {
     contact?.notes,
     contact?.description,
   ];
-  const text =
-    textCandidates.map((value) => (typeof value === "string" ? value.trim() : "")).find((value) => value.length > 0) ||
-    null;
+  const text = textCandidates
+    .map((value) => sanitizeLatestNoteText(value))
+    .find((value) => Boolean(value)) || null;
 
   const date = normalizeBullhornDate(
     contact?.latest_note_date ?? contact?.dateLastComment ?? contact?.dateLastVisit ?? contact?.dateLastModified,
@@ -2453,8 +2454,8 @@ async function enrichFetchedContactsWithLatestNotes(
     if (!Number.isFinite(id)) continue;
     const note = latestByContact.get(id);
     if (!note) continue;
-    const comments = typeof note.comments === "string" ? note.comments.trim() : "";
-    const action = typeof note.action === "string" ? note.action.trim() : "";
+    const comments = sanitizeLatestNoteText(note.comments) || "";
+    const action = sanitizeLatestNoteText(note.action) || "";
     if (comments || action) {
       contact.latest_note = comments && action ? `${action}: ${comments}` : comments || action;
     }
@@ -2491,6 +2492,54 @@ async function enrichFetchedContactsWithLatestNotes(
   }
 
   return rows;
+}
+
+function isLikelyIdOnlyNoteRecord(record: Record<string, unknown>): boolean {
+  const keys = Object.keys(record).map((key) => key.toLowerCase());
+  if (!keys.length) return false;
+
+  if (keys.length === 1 && keys[0] === "id" && toFiniteNumber(record.id) !== null) {
+    return true;
+  }
+
+  if (Array.isArray(record.data)) {
+    const onlyMetaKeys = keys.every((key) => key === "data" || key === "total" || key === "count");
+    if (!onlyMetaKeys) return false;
+    if (!record.data.length) return true;
+    return record.data.every((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+      const item = row as Record<string, unknown>;
+      const itemKeys = Object.keys(item).map((key) => key.toLowerCase());
+      return itemKeys.length === 1 && itemKeys[0] === "id" && toFiniteNumber(item.id) !== null;
+    });
+  }
+
+  return false;
+}
+
+function sanitizeLatestNoteText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed === "-" || trimmed.toLowerCase() === "[object object]") return null;
+
+  // Treat bare numeric IDs as invalid note text.
+  if (/^\d{4,14}$/.test(trimmed)) return null;
+
+  // Treat JSON relation placeholders as invalid note text.
+  const maybeJson = trimmed.startsWith("{") || trimmed.startsWith("[");
+  if (maybeJson) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (isLikelyIdOnlyNoteRecord(parsed as Record<string, unknown>)) return null;
+      }
+    } catch {
+      // Keep non-JSON strings as-is.
+    }
+  }
+
+  return trimmed;
 }
 
 async function enrichContactsWithLatestNotes(supabase: any, contacts: any[]): Promise<any[]> {
