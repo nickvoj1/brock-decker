@@ -2084,19 +2084,24 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       colSpan={CONTACTS_TABLE_COLUMN_COUNT}
                       className={`py-4 ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}
                     >
-                      <div className="flex items-center justify-center gap-2" aria-label="Loading more contacts">
-                        <span
-                          className="h-2 w-2 rounded-full bg-primary/80 animate-pulse"
-                          style={{ animationDelay: "0ms", animationDuration: "900ms" }}
-                        />
-                        <span
-                          className="h-2 w-2 rounded-full bg-primary/80 animate-pulse"
-                          style={{ animationDelay: "150ms", animationDuration: "900ms" }}
-                        />
-                        <span
-                          className="h-2 w-2 rounded-full bg-primary/80 animate-pulse"
-                          style={{ animationDelay: "300ms", animationDuration: "900ms" }}
-                        />
+                      <div className="relative h-8">
+                        <div
+                          className="sticky left-1/2 top-1/2 flex w-fit -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2"
+                          aria-label="Loading more contacts"
+                        >
+                          <span
+                            className="h-3 w-3 rounded-full bg-primary/80 animate-pulse"
+                            style={{ animationDelay: "0ms", animationDuration: "900ms" }}
+                          />
+                          <span
+                            className="h-3 w-3 rounded-full bg-primary/80 animate-pulse"
+                            style={{ animationDelay: "150ms", animationDuration: "900ms" }}
+                          />
+                          <span
+                            className="h-3 w-3 rounded-full bg-primary/80 animate-pulse"
+                            style={{ animationDelay: "300ms", animationDuration: "900ms" }}
+                          />
+                        </div>
                       </div>
                     </TableCell>
                   </TableRow>
