@@ -158,6 +158,13 @@ const FILE_ATTACHMENT_SELECTORS = [
 const CONTACT_PARITY_ENTITY_META = ["ClientContact", "ClientCorporation", "Note", "Task", "Appointment"];
 const CONTACT_TIMELINE_PAGE_SIZE = 200;
 const CONTACT_TIMELINE_MAX_PAGES_PER_QUERY = 10;
+const DICTIONARY_AUTO_HYDRATE_ENTITY_MAP: Record<string, { where: string; selectors: string[] }> = {
+  ClientContact: { where: "id>0", selectors: CONTACT_DETAIL_FIELD_SELECTORS },
+  ClientCorporation: { where: "id>0", selectors: COMPANY_DETAIL_FIELD_SELECTORS },
+  Note: { where: "id>0", selectors: NOTE_QUERY_FIELD_SELECTORS },
+  Task: { where: "id>0", selectors: TASK_QUERY_FIELD_SELECTORS },
+  Appointment: { where: "id>0", selectors: APPOINTMENT_QUERY_FIELD_SELECTORS },
+};
 
 type SyncStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 type MirrorFilterOperator = "contains" | "equals";
@@ -832,6 +839,93 @@ function extractMetaFieldEntries(metaPayload: any): Record<string, unknown>[] {
     }
   }
   return [];
+}
+
+function inferDictionaryDataType(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "object") return "object";
+  if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "string") return "string";
+  return null;
+}
+
+function toTitleLabel(fieldName: string): string {
+  const spaced = fieldName
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!spaced) return fieldName;
+  return spaced
+    .split(/\s+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function addDictionaryRow(
+  rowMap: Map<string, Record<string, unknown>>,
+  row: Record<string, unknown>,
+) {
+  const entity = normalizeOptionalString(row.entity_name);
+  const field = normalizeOptionalString(row.field_name);
+  if (!entity || !field) return;
+  const key = `${entity}::${field}`.toLowerCase();
+  if (rowMap.has(key)) return;
+  rowMap.set(key, row);
+}
+
+async function inferDictionaryRowsFromSampleData(
+  restUrl: string,
+  bhRestToken: string,
+  jobId: string,
+): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+
+  for (const entityName of CONTACT_PARITY_ENTITY_META) {
+    const config = DICTIONARY_AUTO_HYDRATE_ENTITY_MAP[entityName];
+    if (!config) continue;
+
+    const sampleRows = await fetchQueryRowsWithFallback(
+      restUrl,
+      bhRestToken,
+      entityName,
+      config.where,
+      1,
+      0,
+      config.selectors,
+    );
+    const sample = Array.isArray(sampleRows) && sampleRows[0] && typeof sampleRows[0] === "object"
+      ? (sampleRows[0] as Record<string, unknown>)
+      : null;
+    if (!sample) continue;
+
+    for (const [fieldName, value] of Object.entries(sample)) {
+      const normalizedName = normalizeOptionalString(fieldName);
+      if (!normalizedName) continue;
+      const lower = normalizedName.toLowerCase();
+      const isCustom = CUSTOM_FIELD_REGEX.test(lower) || lower.startsWith("custom");
+      rows.push({
+        entity_name: entityName,
+        field_name: normalizedName,
+        field_label: toTitleLabel(normalizedName),
+        data_type: inferDictionaryDataType(value),
+        field_type: null,
+        required: null,
+        hidden: null,
+        is_custom: isCustom,
+        options: [],
+        raw: {
+          source: "sample_inference",
+          inferredType: inferDictionaryDataType(value),
+        },
+        last_synced_job_id: jobId,
+        synced_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  return rows;
 }
 
 async function fetchEntityMetaPayload(
@@ -2146,8 +2240,13 @@ async function fetchDocumentsForContactIds(
   return { rows, summaryByContact };
 }
 
-async function syncCustomFieldDictionary(supabase: any, restUrl: string, bhRestToken: string, jobId: string) {
-  const dictionaryRows: Record<string, unknown>[] = [];
+async function syncCustomFieldDictionary(
+  supabase: any,
+  restUrl: string,
+  bhRestToken: string,
+  jobId: string,
+) {
+  const dictionaryRowMap = new Map<string, Record<string, unknown>>();
   for (const entityName of CONTACT_PARITY_ENTITY_META) {
     const payload = await fetchEntityMetaPayload(restUrl, bhRestToken, entityName);
     if (!payload) continue;
@@ -2165,7 +2264,7 @@ async function syncCustomFieldDictionary(supabase: any, restUrl: string, bhRestT
       const options = Array.isArray(field.options) ? field.options : Array.isArray(field.values) ? field.values : [];
       const lower = name.toLowerCase();
       const isCustom = CUSTOM_FIELD_REGEX.test(lower) || lower.startsWith("custom");
-      dictionaryRows.push({
+      addDictionaryRow(dictionaryRowMap, {
         entity_name: entityName,
         field_name: name,
         field_label: label,
@@ -2182,6 +2281,10 @@ async function syncCustomFieldDictionary(supabase: any, restUrl: string, bhRestT
     }
   }
 
+  const inferredRows = await inferDictionaryRowsFromSampleData(restUrl, bhRestToken, jobId);
+  for (const row of inferredRows) addDictionaryRow(dictionaryRowMap, row);
+
+  const dictionaryRows = Array.from(dictionaryRowMap.values());
   if (!dictionaryRows.length) return;
   const { error } = await supabase
     .from("bullhorn_custom_field_dictionary")
@@ -2189,6 +2292,59 @@ async function syncCustomFieldDictionary(supabase: any, restUrl: string, bhRestT
   if (error) {
     console.warn("[bullhorn-sync-clientcontacts] Failed to upsert custom field dictionary:", error.message);
   }
+}
+
+async function resolveWritableSyncJobId(
+  supabase: any,
+  requestedBy: string,
+  providedJobId?: string | null,
+): Promise<string> {
+  const normalizedProvided = normalizeOptionalString(providedJobId);
+  if (normalizedProvided) {
+    const { data: existingProvided, error: providedLookupError } = await supabase
+      .from("bullhorn_sync_jobs")
+      .select("id")
+      .eq("id", normalizedProvided)
+      .maybeSingle();
+    if (!providedLookupError && existingProvided?.id) return String(existingProvided.id);
+  }
+
+  const { data: latestJob, error: latestLookupError } = await supabase
+    .from("bullhorn_sync_jobs")
+    .select("id")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!latestLookupError && latestJob?.id) return String(latestJob.id);
+
+  const nowIso = new Date().toISOString();
+  const { data: createdJob, error: createError } = await supabase
+    .from("bullhorn_sync_jobs")
+    .insert({
+      requested_by: requestedBy || ADMIN_PROFILE,
+      status: "completed",
+      batch_size: 1,
+      include_deleted: false,
+      next_start: 0,
+      total_expected: 0,
+      total_synced: 0,
+      batches_processed: 0,
+      last_batch_size: 0,
+      started_at: nowIso,
+      finished_at: nowIso,
+      heartbeat_at: nowIso,
+      metadata: {
+        source: "parity_job_seed",
+      },
+    })
+    .select("id")
+    .single();
+
+  if (createError || !createdJob?.id) {
+    throw new Error(createError?.message || "Failed to create sync job for parity writes");
+  }
+
+  return String(createdJob.id);
 }
 
 async function syncBatchParityData(
@@ -3424,6 +3580,45 @@ serve(async (req) => {
 
       const { data: rows, count, error } = await query.range(offset, offset + limit - 1);
       if (error) throw error;
+
+      const needsAutoHydrate =
+        offset === 0 &&
+        !entityName &&
+        !search &&
+        !customOnly &&
+        (count || 0) === 0;
+
+      if (needsAutoHydrate) {
+        const tokens = await getStoredBullhornTokens(supabase);
+        if (tokens) {
+          const hydrationJobId = await resolveWritableSyncJobId(
+            supabase,
+            profileName || ADMIN_PROFILE,
+            normalizeOptionalString(String(data?.jobId || "")),
+          );
+          await syncCustomFieldDictionary(supabase, tokens.rest_url, tokens.bh_rest_token, hydrationJobId);
+
+          const { data: hydratedRows, count: hydratedCount, error: hydratedError } = await supabase
+            .from("bullhorn_custom_field_dictionary")
+            .select("*", { count: "exact" })
+            .order("entity_name", { ascending: true })
+            .order("field_name", { ascending: true })
+            .range(0, limit - 1);
+
+          if (!hydratedError) {
+            return jsonResponse({
+              success: true,
+              data: {
+                rows: hydratedRows || [],
+                total: hydratedCount || 0,
+                limit,
+                offset: 0,
+              },
+            });
+          }
+        }
+      }
+
       return jsonResponse({
         success: true,
         data: {
@@ -3487,14 +3682,18 @@ serve(async (req) => {
         return jsonResponse({ success: false, error: "No matching contacts found for parity sync" }, 404);
       }
 
-      const pseudoJobId = String(data?.jobId || "00000000-0000-0000-0000-000000000000");
+      const parityJobId = await resolveWritableSyncJobId(
+        supabase,
+        profileName || ADMIN_PROFILE,
+        normalizeOptionalString(String(data?.jobId || "")),
+      );
       await enrichFetchedContactsWithLatestNotes(tokens.rest_url, tokens.bh_rest_token, contacts);
-      await syncCustomFieldDictionary(supabase, tokens.rest_url, tokens.bh_rest_token, pseudoJobId);
+      await syncCustomFieldDictionary(supabase, tokens.rest_url, tokens.bh_rest_token, parityJobId);
       const parityById = await syncBatchParityData(
         supabase,
         tokens.rest_url,
         tokens.bh_rest_token,
-        pseudoJobId,
+        parityJobId,
         contacts,
       );
 
@@ -3502,7 +3701,7 @@ serve(async (req) => {
         .map((contact) => {
           const id = toFiniteNumber(contact.id);
           const parity = id ? parityById.get(id) : undefined;
-          return mapMirrorRow(contact, pseudoJobId, parity);
+          return mapMirrorRow(contact, parityJobId, parity);
         })
         .filter((row) => Number.isFinite(Number(row.bullhorn_id)));
 
