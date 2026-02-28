@@ -45,6 +45,7 @@ import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
 const CONTACTS_PAGE_SIZE = 25;
+const CONTACTS_TABLE_COLUMN_COUNT = 13;
 const SKILLS_CANDIDATE_KEYS = [
   "skills",
   "skill",
@@ -1982,7 +1983,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               <TableBody className={tableOnly ? "[&_tr]:border-b [&_tr]:border-border/55 [&_tr:last-child]:border-b-0" : "[&_tr]:border-0"}>
                 {displayedContacts.length === 0 ? (
                   <TableRow className={tableOnly ? "border-b border-border/55 hover:bg-transparent" : "border-0 hover:bg-transparent"}>
-                    <TableCell colSpan={13} className="py-5 text-center text-base text-muted-foreground">
+                    <TableCell colSpan={CONTACTS_TABLE_COLUMN_COUNT} className="py-5 text-center text-base text-muted-foreground">
                       {contactsLoading ? "Loading contacts..." : "No synced contacts yet"}
                     </TableCell>
                   </TableRow>
@@ -2076,6 +2077,29 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       </TableRow>
                     );
                   })
+                )}
+                {displayedContacts.length > 0 && isLoadingMore && (
+                  <TableRow className={tableOnly ? "border-b border-border/55 bg-background/80 hover:bg-transparent" : "border-0 hover:bg-transparent"}>
+                    <TableCell
+                      colSpan={CONTACTS_TABLE_COLUMN_COUNT}
+                      className={`py-4 ${tableOnly ? "border-r border-border/40 last:border-r-0" : ""}`}
+                    >
+                      <div className="flex items-center justify-center gap-2" aria-label="Loading more contacts">
+                        <span
+                          className="h-2 w-2 rounded-full bg-primary/80 animate-pulse"
+                          style={{ animationDelay: "0ms", animationDuration: "900ms" }}
+                        />
+                        <span
+                          className="h-2 w-2 rounded-full bg-primary/80 animate-pulse"
+                          style={{ animationDelay: "150ms", animationDuration: "900ms" }}
+                        />
+                        <span
+                          className="h-2 w-2 rounded-full bg-primary/80 animate-pulse"
+                          style={{ animationDelay: "300ms", animationDuration: "900ms" }}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
                 )}
               </TableBody>
             </table>
