@@ -355,6 +355,14 @@ export async function createDistributionList(profileName: string, name: string) 
   return callBullhornSync<DistributionListSummary>("create-distribution-list", profileName, { name });
 }
 
+export async function deleteDistributionList(profileName: string, listId: string) {
+  return callBullhornSync<{
+    listId: string;
+    name: string;
+    removedContacts: number;
+  }>("delete-distribution-list", profileName, { listId });
+}
+
 export async function addContactsToDistributionList(
   profileName: string,
   listId: string,
@@ -383,4 +391,18 @@ export async function listDistributionListContacts(
     limit: number;
     offset: number;
   }>("list-distribution-list-contacts", profileName, { listId, ...options });
+}
+
+export async function removeContactsFromDistributionList(
+  profileName: string,
+  listId: string,
+  contactIds: number[],
+) {
+  return callBullhornSync<{
+    listId: string;
+    removed: number;
+    requested: number;
+    skipped: number;
+    totalInList: number;
+  }>("remove-contacts-from-distribution-list", profileName, { listId, contactIds });
 }

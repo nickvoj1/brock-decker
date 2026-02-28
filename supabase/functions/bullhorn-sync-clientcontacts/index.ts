@@ -3864,6 +3864,43 @@ serve(async (req) => {
       });
     }
 
+    if (action === "delete-distribution-list") {
+      const listId = String(data?.listId || "").trim();
+      if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
+
+      const { data: existingList, error: listError } = await supabase
+        .from("distribution_lists")
+        .select("id,name")
+        .eq("id", listId)
+        .maybeSingle();
+      if (listError) throw listError;
+      if (!existingList) return jsonResponse({ success: false, error: "Distribution list not found" }, 404);
+
+      const { count: contactsCountBefore, error: countError } = await supabase
+        .from("distribution_list_contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("list_id", listId);
+      if (countError) throw countError;
+
+      const { data: deletedList, error: deleteError } = await supabase
+        .from("distribution_lists")
+        .delete()
+        .eq("id", listId)
+        .select("id,name")
+        .maybeSingle();
+      if (deleteError) throw deleteError;
+      if (!deletedList) return jsonResponse({ success: false, error: "Distribution list not found" }, 404);
+
+      return jsonResponse({
+        success: true,
+        data: {
+          listId,
+          name: deletedList.name,
+          removedContacts: Number(contactsCountBefore || 0),
+        },
+      });
+    }
+
     if (action === "add-contacts-to-distribution-list") {
       const listId = String(data?.listId || "").trim();
       if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
@@ -3965,6 +4002,56 @@ serve(async (req) => {
           total: count || 0,
           limit,
           offset,
+        },
+      });
+    }
+
+    if (action === "remove-contacts-from-distribution-list") {
+      const listId = String(data?.listId || "").trim();
+      if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
+
+      const contactIds = Array.isArray(data?.contactIds)
+        ? data.contactIds
+            .map((value: unknown) => toFiniteNumber(value))
+            .filter((id: number | null): id is number => Number.isFinite(id))
+        : [];
+      const uniqueContactIds = Array.from(new Set(contactIds));
+      if (!uniqueContactIds.length) {
+        return jsonResponse({ success: false, error: "contactIds is required" }, 400);
+      }
+
+      const { data: existingList, error: listError } = await supabase
+        .from("distribution_lists")
+        .select("id")
+        .eq("id", listId)
+        .maybeSingle();
+      if (listError) throw listError;
+      if (!existingList) return jsonResponse({ success: false, error: "Distribution list not found" }, 404);
+
+      const { data: removedRows, error: removeError } = await supabase
+        .from("distribution_list_contacts")
+        .delete()
+        .eq("list_id", listId)
+        .in("bullhorn_id", uniqueContactIds)
+        .select("bullhorn_id");
+      if (removeError) throw removeError;
+
+      const removed = Array.isArray(removedRows) ? removedRows.length : 0;
+
+      const { count: totalInList, error: countError } = await supabase
+        .from("distribution_list_contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("list_id", listId);
+      if (countError) throw countError;
+
+      return jsonResponse({
+        success: true,
+        data: {
+          listId,
+          removed,
+          requested: uniqueContactIds.length,
+          skipped: Math.max(0, uniqueContactIds.length - removed),
+          totalInList: Number(totalInList || 0),
         },
       });
     }

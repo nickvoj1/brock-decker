@@ -6,15 +6,18 @@ import {
   DistributionListContact,
   DistributionListSummary,
   createDistributionList,
+  deleteDistributionList,
   listDistributionListContacts,
   listDistributionLists,
+  removeContactsFromDistributionList,
 } from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RefreshCw } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RefreshCw, Trash2, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
@@ -42,6 +45,9 @@ export default function DistributionLists() {
   const [contactsAppending, setContactsAppending] = useState(false);
   const [searchDraft, setSearchDraft] = useState("");
   const [searchValue, setSearchValue] = useState("");
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
+  const [deleteListLoading, setDeleteListLoading] = useState(false);
+  const [removeContactsLoading, setRemoveContactsLoading] = useState(false);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -150,6 +156,7 @@ export default function DistributionLists() {
 
   useEffect(() => {
     if (!selectedListId) return;
+    setSelectedContactIds(new Set());
     void loadContacts(selectedListId, { reset: true, search: searchValue });
   }, [loadContacts, searchValue, selectedListId]);
 
@@ -159,6 +166,8 @@ export default function DistributionLists() {
   );
 
   const hasMore = contacts.length < contactsTotal;
+  const allLoadedSelected = contacts.length > 0 && contacts.every((row) => selectedContactIds.has(row.bullhorn_id));
+  const partiallySelected = !allLoadedSelected && contacts.some((row) => selectedContactIds.has(row.bullhorn_id));
 
   const handleCreateList = async () => {
     const name = newListName.trim();
@@ -181,6 +190,114 @@ export default function DistributionLists() {
       setSelectedListId(result.data.id);
     } finally {
       setCreateLoading(false);
+    }
+  };
+
+  const toggleSelectAllLoaded = (checked: boolean | "indeterminate") => {
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      if (checked !== false) {
+        contacts.forEach((row) => next.add(row.bullhorn_id));
+      } else {
+        contacts.forEach((row) => next.delete(row.bullhorn_id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectContact = (bullhornId: number, checked: boolean | "indeterminate") => {
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      if (checked !== false) {
+        next.add(bullhornId);
+      } else {
+        next.delete(bullhornId);
+      }
+      return next;
+    });
+  };
+
+  const handleDeleteSelectedList = async () => {
+    if (!selectedList) {
+      toast.error("Select a distribution list first");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete list "${selectedList.name}"? This removes only list membership, not CRM contacts.`,
+    );
+    if (!confirmed) return;
+
+    setDeleteListLoading(true);
+    try {
+      const result = await deleteDistributionList(ADMIN_PROFILE, selectedList.id);
+      if (!result.success || !result.data) {
+        toast.error(result.error || "Failed to delete distribution list");
+        return;
+      }
+
+      const remaining = lists.filter((list) => list.id !== selectedList.id);
+      setLists(remaining);
+      const nextSelectedId = remaining[0]?.id || "";
+      setSelectedListId(nextSelectedId);
+      if (!nextSelectedId) {
+        setContacts([]);
+        setContactsTotal(0);
+        setContactsOffset(0);
+      }
+      setSelectedContactIds(new Set());
+
+      toast.success(
+        `Deleted "${selectedList.name}" (${Number(result.data.removedContacts || 0)} memberships removed)`,
+      );
+      await loadLists({ silent: true });
+    } finally {
+      setDeleteListLoading(false);
+    }
+  };
+
+  const handleRemoveSelectedContacts = async () => {
+    if (!selectedListId) {
+      toast.error("Select a distribution list first");
+      return;
+    }
+
+    if (selectedContactIds.size === 0) {
+      toast.error("Select at least one contact");
+      return;
+    }
+
+    const selectedCount = selectedContactIds.size;
+    const confirmed = window.confirm(
+      `Remove ${selectedCount} contact${selectedCount === 1 ? "" : "s"} from this list? CRM contacts stay unchanged.`,
+    );
+    if (!confirmed) return;
+
+    setRemoveContactsLoading(true);
+    try {
+      const result = await removeContactsFromDistributionList(
+        ADMIN_PROFILE,
+        selectedListId,
+        Array.from(selectedContactIds),
+      );
+      if (!result.success || !result.data) {
+        toast.error(result.error || "Failed to remove contacts from distribution list");
+        return;
+      }
+
+      setSelectedContactIds(new Set());
+      await loadLists({ silent: true });
+      await loadContacts(selectedListId, { reset: true, search: searchValue, silent: true });
+
+      const removed = Number(result.data.removed || 0);
+      const skipped = Number(result.data.skipped || 0);
+      toast.success(
+        skipped > 0
+          ? `Removed ${removed} contact${removed === 1 ? "" : "s"} (${skipped} already absent)`
+          : `Removed ${removed} contact${removed === 1 ? "" : "s"} from list`,
+      );
+    } finally {
+      setRemoveContactsLoading(false);
     }
   };
 
@@ -212,9 +329,20 @@ export default function DistributionLists() {
               <p className="text-xs uppercase tracking-wide text-muted-foreground">
                 {lists.length} list{lists.length === 1 ? "" : "s"}
               </p>
-              <Button size="icon" variant="outline" onClick={() => loadLists()} disabled={listsLoading}>
-                <RefreshCw className={`h-4 w-4 ${listsLoading ? "animate-spin" : ""}`} />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="icon" variant="outline" onClick={() => loadLists()} disabled={listsLoading}>
+                  <RefreshCw className={`h-4 w-4 ${listsLoading ? "animate-spin" : ""}`} />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="destructive"
+                  onClick={handleDeleteSelectedList}
+                  disabled={!selectedListId || deleteListLoading}
+                  title="Delete selected list"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
             <div className="max-h-[62vh] space-y-2 overflow-y-auto pr-1">
@@ -273,6 +401,16 @@ export default function DistributionLists() {
                 >
                   Clear
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleRemoveSelectedContacts}
+                  disabled={!selectedListId || selectedContactIds.size === 0 || removeContactsLoading}
+                >
+                  <UserMinus className="mr-1.5 h-4 w-4" />
+                  {removeContactsLoading
+                    ? "Removing..."
+                    : `Remove Selected (${selectedContactIds.size})`}
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -285,6 +423,13 @@ export default function DistributionLists() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-[44px]">
+                          <Checkbox
+                            checked={allLoadedSelected ? true : partiallySelected ? "indeterminate" : false}
+                            onCheckedChange={toggleSelectAllLoaded}
+                            aria-label="Select all loaded contacts"
+                          />
+                        </TableHead>
                         <TableHead>ID</TableHead>
                         <TableHead>Name</TableHead>
                         <TableHead>Job Title</TableHead>
@@ -296,15 +441,22 @@ export default function DistributionLists() {
                     <TableBody>
                       {contactsLoading ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">Loading contacts...</TableCell>
+                          <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">Loading contacts...</TableCell>
                         </TableRow>
                       ) : contacts.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">No contacts in this list yet.</TableCell>
+                          <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">No contacts in this list yet.</TableCell>
                         </TableRow>
                       ) : (
                         contacts.map((contact) => (
                           <TableRow key={`${contact.list_id}:${contact.bullhorn_id}`}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedContactIds.has(contact.bullhorn_id)}
+                                onCheckedChange={(checked) => toggleSelectContact(contact.bullhorn_id, checked)}
+                                aria-label={`Select contact ${contact.bullhorn_id}`}
+                              />
+                            </TableCell>
                             <TableCell className="font-mono text-xs">{contact.bullhorn_id}</TableCell>
                             <TableCell>{formatValue(contact.name)}</TableCell>
                             <TableCell>{formatValue(contact.occupation)}</TableCell>
