@@ -347,6 +347,42 @@ function compareSortableText(a: string, b: string): number {
   });
 }
 
+function sanitizeGridLastNoteText(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text || text === "-") return null;
+  if (text.toLowerCase() === "[object object]") return null;
+
+  // Bullhorn relation placeholders sometimes leak as plain numeric note IDs.
+  if (/^\d{4,14}$/.test(text)) return null;
+
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        const keys = Object.keys(record).map((key) => key.toLowerCase());
+        if (keys.length === 1 && keys[0] === "id" && toNullableNumber(record.id) !== null) return null;
+        if (Array.isArray(record.data)) {
+          const onlyMetaKeys = keys.every((key) => key === "data" || key === "total" || key === "count");
+          if (onlyMetaKeys) {
+            const allIdOnly = record.data.every((row) => {
+              const rowRecord = asRecord(row);
+              if (!rowRecord) return false;
+              const rowKeys = Object.keys(rowRecord).map((key) => key.toLowerCase());
+              return rowKeys.length === 1 && rowKeys[0] === "id" && toNullableNumber(rowRecord.id) !== null;
+            });
+            if (allIdOnly) return null;
+          }
+        }
+      }
+    } catch {
+      // Keep non-JSON parseable note text.
+    }
+  }
+
+  return text;
+}
+
 function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayRow {
   const rawRecord =
     contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
@@ -369,16 +405,17 @@ function buildContactDisplayRow(contact: BullhornMirrorContact): ContactDisplayR
     (rawRecord.owner as Record<string, unknown> | undefined)?.name ?? contact.owner_name,
   );
   const address = formatMirrorAddress(rawRecord.address, contact.address_city, contact.address_state);
-  const liveLatestNote = formatMirrorValue(contact.latest_note ?? contact.latest_note_action);
-  const lastNoteText = liveLatestNote !== "-"
-    ? liveLatestNote
-    : formatMirrorValue(
-      rawRecord.latest_note ??
-      rawRecord.lastNote ??
-      rawRecord.comments ??
-      rawRecord.notes ??
-      rawRecord.description,
-    );
+  const liveLatestNoteRaw = contact.latest_note ?? contact.latest_note_action;
+  const fallbackLatestNoteRaw =
+    rawRecord.latest_note ??
+    rawRecord.lastNote ??
+    rawRecord.comments ??
+    rawRecord.notes ??
+    rawRecord.description;
+  const lastNoteText =
+    sanitizeGridLastNoteText(liveLatestNoteRaw) ??
+    sanitizeGridLastNoteText(fallbackLatestNoteRaw) ??
+    "-";
   const lastNoteDate = formatMirrorDate(contact.latest_note_date ?? rawRecord.latest_note_date ?? rawRecord.dateLastComment);
   const lastNote = lastNoteText !== "-"
     ? lastNoteText
