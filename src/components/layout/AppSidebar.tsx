@@ -96,8 +96,11 @@ export function AppSidebar() {
   }, [viewedKey]);
 
   useEffect(() => {
-    if (!location.pathname.startsWith("/crm/")) return;
-    setConsoleModeAndPersist("CRM System");
+    if (location.pathname.startsWith("/crm/")) {
+      setConsoleModeAndPersist("CRM System");
+      return;
+    }
+    setConsoleModeAndPersist("Operator Console");
   }, [location.pathname]);
 
   useEffect(() => {

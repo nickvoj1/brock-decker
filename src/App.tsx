@@ -1,8 +1,9 @@
+import { useEffect, useRef } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import TeamDashboard from "./pages/TeamDashboard";
 import UploadRun from "./pages/UploadRun";
@@ -18,6 +19,37 @@ import SignalsDashboard from "./pages/SignalsDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+const LAST_ROUTE_STORAGE_KEY = "bd:last-route";
+
+const RoutePersistence = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const didRestoreRef = useRef(false);
+
+  useEffect(() => {
+    const fullPath = `${location.pathname}${location.search}${location.hash}`;
+    if (location.pathname !== "/") {
+      sessionStorage.setItem(LAST_ROUTE_STORAGE_KEY, fullPath);
+    }
+  }, [location.pathname, location.search, location.hash]);
+
+  useEffect(() => {
+    if (didRestoreRef.current) return;
+    didRestoreRef.current = true;
+
+    if (location.pathname !== "/" || location.search || location.hash) return;
+
+    const navigationEntry = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    const isReload = navigationEntry?.type === "reload";
+    if (!isReload) return;
+
+    const savedRoute = sessionStorage.getItem(LAST_ROUTE_STORAGE_KEY);
+    if (!savedRoute || savedRoute === "/") return;
+    navigate(savedRoute, { replace: true });
+  }, [location.pathname, location.search, location.hash, navigate]);
+
+  return null;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -25,6 +57,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
+        <RoutePersistence />
         <Routes>
           <Route path="/" element={<UploadRun />} />
           <Route path="/upload" element={<UploadRun />} />
