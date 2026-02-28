@@ -124,6 +124,12 @@ const NOTE_QUERY_FIELD_SELECTORS = [
   "id,comments,dateAdded,targetEntityName,targetEntityID",
   "id,comments,dateAdded",
 ];
+const NOTE_ENTITY_FIELD_SELECTORS = [
+  "id,action,comments,comment,notes,description,dateAdded,dateLastModified,personReference(id,name),targetEntityName,targetEntityID",
+  "id,action,comments,dateAdded,personReference(id,name),targetEntityName,targetEntityID",
+  "id,comments,dateAdded,targetEntityName,targetEntityID",
+  "id,dateAdded",
+];
 const CONTACT_NOTE_OVERLAY_FIELDS = "id,dateLastComment,dateLastVisit,comments,notes,description";
 const TASK_QUERY_FIELD_SELECTORS = [
   "id,subject,comments,status,type,dateAdded,dateLastModified,dateBegin,dateEnd,owner(id,name),clientContact(id,name),clientContactReference(id,name)",
@@ -1575,11 +1581,115 @@ function dedupeLiveNotes(rows: Record<string, unknown>[]): Record<string, unknow
   return out.slice(0, 25);
 }
 
+function extractNoteIdsFromEntityRecord(entityRecord: Record<string, unknown> | null): number[] {
+  if (!entityRecord || typeof entityRecord !== "object") return [];
+
+  const out: number[] = [];
+  const seen = new Set<number>();
+
+  const addId = (value: unknown) => {
+    const id = toFiniteNumber(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+
+  const addFromUnknown = (value: unknown) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) addFromUnknown(entry);
+      return;
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      addId(record.id ?? record.noteId ?? record.noteID);
+      if (Array.isArray(record.data)) addFromUnknown(record.data);
+      return;
+    }
+    addId(value);
+  };
+
+  addFromUnknown(entityRecord.notes);
+  addFromUnknown(entityRecord.note);
+  addFromUnknown(entityRecord.comments);
+
+  return out.slice(0, 30);
+}
+
+async function fetchBullhornNotesViaAssociation(
+  restUrl: string,
+  bhRestToken: string,
+  entityName: string,
+  entityId: number,
+): Promise<Record<string, unknown>[]> {
+  for (const selector of NOTE_ENTITY_FIELD_SELECTORS) {
+    let activeFields = selector;
+    const attempted = new Set<string>([activeFields]);
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const notesUrl = `${restUrl}entity/${entityName}/${entityId}/notes?BhRestToken=${encodeURIComponent(
+        bhRestToken,
+      )}&fields=${encodeURIComponent(activeFields)}&count=30&start=0&orderBy=${encodeURIComponent("-dateAdded")}`;
+      const response = await fetch(notesUrl);
+
+      if (response.status === 429) {
+        await new Promise((resolve) => setTimeout(resolve, 500 + attempt * 300));
+        continue;
+      }
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        const invalidFields = parseInvalidFieldNames(body);
+        if (invalidFields.length) {
+          const pruned = removeInvalidFields(activeFields, invalidFields);
+          if (pruned && pruned !== activeFields && !attempted.has(pruned)) {
+            activeFields = pruned;
+            attempted.add(pruned);
+            continue;
+          }
+        }
+        break;
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      const rows = Array.isArray(payload?.data) ? payload.data : [];
+      if (!rows.length) return [];
+      return dedupeLiveNotes(rows.map((row) => normalizeLiveNoteRow(row)));
+    }
+  }
+
+  return [];
+}
+
+async function fetchBullhornNotesByIds(
+  restUrl: string,
+  bhRestToken: string,
+  noteIds: number[],
+): Promise<Record<string, unknown>[]> {
+  const uniqueIds = Array.from(new Set(noteIds.filter((id) => Number.isFinite(id)))).slice(0, 30);
+  if (!uniqueIds.length) return [];
+
+  const results: Record<string, unknown>[] = [];
+  for (const noteId of uniqueIds) {
+    const note = await fetchEntityByIdWithFallback(
+      restUrl,
+      bhRestToken,
+      "Note",
+      noteId,
+      NOTE_ENTITY_FIELD_SELECTORS,
+    );
+    if (!note) continue;
+    results.push(normalizeLiveNoteRow(note));
+  }
+
+  return dedupeLiveNotes(results);
+}
+
 async function fetchBullhornNotesForEntity(
   restUrl: string,
   bhRestToken: string,
   entityName: string,
   entityId: number,
+  entityRecord?: Record<string, unknown> | null,
 ): Promise<Record<string, unknown>[]> {
   const whereCandidates = [
     `targetEntityName='${entityName}' AND targetEntityID=${entityId}`,
@@ -1603,7 +1713,18 @@ async function fetchBullhornNotesForEntity(
     if (results.length) break;
   }
 
-  return dedupeLiveNotes(results);
+  if (results.length) return dedupeLiveNotes(results);
+
+  const viaAssociation = await fetchBullhornNotesViaAssociation(restUrl, bhRestToken, entityName, entityId);
+  if (viaAssociation.length) return viaAssociation;
+
+  const noteIds = extractNoteIdsFromEntityRecord(entityRecord || null);
+  if (noteIds.length) {
+    const viaIds = await fetchBullhornNotesByIds(restUrl, bhRestToken, noteIds);
+    if (viaIds.length) return viaIds;
+  }
+
+  return [];
 }
 
 function normalizeTimelineEventType(source: string, value: unknown, fallbackSummary: unknown): string {
@@ -3067,6 +3188,7 @@ serve(async (req) => {
         tokens.bh_rest_token,
         "ClientContact",
         contactId,
+        contact,
       );
 
       return jsonResponse({
@@ -3137,6 +3259,7 @@ serve(async (req) => {
         tokens.bh_rest_token,
         "ClientCorporation",
         companyId,
+        company,
       );
 
       return jsonResponse({
@@ -3638,19 +3761,16 @@ serve(async (req) => {
       });
     }
 
-    return jsonResponse(
-      {
-        success: false,
-        error: "Unknown action",
-        details: {
-          receivedAction: action || null,
-          bodyAction: typeof parsedBody?.action === "string" ? parsedBody.action : null,
-          nestedAction: typeof data?.action === "string" ? data.action : null,
-          bodyType: typeof rawBody,
-        },
+    return jsonResponse({
+      success: false,
+      error: "Unknown action",
+      details: {
+        receivedAction: action || null,
+        bodyAction: typeof parsedBody?.action === "string" ? parsedBody.action : null,
+        nestedAction: typeof data?.action === "string" ? data.action : null,
+        bodyType: typeof rawBody,
       },
-      400,
-    );
+    }, 400);
   } catch (error: any) {
     console.error("[bullhorn-sync-clientcontacts] Fatal error:", error);
     return jsonResponse({ success: false, error: error?.message || "Unknown error" }, 500);

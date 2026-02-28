@@ -446,6 +446,31 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function isIdOnlyRelationRecord(record: Record<string, unknown>): boolean {
+  const keys = Object.keys(record);
+  const normalizedKeys = keys.map((key) => key.toLowerCase());
+
+  if (keys.length === 1 && normalizedKeys[0] === "id" && toNullableNumber(record.id) !== null) {
+    return true;
+  }
+
+  if ("data" in record && Array.isArray(record.data)) {
+    const hasOnlyRelationMeta = normalizedKeys.every((key) => key === "data" || key === "total" || key === "count");
+    if (!hasOnlyRelationMeta) return false;
+
+    const rows = record.data as unknown[];
+    if (!rows.length) return true;
+    return rows.every((row) => {
+      const item = asRecord(row);
+      if (!item) return false;
+      const itemKeys = Object.keys(item).map((key) => key.toLowerCase());
+      return itemKeys.length === 1 && itemKeys[0] === "id" && toNullableNumber(item.id) !== null;
+    });
+  }
+
+  return false;
+}
+
 function extractTextChunks(value: unknown): string[] {
   if (value === null || value === undefined) return [];
 
@@ -465,10 +490,17 @@ function extractTextChunks(value: unknown): string[] {
 
   const record = asRecord(value);
   if (!record) return [];
+  if (isIdOnlyRelationRecord(record)) return [];
 
   const prioritizedKeys = ["note", "notes", "comment", "comments", "description", "text", "value", "name", "data"];
   const fromKeys = prioritizedKeys.flatMap((key) => (key in record ? extractTextChunks(record[key]) : []));
   if (fromKeys.length) return fromKeys;
+
+  const meaningfulKeys = Object.keys(record).filter((key) => {
+    const normalized = key.toLowerCase();
+    return normalized !== "id" && normalized !== "data" && normalized !== "total" && normalized !== "count";
+  });
+  if (!meaningfulKeys.length) return [];
 
   try {
     return [JSON.stringify(record)];
@@ -614,10 +646,15 @@ function mapLiveNotesToProfileEntries(notes: unknown): ProfileNoteEntry[] {
     .map((entry) => {
       const record = asRecord(entry);
       if (!record) return null;
-      const comments = formatMirrorValue(record.comments);
-      if (comments === "-") return null;
+      const comments = uniqueText(
+        extractTextChunks(
+          record.comments ?? record.comment ?? record.notes ?? record.note ?? record.description,
+        ),
+      )[0];
+      if (!comments) return null;
+      const action = formatMirrorValue(record.action ?? record.type);
       return {
-        label: formatMirrorValue(record.action) !== "-" ? formatMirrorValue(record.action) : "Bullhorn Note",
+        label: action !== "-" ? action : "Bullhorn Note",
         value: comments,
         date: formatMirrorDate(record.dateAdded) === "-" ? null : formatMirrorDate(record.dateAdded),
       } satisfies ProfileNoteEntry;
