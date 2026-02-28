@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
@@ -46,6 +46,42 @@ import { toast } from "sonner";
 const ADMIN_PROFILE = "Nikita Vojevoda";
 const CONTACTS_PAGE_SIZE = 25;
 const CONTACTS_TABLE_COLUMN_COUNT = 13;
+const CRM_QUERY_SEARCH_KEY = "q";
+const CRM_QUERY_SORT_KEY = "sort";
+const CRM_QUERY_DIRECTION_KEY = "dir";
+const CRM_QUERY_FILTERS_KEY = "filters";
+const CONTACT_SORT_KEYS: ContactSortKey[] = [
+  "id",
+  "name",
+  "jobTitle",
+  "company",
+  "workEmail",
+  "status",
+  "workPhone",
+  "consultant",
+  "address",
+  "lastNote",
+  "dateAdded",
+  "dateLastModified",
+  "skills",
+];
+const CONTACT_FILTER_FIELDS: BullhornContactFilterField[] = [
+  "name",
+  "company",
+  "title",
+  "email",
+  "city",
+  "country",
+  "consultant",
+  "status",
+  "skills",
+  "preferred_contact",
+  "comm_status",
+  "last_contacted",
+  "has_resume",
+  "mass_mail_opt_out",
+];
+const CONTACT_FILTER_OPERATORS: BullhornContactFilterOperator[] = ["contains", "equals"];
 const SKILLS_CANDIDATE_KEYS = [
   "skills",
   "skill",
@@ -257,6 +293,13 @@ type ContactFilterDraftRow = {
   valueInput: string;
 };
 
+type CrmQueryState = {
+  search: string;
+  sortKey: ContactSortKey;
+  sortDirection: ContactSortDirection;
+  filters: BullhornContactFilterRow[];
+};
+
 const FILTER_FIELD_OPTIONS: Array<{ value: BullhornContactFilterField; label: string }> = [
   { value: "name", label: "Name" },
   { value: "company", label: "Company" },
@@ -291,6 +334,15 @@ function createFilterDraftRow(): ContactFilterDraftRow {
   };
 }
 
+function createFilterDraftRowsFromApplied(rows: BullhornContactFilterRow[]): ContactFilterDraftRow[] {
+  return rows.map((row) => ({
+    ...createFilterDraftRow(),
+    field: row.field,
+    operator: row.operator,
+    valueInput: row.values.join(", "),
+  }));
+}
+
 function buildAppliedFilters(rows: ContactFilterDraftRow[]): BullhornContactFilterRow[] {
   return rows
     .map((row) => ({
@@ -302,6 +354,69 @@ function buildAppliedFilters(rows: ContactFilterDraftRow[]): BullhornContactFilt
         .filter(Boolean),
     }))
     .filter((row) => row.values.length > 0);
+}
+
+function parseFilterRowsParam(rawValue: string | null): BullhornContactFilterRow[] {
+  if (!rawValue) return [];
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+
+    const fieldSet = new Set<string>(CONTACT_FILTER_FIELDS);
+    const operatorSet = new Set<string>(CONTACT_FILTER_OPERATORS);
+
+    const normalized = parsed
+      .map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+        const record = item as Record<string, unknown>;
+        const field = String(record.field || "").trim() as BullhornContactFilterField;
+        const operator = String(record.operator || "").trim() as BullhornContactFilterOperator;
+        if (!fieldSet.has(field)) return null;
+        if (!operatorSet.has(operator)) return null;
+        const values = Array.isArray(record.values)
+          ? record.values
+              .map((value) => String(value || "").trim())
+              .filter(Boolean)
+              .slice(0, 25)
+          : [];
+        if (!values.length) return null;
+        return { field, operator, values } satisfies BullhornContactFilterRow;
+      })
+      .filter((row): row is BullhornContactFilterRow => Boolean(row));
+
+    return normalized.slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function serializeFilterRowsParam(rows: BullhornContactFilterRow[]): string {
+  if (!rows.length) return "";
+  return JSON.stringify(
+    rows.map((row) => ({
+      field: row.field,
+      operator: row.operator,
+      values: row.values.map((value) => String(value || "").trim()).filter(Boolean),
+    })),
+  );
+}
+
+function parseCrmQueryState(params: URLSearchParams): CrmQueryState {
+  const search = String(params.get(CRM_QUERY_SEARCH_KEY) || "").trim();
+  const sortKeyCandidate = String(params.get(CRM_QUERY_SORT_KEY) || "").trim() as ContactSortKey;
+  const sortDirectionCandidate = String(params.get(CRM_QUERY_DIRECTION_KEY) || "").trim() as ContactSortDirection;
+  const sortKey = CONTACT_SORT_KEYS.includes(sortKeyCandidate) ? sortKeyCandidate : "id";
+  const sortDirection = sortDirectionCandidate === "asc" || sortDirectionCandidate === "desc"
+    ? sortDirectionCandidate
+    : "desc";
+  const filters = parseFilterRowsParam(params.get(CRM_QUERY_FILTERS_KEY));
+
+  return {
+    search,
+    sortKey,
+    sortDirection,
+    filters,
+  };
 }
 
 function toDateMillis(value: unknown): number | null {
@@ -708,6 +823,12 @@ function toNullableDisplay(value: unknown): string | null {
 export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdminProps) {
   const profileName = useProfileName();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialCrmQueryState = useMemo(
+    () => parseCrmQueryState(new URLSearchParams(location.search)),
+    [location.search],
+  );
   const [syncJobs, setSyncJobs] = useState<BullhornSyncJob[]>([]);
   const [syncJobLoading, setSyncJobLoading] = useState(false);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
@@ -718,10 +839,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [contactsOffset, setContactsOffset] = useState(0);
   const [hasMoreContacts, setHasMoreContacts] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [contactsSearchDraft, setContactsSearchDraft] = useState("");
-  const [contactsSearch, setContactsSearch] = useState("");
-  const [filterRows, setFilterRows] = useState<ContactFilterDraftRow[]>([]);
-  const [appliedFilters, setAppliedFilters] = useState<BullhornContactFilterRow[]>([]);
+  const [contactsSearchDraft, setContactsSearchDraft] = useState(() => initialCrmQueryState.search);
+  const [contactsSearch, setContactsSearch] = useState(() => initialCrmQueryState.search);
+  const [filterRows, setFilterRows] = useState<ContactFilterDraftRow[]>(() =>
+    initialCrmQueryState.filters.length ? createFilterDraftRowsFromApplied(initialCrmQueryState.filters) : [],
+  );
+  const [appliedFilters, setAppliedFilters] = useState<BullhornContactFilterRow[]>(() =>
+    initialCrmQueryState.filters,
+  );
   const [isFiltersDialogOpen, setIsFiltersDialogOpen] = useState(false);
   const [distributionLists, setDistributionLists] = useState<DistributionListSummary[]>([]);
   const [distributionListsLoading, setDistributionListsLoading] = useState(false);
@@ -729,8 +854,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [targetDistributionListId, setTargetDistributionListId] = useState("");
   const [newDistributionListName, setNewDistributionListName] = useState("");
   const [addToListLoading, setAddToListLoading] = useState(false);
-  const [sortKey, setSortKey] = useState<ContactSortKey>("id");
-  const [sortDirection, setSortDirection] = useState<ContactSortDirection>("desc");
+  const [sortKey, setSortKey] = useState<ContactSortKey>(() => initialCrmQueryState.sortKey);
+  const [sortDirection, setSortDirection] = useState<ContactSortDirection>(() => initialCrmQueryState.sortDirection);
   const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
   const [selectedContactProfile, setSelectedContactProfile] = useState<ContactDisplayRow | null>(null);
   const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<ContactDisplayRow | null>(null);
@@ -749,6 +874,52 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const contactDetailRequestIdRef = useRef(0);
   const companyDetailRequestIdRef = useRef(0);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
+  const isApplyingUrlStateRef = useRef(false);
+
+  useEffect(() => {
+    isApplyingUrlStateRef.current = true;
+    const parsed = parseCrmQueryState(new URLSearchParams(location.search));
+    const nextFiltersSerialized = serializeFilterRowsParam(parsed.filters);
+    const currentFiltersSerialized = serializeFilterRowsParam(appliedFilters);
+
+    if (contactsSearchDraft !== parsed.search) setContactsSearchDraft(parsed.search);
+    if (contactsSearch !== parsed.search) setContactsSearch(parsed.search);
+    if (sortKey !== parsed.sortKey) setSortKey(parsed.sortKey);
+    if (sortDirection !== parsed.sortDirection) setSortDirection(parsed.sortDirection);
+
+    if (currentFiltersSerialized !== nextFiltersSerialized) {
+      setAppliedFilters(parsed.filters);
+      setFilterRows(parsed.filters.length ? createFilterDraftRowsFromApplied(parsed.filters) : []);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (isApplyingUrlStateRef.current) {
+      isApplyingUrlStateRef.current = false;
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    const searchValue = contactsSearch.trim();
+    if (searchValue) nextParams.set(CRM_QUERY_SEARCH_KEY, searchValue);
+    else nextParams.delete(CRM_QUERY_SEARCH_KEY);
+
+    if (sortKey !== "id") nextParams.set(CRM_QUERY_SORT_KEY, sortKey);
+    else nextParams.delete(CRM_QUERY_SORT_KEY);
+
+    if (sortDirection !== "desc") nextParams.set(CRM_QUERY_DIRECTION_KEY, sortDirection);
+    else nextParams.delete(CRM_QUERY_DIRECTION_KEY);
+
+    const serializedFilters = serializeFilterRowsParam(appliedFilters);
+    if (serializedFilters) nextParams.set(CRM_QUERY_FILTERS_KEY, serializedFilters);
+    else nextParams.delete(CRM_QUERY_FILTERS_KEY);
+
+    const currentString = searchParams.toString();
+    const nextString = nextParams.toString();
+    if (currentString !== nextString) {
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [contactsSearch, sortKey, sortDirection, appliedFilters, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
