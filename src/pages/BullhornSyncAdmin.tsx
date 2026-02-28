@@ -50,6 +50,8 @@ const CRM_QUERY_SEARCH_KEY = "q";
 const CRM_QUERY_SORT_KEY = "sort";
 const CRM_QUERY_DIRECTION_KEY = "dir";
 const CRM_QUERY_FILTERS_KEY = "filters";
+const CRM_QUERY_CONTACT_ID_KEY = "contact";
+const CRM_QUERY_CONTACT_TAB_KEY = "contactTab";
 const CONTACT_SORT_KEYS: ContactSortKey[] = [
   "id",
   "name",
@@ -242,6 +244,7 @@ type ContactSortKey =
   | "skills";
 
 type ContactSortDirection = "asc" | "desc";
+type ContactProfileTab = "overview" | "timeline" | "notes" | "documents" | "raw";
 
 type ContactDisplayRow = {
   contact: BullhornMirrorContact;
@@ -299,6 +302,8 @@ type CrmQueryState = {
   sortDirection: ContactSortDirection;
   filters: BullhornContactFilterRow[];
 };
+
+const CONTACT_PROFILE_TABS: ContactProfileTab[] = ["overview", "timeline", "notes", "documents", "raw"];
 
 const FILTER_FIELD_OPTIONS: Array<{ value: BullhornContactFilterField; label: string }> = [
   { value: "name", label: "Name" },
@@ -417,6 +422,17 @@ function parseCrmQueryState(params: URLSearchParams): CrmQueryState {
     sortDirection,
     filters,
   };
+}
+
+function parseContactIdParam(value: string | null): number | null {
+  const parsed = Number(value || "");
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+function normalizeContactProfileTab(value: string | null): ContactProfileTab {
+  const candidate = String(value || "").trim() as ContactProfileTab;
+  return CONTACT_PROFILE_TABS.includes(candidate) ? candidate : "overview";
 }
 
 function toDateMillis(value: unknown): number | null {
@@ -858,6 +874,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [sortDirection, setSortDirection] = useState<ContactSortDirection>(() => initialCrmQueryState.sortDirection);
   const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
   const [selectedContactProfile, setSelectedContactProfile] = useState<ContactDisplayRow | null>(null);
+  const [contactActiveTab, setContactActiveTab] = useState<ContactProfileTab>("overview");
+  const [urlContactId, setUrlContactId] = useState<number | null>(null);
   const [selectedCompanyProfile, setSelectedCompanyProfile] = useState<ContactDisplayRow | null>(null);
   const [liveContactDetail, setLiveContactDetail] = useState<BullhornLiveContactDetail | null>(null);
   const [liveCompanyDetail, setLiveCompanyDetail] = useState<BullhornLiveCompanyDetail | null>(null);
@@ -878,14 +896,19 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
   useEffect(() => {
     isApplyingUrlStateRef.current = true;
-    const parsed = parseCrmQueryState(new URLSearchParams(location.search));
+    const params = new URLSearchParams(location.search);
+    const parsed = parseCrmQueryState(params);
     const nextFiltersSerialized = serializeFilterRowsParam(parsed.filters);
     const currentFiltersSerialized = serializeFilterRowsParam(appliedFilters);
+    const nextUrlContactId = parseContactIdParam(params.get(CRM_QUERY_CONTACT_ID_KEY));
+    const nextContactTab = normalizeContactProfileTab(params.get(CRM_QUERY_CONTACT_TAB_KEY));
 
     if (contactsSearchDraft !== parsed.search) setContactsSearchDraft(parsed.search);
     if (contactsSearch !== parsed.search) setContactsSearch(parsed.search);
     if (sortKey !== parsed.sortKey) setSortKey(parsed.sortKey);
     if (sortDirection !== parsed.sortDirection) setSortDirection(parsed.sortDirection);
+    if (contactActiveTab !== nextContactTab) setContactActiveTab(nextContactTab);
+    if (urlContactId !== nextUrlContactId) setUrlContactId(nextUrlContactId);
 
     if (currentFiltersSerialized !== nextFiltersSerialized) {
       setAppliedFilters(parsed.filters);
@@ -914,12 +937,23 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     if (serializedFilters) nextParams.set(CRM_QUERY_FILTERS_KEY, serializedFilters);
     else nextParams.delete(CRM_QUERY_FILTERS_KEY);
 
+    const selectedContactId = selectedContactProfile?.contact.bullhorn_id ?? null;
+    const effectiveContactId = selectedContactId ?? urlContactId;
+    if (effectiveContactId) nextParams.set(CRM_QUERY_CONTACT_ID_KEY, String(effectiveContactId));
+    else nextParams.delete(CRM_QUERY_CONTACT_ID_KEY);
+
+    if (effectiveContactId && contactActiveTab !== "overview") {
+      nextParams.set(CRM_QUERY_CONTACT_TAB_KEY, contactActiveTab);
+    } else {
+      nextParams.delete(CRM_QUERY_CONTACT_TAB_KEY);
+    }
+
     const currentString = searchParams.toString();
     const nextString = nextParams.toString();
     if (currentString !== nextString) {
       setSearchParams(nextParams, { replace: true });
     }
-  }, [contactsSearch, sortKey, sortDirection, appliedFilters, searchParams, setSearchParams]);
+  }, [contactsSearch, sortKey, sortDirection, appliedFilters, selectedContactProfile, urlContactId, contactActiveTab, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -1420,10 +1454,28 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }));
   }, [allContactRowsById, liveCompanyDetail?.contacts, selectedCompanyData]);
 
-  const openContactProfile = useCallback(async (row: ContactDisplayRow) => {
+  const resetSelectedContactProfile = useCallback(() => {
+    setSelectedContactProfile(null);
+    setUrlContactId(null);
+    setLiveContactDetail(null);
+    setContactTimeline([]);
+    setContactDocuments([]);
+    setContactCommsStatus(null);
+    setContactDetailLoading(false);
+    setContactTimelineLoading(false);
+    setContactDocumentsLoading(false);
+    setContactCommsLoading(false);
+    setContactActiveTab("overview");
+  }, []);
+
+  const openContactProfile = useCallback(async (
+    row: ContactDisplayRow,
+    options?: { preserveActiveTab?: boolean },
+  ) => {
     const requestId = contactDetailRequestIdRef.current + 1;
     contactDetailRequestIdRef.current = requestId;
     setSelectedCompanyProfile(null);
+    if (!options?.preserveActiveTab) setContactActiveTab("overview");
     setSelectedContactProfile(row);
     setLiveContactDetail(null);
     setContactTimeline([]);
@@ -1515,7 +1567,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const openCompanyProfile = useCallback(async (row: ContactDisplayRow) => {
     const requestId = companyDetailRequestIdRef.current + 1;
     companyDetailRequestIdRef.current = requestId;
-    setSelectedContactProfile(null);
+    resetSelectedContactProfile();
     setSelectedCompanyProfile(row);
     setLiveCompanyDetail(null);
     if (!liveDetailApiSupported) {
@@ -1544,7 +1596,21 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       }
     }
     setCompanyDetailLoading(false);
-  }, [liveDetailApiSupported]);
+  }, [liveDetailApiSupported, resetSelectedContactProfile]);
+
+  useEffect(() => {
+    if (!urlContactId) {
+      if (selectedContactProfile) {
+        resetSelectedContactProfile();
+      }
+      return;
+    }
+
+    if (selectedContactProfile?.contact.bullhorn_id === urlContactId) return;
+    const row = allContactRowsById.get(urlContactId);
+    if (!row) return;
+    void openContactProfile(row, { preserveActiveTab: true });
+  }, [urlContactId, allContactRowsById, openContactProfile, selectedContactProfile, resetSelectedContactProfile]);
 
   const visibleContactIds = useMemo(
     () => displayedContacts.map(({ contact }) => contact.bullhorn_id),
@@ -2305,15 +2371,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         open={Boolean(selectedContactProfile)}
         onOpenChange={(open) => {
           if (!open) {
-            setSelectedContactProfile(null);
-            setLiveContactDetail(null);
-            setContactTimeline([]);
-            setContactDocuments([]);
-            setContactCommsStatus(null);
-            setContactDetailLoading(false);
-            setContactTimelineLoading(false);
-            setContactDocumentsLoading(false);
-            setContactCommsLoading(false);
+            resetSelectedContactProfile();
           }
         }}
       >
@@ -2329,7 +2387,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </SheetHeader>
 
               <div className="flex-1 overflow-y-auto px-6 py-4">
-                <Tabs defaultValue="overview" className="w-full">
+                <Tabs value={contactActiveTab} onValueChange={(value) => setContactActiveTab(value as ContactProfileTab)} className="w-full">
                   <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger value="timeline">Timeline</TabsTrigger>
