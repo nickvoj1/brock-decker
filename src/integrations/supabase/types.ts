@@ -49,25 +49,40 @@ export type Database = {
           bullhorn_id: number
           client_corporation_id: number | null
           client_corporation_name: string | null
+          comm_status_label: string | null
           created_at: string
+          custom_field_summary: Json
           date_added: string | null
           date_last_modified: string | null
+          do_not_contact: boolean | null
+          documents_count: number
           email: string | null
+          email_bounced: boolean | null
           email_normalized: string | null
           first_name: string | null
+          has_resume: boolean
           is_deleted: boolean
+          last_contacted_at: string | null
+          last_email_received_at: string | null
+          last_email_sent_at: string | null
           last_name: string | null
           last_synced_job_id: string | null
+          linkedin_url: string | null
+          mass_mail_opt_out: boolean | null
           mobile: string | null
           name: string | null
           occupation: string | null
           owner_id: number | null
           owner_name: string | null
           phone: string | null
+          preferred_contact: string | null
           raw: Json
+          sms_opt_in: boolean | null
           status: string | null
           synced_at: string
+          timeline_event_count: number
           updated_at: string
+          work_phone_secondary: string | null
         }
         Insert: {
           address_city?: string | null
@@ -76,25 +91,40 @@ export type Database = {
           bullhorn_id: number
           client_corporation_id?: number | null
           client_corporation_name?: string | null
+          comm_status_label?: string | null
           created_at?: string
+          custom_field_summary?: Json
           date_added?: string | null
           date_last_modified?: string | null
+          do_not_contact?: boolean | null
+          documents_count?: number
           email?: string | null
+          email_bounced?: boolean | null
           email_normalized?: string | null
           first_name?: string | null
+          has_resume?: boolean
           is_deleted?: boolean
+          last_contacted_at?: string | null
+          last_email_received_at?: string | null
+          last_email_sent_at?: string | null
           last_name?: string | null
           last_synced_job_id?: string | null
+          linkedin_url?: string | null
+          mass_mail_opt_out?: boolean | null
           mobile?: string | null
           name?: string | null
           occupation?: string | null
           owner_id?: number | null
           owner_name?: string | null
           phone?: string | null
+          preferred_contact?: string | null
           raw?: Json
+          sms_opt_in?: boolean | null
           status?: string | null
           synced_at?: string
+          timeline_event_count?: number
           updated_at?: string
+          work_phone_secondary?: string | null
         }
         Update: {
           address_city?: string | null
@@ -103,29 +133,307 @@ export type Database = {
           bullhorn_id?: number
           client_corporation_id?: number | null
           client_corporation_name?: string | null
+          comm_status_label?: string | null
           created_at?: string
+          custom_field_summary?: Json
           date_added?: string | null
           date_last_modified?: string | null
+          do_not_contact?: boolean | null
+          documents_count?: number
           email?: string | null
+          email_bounced?: boolean | null
           email_normalized?: string | null
           first_name?: string | null
+          has_resume?: boolean
           is_deleted?: boolean
+          last_contacted_at?: string | null
+          last_email_received_at?: string | null
+          last_email_sent_at?: string | null
           last_name?: string | null
           last_synced_job_id?: string | null
+          linkedin_url?: string | null
+          mass_mail_opt_out?: boolean | null
           mobile?: string | null
           name?: string | null
           occupation?: string | null
           owner_id?: number | null
           owner_name?: string | null
           phone?: string | null
+          preferred_contact?: string | null
           raw?: Json
+          sms_opt_in?: boolean | null
           status?: string | null
+          synced_at?: string
+          timeline_event_count?: number
+          updated_at?: string
+          work_phone_secondary?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_client_contacts_mirror_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bullhorn_contact_comms_status: {
+        Row: {
+          bullhorn_contact_id: number
+          created_at: string
+          do_not_contact: boolean | null
+          email_bounced: boolean | null
+          email_primary: string | null
+          email_secondary: string | null
+          last_call_at: string | null
+          last_contacted_at: string | null
+          last_email_received_at: string | null
+          last_email_sent_at: string | null
+          last_note_at: string | null
+          last_synced_job_id: string | null
+          last_task_at: string | null
+          mass_mail_opt_out: boolean | null
+          preferred_contact: string | null
+          raw: Json
+          sms_opt_in: boolean | null
+          status_label: string | null
+          updated_at: string
+        }
+        Insert: {
+          bullhorn_contact_id: number
+          created_at?: string
+          do_not_contact?: boolean | null
+          email_bounced?: boolean | null
+          email_primary?: string | null
+          email_secondary?: string | null
+          last_call_at?: string | null
+          last_contacted_at?: string | null
+          last_email_received_at?: string | null
+          last_email_sent_at?: string | null
+          last_note_at?: string | null
+          last_synced_job_id?: string | null
+          last_task_at?: string | null
+          mass_mail_opt_out?: boolean | null
+          preferred_contact?: string | null
+          raw?: Json
+          sms_opt_in?: boolean | null
+          status_label?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bullhorn_contact_id?: number
+          created_at?: string
+          do_not_contact?: boolean | null
+          email_bounced?: boolean | null
+          email_primary?: string | null
+          email_secondary?: string | null
+          last_call_at?: string | null
+          last_contacted_at?: string | null
+          last_email_received_at?: string | null
+          last_email_sent_at?: string | null
+          last_note_at?: string | null
+          last_synced_job_id?: string | null
+          last_task_at?: string | null
+          mass_mail_opt_out?: boolean | null
+          preferred_contact?: string | null
+          raw?: Json
+          sms_opt_in?: boolean | null
+          status_label?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_contact_comms_status_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bullhorn_contact_documents: {
+        Row: {
+          bullhorn_contact_id: number
+          bullhorn_file_id: number | null
+          content_type: string | null
+          created_at: string
+          date_added: string | null
+          date_last_modified: string | null
+          external_key: string
+          file_name: string | null
+          file_size: number | null
+          file_type: string | null
+          id: number
+          is_deleted: boolean
+          is_resume: boolean
+          last_synced_job_id: string | null
+          payload: Json
+          updated_at: string
+        }
+        Insert: {
+          bullhorn_contact_id: number
+          bullhorn_file_id?: number | null
+          content_type?: string | null
+          created_at?: string
+          date_added?: string | null
+          date_last_modified?: string | null
+          external_key: string
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          id?: number
+          is_deleted?: boolean
+          is_resume?: boolean
+          last_synced_job_id?: string | null
+          payload?: Json
+          updated_at?: string
+        }
+        Update: {
+          bullhorn_contact_id?: number
+          bullhorn_file_id?: number | null
+          content_type?: string | null
+          created_at?: string
+          date_added?: string | null
+          date_last_modified?: string | null
+          external_key?: string
+          file_name?: string | null
+          file_size?: number | null
+          file_type?: string | null
+          id?: number
+          is_deleted?: boolean
+          is_resume?: boolean
+          last_synced_job_id?: string | null
+          payload?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_contact_documents_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bullhorn_contact_timeline_events: {
+        Row: {
+          actor_name: string | null
+          bullhorn_contact_id: number
+          created_at: string
+          details: string | null
+          entity_id: number | null
+          entity_name: string | null
+          event_at: string | null
+          event_source: string
+          event_type: string
+          external_key: string
+          id: number
+          last_synced_job_id: string | null
+          payload: Json
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          actor_name?: string | null
+          bullhorn_contact_id: number
+          created_at?: string
+          details?: string | null
+          entity_id?: number | null
+          entity_name?: string | null
+          event_at?: string | null
+          event_source: string
+          event_type: string
+          external_key: string
+          id?: number
+          last_synced_job_id?: string | null
+          payload?: Json
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          actor_name?: string | null
+          bullhorn_contact_id?: number
+          created_at?: string
+          details?: string | null
+          entity_id?: number | null
+          entity_name?: string | null
+          event_at?: string | null
+          event_source?: string
+          event_type?: string
+          external_key?: string
+          id?: number
+          last_synced_job_id?: string | null
+          payload?: Json
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_contact_timeline_events_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bullhorn_custom_field_dictionary: {
+        Row: {
+          created_at: string
+          data_type: string | null
+          entity_name: string
+          field_label: string | null
+          field_name: string
+          field_type: string | null
+          hidden: boolean | null
+          id: number
+          is_custom: boolean
+          last_synced_job_id: string | null
+          options: Json
+          raw: Json
+          required: boolean | null
+          synced_at: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          data_type?: string | null
+          entity_name: string
+          field_label?: string | null
+          field_name: string
+          field_type?: string | null
+          hidden?: boolean | null
+          id?: number
+          is_custom?: boolean
+          last_synced_job_id?: string | null
+          options?: Json
+          raw?: Json
+          required?: boolean | null
+          synced_at?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          data_type?: string | null
+          entity_name?: string
+          field_label?: string | null
+          field_name?: string
+          field_type?: string | null
+          hidden?: boolean | null
+          id?: number
+          is_custom?: boolean
+          last_synced_job_id?: string | null
+          options?: Json
+          raw?: Json
+          required?: boolean | null
           synced_at?: string
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "bullhorn_client_contacts_mirror_last_synced_job_id_fkey"
+            foreignKeyName: "bullhorn_custom_field_dictionary_last_synced_job_id_fkey"
             columns: ["last_synced_job_id"]
             isOneToOne: false
             referencedRelation: "bullhorn_sync_jobs"
