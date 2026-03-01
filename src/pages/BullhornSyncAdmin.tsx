@@ -387,7 +387,7 @@ function parseFilterRowsParam(rawValue: string | null): BullhornContactFilterRow
         if (!values.length) return null;
         return { field, operator, values } satisfies BullhornContactFilterRow;
       })
-      .filter((row): row is BullhornContactFilterRow => Boolean(row));
+      .filter((row): row is NonNullable<typeof row> => Boolean(row)) as BullhornContactFilterRow[];
 
     return normalized.slice(0, 20);
   } catch {
