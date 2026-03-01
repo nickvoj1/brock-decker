@@ -20,6 +20,34 @@ export interface BullhornSyncJob {
   metadata: Record<string, unknown> | null;
 }
 
+export interface BullhornSyncSettings {
+  id: string;
+  enabled: boolean;
+  target_hour_utc: number;
+  target_minute_utc: number;
+  min_interval_hours: number;
+  max_lag_hours: number;
+  include_deleted: boolean;
+  batch_size: number;
+  max_batches_per_invocation: number;
+  last_scheduled_run_at: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface BullhornSyncHealth {
+  settings: BullhornSyncSettings;
+  activeJob: BullhornSyncJob | null;
+  latestCompletedJob: BullhornSyncJob | null;
+  latestMirrorSyncedAt: string | null;
+  lagHours: number | null;
+  lagMinutes: number | null;
+  lagStatus: "ok" | "warning" | "critical" | "running" | "never_synced";
+  nextScheduledRunAt: string | null;
+  dueNow: boolean;
+  dueReason: string;
+  checkedAt: string;
+}
+
 export interface BullhornMirrorContact {
   bullhorn_id: number;
   name: string | null;
@@ -248,6 +276,36 @@ export async function startBullhornClientContactSync(
   return callBullhornSync<BullhornSyncJob>("start-sync", profileName, options);
 }
 
+export async function getBullhornSyncHealth(profileName: string) {
+  return callBullhornSync<BullhornSyncHealth>("get-sync-health", profileName);
+}
+
+export async function upsertBullhornSyncSettings(
+  profileName: string,
+  options: {
+    enabled?: boolean;
+    targetHourUtc?: number;
+    targetMinuteUtc?: number;
+    minIntervalHours?: number;
+    maxLagHours?: number;
+    includeDeleted?: boolean;
+    batchSize?: number;
+    maxBatchesPerInvocation?: number;
+    metadata?: Record<string, unknown>;
+  } = {},
+) {
+  return callBullhornSync<BullhornSyncSettings>("upsert-sync-settings", profileName, options);
+}
+
+export async function runBullhornScheduledSync(profileName: string) {
+  return callBullhornSync<BullhornSyncJob | {
+    skipped: true;
+    reason: string;
+    activeJob: BullhornSyncJob | null;
+    latestCompletedJob: BullhornSyncJob | null;
+  }>("run-scheduled-sync", profileName);
+}
+
 export async function getBullhornSyncJob(profileName: string, jobId: string) {
   return callBullhornSync<BullhornSyncJob>("get-sync-job", profileName, { jobId });
 }
@@ -414,4 +472,38 @@ export async function removeContactsFromDistributionList(
     skipped: number;
     totalInList: number;
   }>("remove-contacts-from-distribution-list", profileName, { listId, contactIds });
+}
+
+export async function createBullhornLocalContactNote(
+  profileName: string,
+  contactId: number,
+  noteText: string,
+  options: {
+    noteLabel?: string;
+  } = {},
+) {
+  return callBullhornSync<Record<string, unknown>>("create-local-contact-note", profileName, {
+    contactId,
+    noteText,
+    ...options,
+  });
+}
+
+export async function updateBullhornLocalContactStatus(
+  profileName: string,
+  contactId: number,
+  options: {
+    status?: string | null;
+    commStatusLabel?: string | null;
+    preferredContact?: string | null;
+    doNotContact?: boolean | null;
+    massMailOptOut?: boolean | null;
+    smsOptIn?: boolean | null;
+    emailBounced?: boolean | null;
+  },
+) {
+  return callBullhornSync<BullhornMirrorContact>("update-local-contact-status", profileName, {
+    contactId,
+    ...options,
+  });
 }

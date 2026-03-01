@@ -6,6 +6,7 @@ import {
   BullhornContactCommsStatus,
   BullhornContactDocument,
   DistributionListSummary,
+  BullhornSyncHealth,
   BullhornTimelineEvent,
   addContactsToDistributionList,
   BullhornContactFilterField,
@@ -16,16 +17,20 @@ import {
   BullhornMirrorContact,
   BullhornSyncJob,
   createDistributionList,
+  createBullhornLocalContactNote,
   getBullhornContactCommsStatus,
   getBullhornContactDocuments,
   getBullhornContactTimeline,
   getBullhornLiveCompanyDetail,
   getBullhornLiveContactDetail,
   getBullhornMirrorStats,
+  getBullhornSyncHealth,
   listDistributionLists,
   listBullhornMirrorContacts,
   listBullhornSyncJobs,
+  runBullhornScheduledSync,
   startBullhornClientContactSync,
+  updateBullhornLocalContactStatus,
 } from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +40,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -277,6 +283,16 @@ type ProfileNoteEntry = {
   date: string | null;
 };
 
+type LocalContactStatusDraft = {
+  status: string;
+  commStatusLabel: string;
+  preferredContact: string;
+  doNotContact: boolean;
+  massMailOptOut: boolean;
+  smsOptIn: boolean;
+  emailBounced: boolean;
+};
+
 type CompanyProfileData = {
   id: number | null;
   name: string;
@@ -457,6 +473,15 @@ function formatDateTime(value: unknown): string {
   const date = new Date(String(value));
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
+}
+
+function formatLagLabel(health: BullhornSyncHealth | null): string {
+  if (!health) return "Lag: -";
+  if (health.lagStatus === "running") return "Lag: syncing";
+  if (health.lagStatus === "never_synced") return "Lag: never";
+  if (health.lagHours === null || !Number.isFinite(health.lagHours)) return "Lag: -";
+  if (health.lagHours < 1) return `Lag: ${Math.max(1, Math.round(health.lagHours * 60))}m`;
+  return `Lag: ${health.lagHours.toFixed(1)}h`;
 }
 
 function normalizeSortableText(value: string): string {
@@ -848,7 +873,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [syncJobs, setSyncJobs] = useState<BullhornSyncJob[]>([]);
   const [syncJobLoading, setSyncJobLoading] = useState(false);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
+  const [scheduledSyncActionLoading, setScheduledSyncActionLoading] = useState(false);
   const [mirrorCount, setMirrorCount] = useState(0);
+  const [syncHealth, setSyncHealth] = useState<BullhornSyncHealth | null>(null);
   const [contacts, setContacts] = useState<BullhornMirrorContact[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
   const [contactsLoading, setContactsLoading] = useState(false);
@@ -887,6 +914,18 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [contactCommsLoading, setContactCommsLoading] = useState(false);
   const [contactDetailLoading, setContactDetailLoading] = useState(false);
   const [companyDetailLoading, setCompanyDetailLoading] = useState(false);
+  const [localNoteDraft, setLocalNoteDraft] = useState("");
+  const [localNoteSaving, setLocalNoteSaving] = useState(false);
+  const [localStatusSaving, setLocalStatusSaving] = useState(false);
+  const [localStatusDraft, setLocalStatusDraft] = useState<LocalContactStatusDraft>({
+    status: "",
+    commStatusLabel: "",
+    preferredContact: "",
+    doNotContact: false,
+    massMailOptOut: false,
+    smsOptIn: false,
+    emailBounced: false,
+  });
   const [liveDetailApiSupported, setLiveDetailApiSupported] = useState(true);
   const [parityApiSupported, setParityApiSupported] = useState(true);
   const contactDetailRequestIdRef = useRef(0);
@@ -961,8 +1000,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       navigate("/");
       return;
     }
-    if (profileName === ADMIN_PROFILE && !tableOnly) {
-      loadBullhornSyncData();
+    if (profileName === ADMIN_PROFILE) {
+      void loadBullhornSyncData({ silent: tableOnly });
     }
   }, [profileName, navigate, tableOnly]);
 
@@ -986,6 +1025,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
         listBullhornSyncJobs(ADMIN_PROFILE, 10),
         getBullhornMirrorStats(ADMIN_PROFILE),
       ]);
+      const healthResult = await getBullhornSyncHealth(ADMIN_PROFILE);
 
       if (jobsResult.success && Array.isArray(jobsResult.data)) {
         setSyncJobs(jobsResult.data);
@@ -993,6 +1033,10 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
       if (statsResult.success && statsResult.data) {
         setMirrorCount(statsResult.data.totalMirroredContacts || 0);
+      }
+
+      if (healthResult.success && healthResult.data) {
+        setSyncHealth(healthResult.data);
       }
     } catch (err) {
       console.error("Failed to load Bullhorn contact sync state", err);
@@ -1157,6 +1201,32 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
   };
 
+  const runScheduledSyncNow = async () => {
+    setScheduledSyncActionLoading(true);
+    try {
+      const result = await runBullhornScheduledSync(ADMIN_PROFILE);
+      if (!result.success) {
+        toast.error(result.error || "Failed to run scheduled sync check");
+        return;
+      }
+
+      if (result.data && typeof result.data === "object" && "skipped" in result.data && result.data.skipped) {
+        toast.info(`Scheduled sync skipped: ${result.data.reason}`);
+      } else {
+        toast.success(result.message || "Scheduled sync started");
+      }
+
+      await Promise.all([
+        loadBullhornSyncData({ silent: true }),
+        loadBullhornMirrorContacts({ silent: true, reset: true }),
+      ]);
+    } catch {
+      toast.error("Failed to run scheduled sync check");
+    } finally {
+      setScheduledSyncActionLoading(false);
+    }
+  };
+
   const latestSyncJob = syncJobs[0] || null;
   const activeSyncJob = syncJobs.find((job) => job.status === "queued" || job.status === "running") || null;
   const latestExpectedTotal = getExpectedTotal(latestSyncJob);
@@ -1175,6 +1245,22 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       case "running":
       case "queued":
         return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+      default:
+        return "bg-muted text-muted-foreground";
+    }
+  };
+  const getLagStatusColor = (status: BullhornSyncHealth["lagStatus"] | null | undefined) => {
+    switch (status) {
+      case "ok":
+        return "bg-green-500/10 text-green-700 border-green-500/30";
+      case "warning":
+        return "bg-amber-500/10 text-amber-700 border-amber-500/30";
+      case "critical":
+        return "bg-red-500/10 text-red-700 border-red-500/30";
+      case "running":
+        return "bg-blue-500/10 text-blue-700 border-blue-500/30";
+      case "never_synced":
+        return "bg-zinc-500/10 text-zinc-700 border-zinc-500/30";
       default:
         return "bg-muted text-muted-foreground";
     }
@@ -1454,6 +1540,35 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }));
   }, [allContactRowsById, liveCompanyDetail?.contacts, selectedCompanyData]);
 
+  useEffect(() => {
+    if (!selectedContactProfile) {
+      setLocalNoteDraft("");
+      setLocalStatusDraft({
+        status: "",
+        commStatusLabel: "",
+        preferredContact: "",
+        doNotContact: false,
+        massMailOptOut: false,
+        smsOptIn: false,
+        emailBounced: false,
+      });
+      return;
+    }
+
+    const statusValue = contactOverview?.status || selectedContactProfile.status;
+    const commStatusValue = contactOverview?.commStatus || selectedContactProfile.commStatus;
+    const preferredContactValue = contactOverview?.preferredContact || selectedContactProfile.preferredContact;
+    setLocalStatusDraft({
+      status: statusValue === "-" ? "" : statusValue,
+      commStatusLabel: commStatusValue === "-" ? "" : commStatusValue,
+      preferredContact: preferredContactValue === "-" ? "" : preferredContactValue,
+      doNotContact: Boolean(contactOverview?.doNotContact),
+      massMailOptOut: Boolean(contactOverview?.massMailOptOut),
+      smsOptIn: Boolean(contactOverview?.smsOptIn),
+      emailBounced: Boolean(contactOverview?.emailBounced),
+    });
+  }, [selectedContactProfile, contactOverview]);
+
   const resetSelectedContactProfile = useCallback(() => {
     setSelectedContactProfile(null);
     setUrlContactId(null);
@@ -1597,6 +1712,73 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
     setCompanyDetailLoading(false);
   }, [liveDetailApiSupported, resetSelectedContactProfile]);
+
+  const saveLocalNote = useCallback(async () => {
+    if (!selectedContactProfile) return;
+    const noteText = localNoteDraft.trim();
+    if (!noteText) {
+      toast.error("Enter note text before saving");
+      return;
+    }
+
+    setLocalNoteSaving(true);
+    try {
+      const result = await createBullhornLocalContactNote(
+        ADMIN_PROFILE,
+        selectedContactProfile.contact.bullhorn_id,
+        noteText,
+      );
+      if (!result.success) {
+        toast.error(result.error || "Failed to save local note");
+        return;
+      }
+
+      toast.success("Local note saved");
+      setLocalNoteDraft("");
+      await Promise.all([
+        openContactProfile(selectedContactProfile, { preserveActiveTab: true }),
+        loadBullhornMirrorContacts({ silent: true, reset: true }),
+      ]);
+    } catch {
+      toast.error("Failed to save local note");
+    } finally {
+      setLocalNoteSaving(false);
+    }
+  }, [localNoteDraft, selectedContactProfile, openContactProfile, loadBullhornMirrorContacts]);
+
+  const saveLocalStatus = useCallback(async () => {
+    if (!selectedContactProfile) return;
+    setLocalStatusSaving(true);
+    try {
+      const result = await updateBullhornLocalContactStatus(
+        ADMIN_PROFILE,
+        selectedContactProfile.contact.bullhorn_id,
+        {
+          status: localStatusDraft.status.trim() || null,
+          commStatusLabel: localStatusDraft.commStatusLabel.trim() || null,
+          preferredContact: localStatusDraft.preferredContact.trim() || null,
+          doNotContact: localStatusDraft.doNotContact,
+          massMailOptOut: localStatusDraft.massMailOptOut,
+          smsOptIn: localStatusDraft.smsOptIn,
+          emailBounced: localStatusDraft.emailBounced,
+        },
+      );
+      if (!result.success) {
+        toast.error(result.error || "Failed to update local status");
+        return;
+      }
+
+      toast.success("Local status updated");
+      await Promise.all([
+        openContactProfile(selectedContactProfile, { preserveActiveTab: true }),
+        loadBullhornMirrorContacts({ silent: true, reset: true }),
+      ]);
+    } catch {
+      toast.error("Failed to update local status");
+    } finally {
+      setLocalStatusSaving(false);
+    }
+  }, [localStatusDraft, selectedContactProfile, openContactProfile, loadBullhornMirrorContacts]);
 
   useEffect(() => {
     if (!urlContactId) {
@@ -1775,6 +1957,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
+                <Badge variant="outline" className={getLagStatusColor(syncHealth?.lagStatus)}>
+                  {formatLagLabel(syncHealth)}
+                </Badge>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1794,6 +1979,14 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 </Button>
                 <Button size="sm" onClick={() => startSync("full")} disabled={syncActionLoading || !!activeSyncJob}>
                   {syncActionLoading ? "Starting..." : activeSyncJob ? "Contact Sync Running" : "Start Full Contact Sync"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={runScheduledSyncNow}
+                  disabled={scheduledSyncActionLoading}
+                >
+                  {scheduledSyncActionLoading ? "Checking..." : "Run Scheduled Check"}
                 </Button>
               </div>
             </div>
@@ -1823,6 +2016,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                     : "-"}
                 </p>
                 <Progress value={progressPercent} className="mt-2 h-2" />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Next scheduled: {syncHealth?.nextScheduledRunAt ? formatDateTime(syncHealth.nextScheduledRunAt) : "-"}
+                </p>
               </div>
             </div>
 
@@ -1940,11 +2136,19 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 size="sm"
                 variant="outline"
                 className="h-8 w-8"
-                onClick={() => loadBullhornMirrorContacts({ reset: true })}
+                onClick={() => {
+                  void Promise.all([
+                    loadBullhornMirrorContacts({ reset: true }),
+                    loadBullhornSyncData({ silent: true }),
+                  ]);
+                }}
                 disabled={contactsLoading}
               >
                 <RefreshCw className={`h-4 w-4 ${contactsLoading ? "animate-spin" : ""}`} />
               </Button>
+              <Badge variant="outline" className={`h-8 px-2 text-xs ${getLagStatusColor(syncHealth?.lagStatus)}`}>
+                {formatLagLabel(syncHealth)}
+              </Badge>
             </div>
           </div>
         </CardHeader>
@@ -2480,6 +2684,72 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                         <p className="text-sm font-medium">Email Bounced: {contactOverview?.emailBounced === null ? "-" : contactOverview?.emailBounced ? "Yes" : "No"}</p>
                         <p className="text-sm font-medium">Last Email Sent: {contactOverview?.lastEmailSent || "-"}</p>
                         <p className="text-sm font-medium">Last Email Received: {contactOverview?.lastEmailReceived || "-"}</p>
+                        <div className="mt-3 space-y-2 rounded-md border border-border/60 bg-muted/20 p-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Local CRM Overrides</p>
+                          <div className="grid gap-2 md:grid-cols-2">
+                            <Input
+                              value={localStatusDraft.status}
+                              onChange={(e) => setLocalStatusDraft((prev) => ({ ...prev, status: e.target.value }))}
+                              placeholder="Contact status"
+                              className="h-8 text-xs"
+                            />
+                            <Input
+                              value={localStatusDraft.commStatusLabel}
+                              onChange={(e) => setLocalStatusDraft((prev) => ({ ...prev, commStatusLabel: e.target.value }))}
+                              placeholder="Comms status"
+                              className="h-8 text-xs"
+                            />
+                            <Input
+                              value={localStatusDraft.preferredContact}
+                              onChange={(e) => setLocalStatusDraft((prev) => ({ ...prev, preferredContact: e.target.value }))}
+                              placeholder="Preferred contact"
+                              className="h-8 text-xs md:col-span-2"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <label className="flex items-center gap-2">
+                              <Checkbox
+                                checked={localStatusDraft.doNotContact}
+                                onCheckedChange={(checked) =>
+                                  setLocalStatusDraft((prev) => ({ ...prev, doNotContact: checked === true }))
+                                }
+                              />
+                              Do Not Contact
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <Checkbox
+                                checked={localStatusDraft.massMailOptOut}
+                                onCheckedChange={(checked) =>
+                                  setLocalStatusDraft((prev) => ({ ...prev, massMailOptOut: checked === true }))
+                                }
+                              />
+                              Mass Mail Opt-Out
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <Checkbox
+                                checked={localStatusDraft.smsOptIn}
+                                onCheckedChange={(checked) =>
+                                  setLocalStatusDraft((prev) => ({ ...prev, smsOptIn: checked === true }))
+                                }
+                              />
+                              SMS Opt-In
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <Checkbox
+                                checked={localStatusDraft.emailBounced}
+                                onCheckedChange={(checked) =>
+                                  setLocalStatusDraft((prev) => ({ ...prev, emailBounced: checked === true }))
+                                }
+                              />
+                              Email Bounced
+                            </label>
+                          </div>
+                          <div className="flex justify-end">
+                            <Button size="sm" onClick={saveLocalStatus} disabled={localStatusSaving} className="h-8">
+                              {localStatusSaving ? "Saving..." : "Save Local Status"}
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                       <div className="rounded-md border p-3">
                         <p className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Mirror Parity</p>
@@ -2543,6 +2813,20 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                   </TabsContent>
 
                   <TabsContent value="notes" className="space-y-3">
+                    <div className="rounded-md border p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Add Local Note</p>
+                      <Textarea
+                        value={localNoteDraft}
+                        onChange={(e) => setLocalNoteDraft(e.target.value)}
+                        placeholder="Add internal CRM note (stored locally in mirrored timeline)"
+                        className="min-h-[92px] text-sm"
+                      />
+                      <div className="mt-2 flex justify-end">
+                        <Button size="sm" onClick={saveLocalNote} disabled={localNoteSaving || !localNoteDraft.trim()}>
+                          {localNoteSaving ? "Saving..." : "Save Local Note"}
+                        </Button>
+                      </div>
+                    </div>
                     {(selectedLiveContactNotes.length ? selectedLiveContactNotes : selectedContactNotes).length ? (
                       (selectedLiveContactNotes.length ? selectedLiveContactNotes : selectedContactNotes).map((note, index) => (
                         <div key={`${note.label}-${index}`} className="rounded-md border p-3">

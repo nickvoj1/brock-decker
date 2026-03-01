@@ -158,6 +158,19 @@ const FILE_ATTACHMENT_SELECTORS = [
 const CONTACT_PARITY_ENTITY_META = ["ClientContact", "ClientCorporation", "Note", "Task", "Appointment"];
 const CONTACT_TIMELINE_PAGE_SIZE = 200;
 const CONTACT_TIMELINE_MAX_PAGES_PER_QUERY = 10;
+const SYNC_SETTINGS_ID = "clientcontacts";
+const DEFAULT_SYNC_LAG_WARNING_HOURS = 24;
+const DEFAULT_SYNC_SCHEDULE = {
+  enabled: true,
+  target_hour_utc: 2,
+  target_minute_utc: 0,
+  min_interval_hours: 20,
+  max_lag_hours: DEFAULT_SYNC_LAG_WARNING_HOURS,
+  include_deleted: false,
+  batch_size: DEFAULT_BATCH_SIZE,
+  max_batches_per_invocation: DEFAULT_MAX_BATCHES_PER_INVOCATION,
+  metadata: { created_by: "edge-default" } as Record<string, unknown>,
+};
 const DICTIONARY_AUTO_HYDRATE_ENTITY_MAP: Record<string, { where: string; selectors: string[] }> = {
   ClientContact: { where: "id>0", selectors: CONTACT_DETAIL_FIELD_SELECTORS },
   ClientCorporation: { where: "id>0", selectors: COMPANY_DETAIL_FIELD_SELECTORS },
@@ -211,6 +224,22 @@ type SyncJob = {
   metadata: Record<string, unknown> | null;
 };
 
+type SyncSettingsRow = {
+  id: string;
+  enabled: boolean;
+  target_hour_utc: number;
+  target_minute_utc: number;
+  min_interval_hours: number;
+  max_lag_hours: number;
+  include_deleted: boolean;
+  batch_size: number;
+  max_batches_per_invocation: number;
+  last_scheduled_run_at: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+type SyncLagStatus = "ok" | "warning" | "critical" | "running" | "never_synced";
+
 type ContactParitySummary = {
   eventCount: number;
   lastContactedAt: string | null;
@@ -240,6 +269,30 @@ function normalizeMaxBatches(input: unknown): number {
   const n = Number(input);
   if (!Number.isFinite(n)) return DEFAULT_MAX_BATCHES_PER_INVOCATION;
   return Math.max(1, Math.min(40, Math.floor(n)));
+}
+
+function normalizeHour(input: unknown, fallback: number): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(23, Math.floor(n)));
+}
+
+function normalizeMinute(input: unknown, fallback: number): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(59, Math.floor(n)));
+}
+
+function normalizeLagHours(input: unknown, fallback = DEFAULT_SYNC_LAG_WARNING_HOURS): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(720, Math.floor(n)));
+}
+
+function normalizeIntervalHours(input: unknown, fallback = 20): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(168, Math.floor(n)));
 }
 
 function normalizeMaxContacts(input: unknown): number | null {
@@ -2970,6 +3023,319 @@ async function markJobFailed(supabase: any, jobId: string, error: unknown) {
     .eq("id", jobId);
 }
 
+function normalizeSyncSettingsRow(row: any): SyncSettingsRow {
+  const metadata =
+    row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : DEFAULT_SYNC_SCHEDULE.metadata;
+
+  return {
+    id: String(row?.id || SYNC_SETTINGS_ID),
+    enabled: row?.enabled === undefined ? DEFAULT_SYNC_SCHEDULE.enabled : Boolean(row.enabled),
+    target_hour_utc: normalizeHour(row?.target_hour_utc, DEFAULT_SYNC_SCHEDULE.target_hour_utc),
+    target_minute_utc: normalizeMinute(row?.target_minute_utc, DEFAULT_SYNC_SCHEDULE.target_minute_utc),
+    min_interval_hours: normalizeIntervalHours(row?.min_interval_hours, DEFAULT_SYNC_SCHEDULE.min_interval_hours),
+    max_lag_hours: normalizeLagHours(row?.max_lag_hours, DEFAULT_SYNC_SCHEDULE.max_lag_hours),
+    include_deleted: row?.include_deleted === undefined ? DEFAULT_SYNC_SCHEDULE.include_deleted : Boolean(row.include_deleted),
+    batch_size: normalizeBatchSize(row?.batch_size ?? DEFAULT_SYNC_SCHEDULE.batch_size),
+    max_batches_per_invocation: normalizeMaxBatches(
+      row?.max_batches_per_invocation ?? DEFAULT_SYNC_SCHEDULE.max_batches_per_invocation,
+    ),
+    last_scheduled_run_at: normalizeBullhornDate(row?.last_scheduled_run_at),
+    metadata,
+  };
+}
+
+async function getOrCreateSyncSettings(supabase: any): Promise<SyncSettingsRow> {
+  const { data, error } = await supabase
+    .from("bullhorn_sync_settings")
+    .select("*")
+    .eq("id", SYNC_SETTINGS_ID)
+    .maybeSingle();
+
+  if (data && !error) {
+    return normalizeSyncSettingsRow(data);
+  }
+
+  if (error && String(error.message || "").toLowerCase().includes("bullhorn_sync_settings")) {
+    return normalizeSyncSettingsRow({ id: SYNC_SETTINGS_ID, ...DEFAULT_SYNC_SCHEDULE });
+  }
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("bullhorn_sync_settings")
+    .insert({
+      id: SYNC_SETTINGS_ID,
+      ...DEFAULT_SYNC_SCHEDULE,
+    })
+    .select("*")
+    .single();
+
+  if (insertError || !inserted) {
+    if (String(insertError?.message || "").toLowerCase().includes("bullhorn_sync_settings")) {
+      return normalizeSyncSettingsRow({ id: SYNC_SETTINGS_ID, ...DEFAULT_SYNC_SCHEDULE });
+    }
+    throw new Error(insertError?.message || "Failed to initialize bullhorn_sync_settings");
+  }
+
+  return normalizeSyncSettingsRow(inserted);
+}
+
+async function upsertSyncSettings(supabase: any, patch: Record<string, unknown>): Promise<SyncSettingsRow> {
+  const current = await getOrCreateSyncSettings(supabase);
+  const metadataPatch =
+    patch?.metadata && typeof patch.metadata === "object" && !Array.isArray(patch.metadata)
+      ? (patch.metadata as Record<string, unknown>)
+      : {};
+
+  const payload = {
+    id: SYNC_SETTINGS_ID,
+    enabled: patch.enabled === undefined ? current.enabled : Boolean(patch.enabled),
+    target_hour_utc: normalizeHour(
+      patch.target_hour_utc,
+      current.target_hour_utc,
+    ),
+    target_minute_utc: normalizeMinute(
+      patch.target_minute_utc,
+      current.target_minute_utc,
+    ),
+    min_interval_hours: normalizeIntervalHours(
+      patch.min_interval_hours,
+      current.min_interval_hours,
+    ),
+    max_lag_hours: normalizeLagHours(
+      patch.max_lag_hours,
+      current.max_lag_hours,
+    ),
+    include_deleted: patch.include_deleted === undefined ? current.include_deleted : Boolean(patch.include_deleted),
+    batch_size: normalizeBatchSize(
+      patch.batch_size === undefined ? current.batch_size : patch.batch_size,
+    ),
+    max_batches_per_invocation: normalizeMaxBatches(
+      patch.max_batches_per_invocation === undefined
+        ? current.max_batches_per_invocation
+        : patch.max_batches_per_invocation,
+    ),
+    last_scheduled_run_at: normalizeBullhornDate(
+      patch.last_scheduled_run_at === undefined ? current.last_scheduled_run_at : patch.last_scheduled_run_at,
+    ),
+    metadata: {
+      ...(current.metadata || {}),
+      ...metadataPatch,
+    },
+  };
+
+  const { data, error } = await supabase
+    .from("bullhorn_sync_settings")
+    .upsert(payload, { onConflict: "id" })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to upsert bullhorn_sync_settings");
+  }
+
+  return normalizeSyncSettingsRow(data);
+}
+
+async function getLatestMirrorSyncedAt(supabase: any): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("bullhorn_client_contacts_mirror")
+    .select("synced_at")
+    .order("synced_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return normalizeBullhornDate(data?.synced_at);
+}
+
+async function getActiveSyncJob(supabase: any): Promise<SyncJob | null> {
+  const { data, error } = await supabase
+    .from("bullhorn_sync_jobs")
+    .select("*")
+    .in("status", ["queued", "running"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as SyncJob | null) || null;
+}
+
+async function getLatestCompletedSyncJob(supabase: any): Promise<SyncJob | null> {
+  const { data, error } = await supabase
+    .from("bullhorn_sync_jobs")
+    .select("*")
+    .eq("status", "completed")
+    .order("finished_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as SyncJob | null) || null;
+}
+
+function getLatestJobTimestampIso(job: SyncJob | null): string | null {
+  if (!job) return null;
+  return normalizeBullhornDate(
+    (job as any).finished_at ?? (job as any).heartbeat_at ?? (job as any).updated_at ?? (job as any).created_at,
+  );
+}
+
+function computeNextScheduledRunAt(settings: SyncSettingsRow, latestCompletedAtIso: string | null, now = new Date()): string | null {
+  if (!settings.enabled) return null;
+  const candidate = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      settings.target_hour_utc,
+      settings.target_minute_utc,
+      0,
+      0,
+    ),
+  );
+  if (candidate.getTime() <= now.getTime()) {
+    candidate.setUTCDate(candidate.getUTCDate() + 1);
+  }
+
+  if (latestCompletedAtIso) {
+    const latestCompletedAt = new Date(latestCompletedAtIso);
+    const minIntervalMs = settings.min_interval_hours * 60 * 60 * 1000;
+    if (!Number.isNaN(latestCompletedAt.getTime())) {
+      const minAllowed = new Date(latestCompletedAt.getTime() + minIntervalMs);
+      if (minAllowed.getTime() > candidate.getTime()) {
+        return minAllowed.toISOString();
+      }
+    }
+  }
+
+  return candidate.toISOString();
+}
+
+function computeLagStatus(
+  lagHours: number | null,
+  maxLagHours: number,
+  hasActiveJob: boolean,
+): SyncLagStatus {
+  if (hasActiveJob) return "running";
+  if (lagHours === null) return "never_synced";
+  if (lagHours <= maxLagHours) return "ok";
+  if (lagHours <= maxLagHours * 2) return "warning";
+  return "critical";
+}
+
+function isScheduledSyncDue(
+  settings: SyncSettingsRow,
+  latestCompletedAtIso: string | null,
+  latestMirrorSyncedAtIso: string | null,
+  activeJob: SyncJob | null,
+  now = new Date(),
+): { due: boolean; reason: string } {
+  if (!settings.enabled) return { due: false, reason: "schedule_disabled" };
+  if (activeJob) return { due: false, reason: "active_job_present" };
+
+  const minIntervalMs = settings.min_interval_hours * 60 * 60 * 1000;
+  const maxLagMs = settings.max_lag_hours * 60 * 60 * 1000;
+  const nowMs = now.getTime();
+
+  if (!latestCompletedAtIso) {
+    return { due: true, reason: "bootstrap_no_completed_job" };
+  }
+
+  const latestCompletedMs = new Date(latestCompletedAtIso).getTime();
+  if (!Number.isFinite(latestCompletedMs)) {
+    return { due: true, reason: "invalid_completed_timestamp" };
+  }
+
+  if (nowMs - latestCompletedMs < minIntervalMs) {
+    return { due: false, reason: "min_interval_not_elapsed" };
+  }
+
+  if (latestMirrorSyncedAtIso) {
+    const latestMirrorMs = new Date(latestMirrorSyncedAtIso).getTime();
+    if (Number.isFinite(latestMirrorMs) && nowMs - latestMirrorMs >= maxLagMs) {
+      return { due: true, reason: "lag_threshold_exceeded" };
+    }
+  }
+
+  const todayScheduledMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    settings.target_hour_utc,
+    settings.target_minute_utc,
+    0,
+    0,
+  );
+  if (nowMs < todayScheduledMs) {
+    return { due: false, reason: "before_daily_window" };
+  }
+
+  if (latestCompletedMs < todayScheduledMs) {
+    return { due: true, reason: "daily_window_due" };
+  }
+
+  return { due: false, reason: "already_synced_today" };
+}
+
+async function createSyncJob(
+  supabase: any,
+  payload: {
+    requestedBy: string;
+    batchSize: number;
+    includeDeleted: boolean;
+    maxContacts?: number | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<SyncJob> {
+  const { data: createdJob, error: createError } = await supabase
+    .from("bullhorn_sync_jobs")
+    .insert({
+      requested_by: payload.requestedBy || ADMIN_PROFILE,
+      status: "queued",
+      batch_size: payload.maxContacts ? Math.min(payload.batchSize, payload.maxContacts) : payload.batchSize,
+      total_expected: payload.maxContacts ?? null,
+      include_deleted: payload.includeDeleted,
+      metadata: {
+        ...(payload.metadata || {}),
+        max_contacts: payload.maxContacts ?? null,
+      },
+    })
+    .select("*")
+    .single();
+
+  if (createError || !createdJob) {
+    throw new Error(createError?.message || "Failed to create sync job");
+  }
+
+  return createdJob as SyncJob;
+}
+
+function queueProcessSyncJob(
+  supabase: any,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  job: SyncJob,
+  maxBatchesPerInvocation: number,
+) {
+  const promise = processSyncJob(
+    supabase,
+    supabaseUrl,
+    supabaseServiceKey,
+    job,
+    maxBatchesPerInvocation,
+  ).catch(async (err) => {
+    console.error("[bullhorn-sync-clientcontacts] Sync failed:", err);
+    await markJobFailed(supabase, job.id, err);
+  });
+
+  const edgeRuntime = (globalThis as any).EdgeRuntime;
+  if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
+    edgeRuntime.waitUntil(promise);
+  } else {
+    void promise;
+  }
+}
+
 async function queueContinuation(
   supabaseUrl: string,
   serviceKey: string,
@@ -3150,6 +3516,238 @@ async function processSyncJob(
   await queueContinuation(supabaseUrl, supabaseServiceKey, job.id, job.batch_size, maxBatchesPerInvocation);
 }
 
+function mergeRawRecord(baseRaw: unknown, patch: Record<string, unknown>): Record<string, unknown> {
+  const base = baseRaw && typeof baseRaw === "object" && !Array.isArray(baseRaw) ? (baseRaw as Record<string, unknown>) : {};
+  return {
+    ...base,
+    ...patch,
+  };
+}
+
+async function appendLocalContactNote(
+  supabase: any,
+  payload: {
+    contactId: number;
+    noteText: string;
+    noteLabel: string;
+    profileName: string;
+  },
+) {
+  const { data: mirrorRow, error: mirrorError } = await supabase
+    .from("bullhorn_client_contacts_mirror")
+    .select("bullhorn_id,raw,timeline_event_count,last_contacted_at,last_synced_job_id")
+    .eq("bullhorn_id", payload.contactId)
+    .maybeSingle();
+  if (mirrorError) throw mirrorError;
+  if (!mirrorRow) throw new Error("Contact not found in mirror");
+
+  const nowIso = new Date().toISOString();
+  const eventPayload = {
+    local: true,
+    note: payload.noteText,
+    label: payload.noteLabel,
+    createdBy: payload.profileName,
+    createdAt: nowIso,
+  };
+  const externalKey = `local-note:${payload.contactId}:${crypto.randomUUID()}`;
+  const { data: insertedEvent, error: insertEventError } = await supabase
+    .from("bullhorn_contact_timeline_events")
+    .insert({
+      bullhorn_contact_id: payload.contactId,
+      event_source: "local_note",
+      event_type: "note",
+      event_at: nowIso,
+      summary: payload.noteLabel,
+      details: payload.noteText,
+      actor_name: payload.profileName,
+      entity_name: "ClientContact",
+      entity_id: payload.contactId,
+      external_key: externalKey,
+      payload: eventPayload,
+      last_synced_job_id: mirrorRow.last_synced_job_id || null,
+    })
+    .select("*")
+    .single();
+  if (insertEventError || !insertedEvent) {
+    throw new Error(insertEventError?.message || "Failed to insert local contact note");
+  }
+
+  const rawNext = mergeRawRecord(mirrorRow.raw, {
+    latest_note: payload.noteText,
+    latest_note_action: payload.noteLabel,
+    latest_note_date: nowIso,
+    comments: payload.noteText,
+    notes: payload.noteText,
+    dateLastComment: nowIso,
+  });
+
+  const timelineCount = Number(mirrorRow.timeline_event_count || 0) + 1;
+  const { error: updateMirrorError } = await supabase
+    .from("bullhorn_client_contacts_mirror")
+    .update({
+      raw: rawNext,
+      timeline_event_count: timelineCount,
+      last_contacted_at: nowIso,
+    })
+    .eq("bullhorn_id", payload.contactId);
+  if (updateMirrorError) throw updateMirrorError;
+
+  const { data: existingComms } = await supabase
+    .from("bullhorn_contact_comms_status")
+    .select("*")
+    .eq("bullhorn_contact_id", payload.contactId)
+    .maybeSingle();
+
+  const { error: upsertCommsError } = await supabase
+    .from("bullhorn_contact_comms_status")
+    .upsert({
+      bullhorn_contact_id: payload.contactId,
+      email_primary: existingComms?.email_primary || null,
+      email_secondary: existingComms?.email_secondary || null,
+      preferred_contact: existingComms?.preferred_contact || null,
+      mass_mail_opt_out: existingComms?.mass_mail_opt_out ?? null,
+      sms_opt_in: existingComms?.sms_opt_in ?? null,
+      do_not_contact: existingComms?.do_not_contact ?? null,
+      email_bounced: existingComms?.email_bounced ?? null,
+      status_label: existingComms?.status_label || "ACTIVE",
+      last_email_received_at: existingComms?.last_email_received_at || null,
+      last_email_sent_at: existingComms?.last_email_sent_at || null,
+      last_call_at: existingComms?.last_call_at || null,
+      last_task_at: existingComms?.last_task_at || null,
+      last_note_at: nowIso,
+      last_contacted_at: nowIso,
+      raw: mergeRawRecord(existingComms?.raw, {
+        localNote: payload.noteText,
+        localNoteAt: nowIso,
+      }),
+      last_synced_job_id: mirrorRow.last_synced_job_id || existingComms?.last_synced_job_id || null,
+    }, { onConflict: "bullhorn_contact_id" });
+  if (upsertCommsError) throw upsertCommsError;
+
+  return insertedEvent;
+}
+
+async function updateLocalContactStatus(
+  supabase: any,
+  payload: {
+    contactId: number;
+    profileName: string;
+    status?: string | null;
+    commStatusLabel?: string | null;
+    preferredContact?: string | null;
+    doNotContact?: boolean | null;
+    massMailOptOut?: boolean | null;
+    smsOptIn?: boolean | null;
+    emailBounced?: boolean | null;
+  },
+) {
+  const { data: mirrorRow, error: mirrorError } = await supabase
+    .from("bullhorn_client_contacts_mirror")
+    .select("*")
+    .eq("bullhorn_id", payload.contactId)
+    .maybeSingle();
+  if (mirrorError) throw mirrorError;
+  if (!mirrorRow) throw new Error("Contact not found in mirror");
+
+  const { data: existingComms } = await supabase
+    .from("bullhorn_contact_comms_status")
+    .select("*")
+    .eq("bullhorn_contact_id", payload.contactId)
+    .maybeSingle();
+
+  const nowIso = new Date().toISOString();
+  const currentRaw = mirrorRow.raw && typeof mirrorRow.raw === "object" && !Array.isArray(mirrorRow.raw)
+    ? (mirrorRow.raw as Record<string, unknown>)
+    : {};
+
+  const nextStatus = payload.status === undefined ? mirrorRow.status : normalizeOptionalString(payload.status);
+  const nextCommStatus =
+    payload.commStatusLabel === undefined
+      ? existingComms?.status_label ?? mirrorRow.comm_status_label
+      : normalizeOptionalString(payload.commStatusLabel);
+  const nextPreferredContact =
+    payload.preferredContact === undefined
+      ? existingComms?.preferred_contact ?? mirrorRow.preferred_contact
+      : normalizeOptionalString(payload.preferredContact);
+  const nextDoNotContact =
+    payload.doNotContact === undefined
+      ? (existingComms?.do_not_contact ?? mirrorRow.do_not_contact ?? null)
+      : payload.doNotContact;
+  const nextMassMailOptOut =
+    payload.massMailOptOut === undefined
+      ? (existingComms?.mass_mail_opt_out ?? mirrorRow.mass_mail_opt_out ?? null)
+      : payload.massMailOptOut;
+  const nextSmsOptIn =
+    payload.smsOptIn === undefined
+      ? (existingComms?.sms_opt_in ?? mirrorRow.sms_opt_in ?? null)
+      : payload.smsOptIn;
+  const nextEmailBounced =
+    payload.emailBounced === undefined
+      ? (existingComms?.email_bounced ?? mirrorRow.email_bounced ?? null)
+      : payload.emailBounced;
+
+  const { error: commsError } = await supabase
+    .from("bullhorn_contact_comms_status")
+    .upsert({
+      bullhorn_contact_id: payload.contactId,
+      email_primary: existingComms?.email_primary ?? mirrorRow.email ?? null,
+      email_secondary: existingComms?.email_secondary ?? null,
+      preferred_contact: nextPreferredContact,
+      mass_mail_opt_out: nextMassMailOptOut,
+      sms_opt_in: nextSmsOptIn,
+      do_not_contact: nextDoNotContact,
+      email_bounced: nextEmailBounced,
+      status_label: nextCommStatus,
+      last_email_received_at: existingComms?.last_email_received_at ?? mirrorRow.last_email_received_at ?? null,
+      last_email_sent_at: existingComms?.last_email_sent_at ?? mirrorRow.last_email_sent_at ?? null,
+      last_call_at: existingComms?.last_call_at ?? null,
+      last_task_at: existingComms?.last_task_at ?? null,
+      last_note_at: existingComms?.last_note_at ?? null,
+      last_contacted_at: existingComms?.last_contacted_at ?? mirrorRow.last_contacted_at ?? null,
+      raw: mergeRawRecord(existingComms?.raw, {
+        localStatusUpdatedBy: payload.profileName,
+        localStatusUpdatedAt: nowIso,
+      }),
+      last_synced_job_id: mirrorRow.last_synced_job_id || existingComms?.last_synced_job_id || null,
+    }, { onConflict: "bullhorn_contact_id" });
+  if (commsError) throw commsError;
+
+  const nextRaw = mergeRawRecord(currentRaw, {
+    status: nextStatus,
+    comm_status_label: nextCommStatus,
+    preferredContact: nextPreferredContact,
+    doNotContact: nextDoNotContact,
+    massMailOptOut: nextMassMailOptOut,
+    smsOptIn: nextSmsOptIn,
+    emailBounced: nextEmailBounced,
+    localStatusUpdatedAt: nowIso,
+    localStatusUpdatedBy: payload.profileName,
+  });
+
+  const { error: updateMirrorError } = await supabase
+    .from("bullhorn_client_contacts_mirror")
+    .update({
+      status: nextStatus,
+      comm_status_label: nextCommStatus,
+      preferred_contact: nextPreferredContact,
+      do_not_contact: nextDoNotContact,
+      mass_mail_opt_out: nextMassMailOptOut,
+      sms_opt_in: nextSmsOptIn,
+      email_bounced: nextEmailBounced,
+      raw: nextRaw,
+    })
+    .eq("bullhorn_id", payload.contactId);
+  if (updateMirrorError) throw updateMirrorError;
+
+  const { data: updatedMirror } = await supabase
+    .from("bullhorn_client_contacts_mirror")
+    .select("*")
+    .eq("bullhorn_id", payload.contactId)
+    .maybeSingle();
+
+  return updatedMirror;
+}
+
 serve(async (req) => {
   if (!bootLogged) {
     console.log(`[BHSYNC] boot ${BUILD_MARKER}`);
@@ -3223,62 +3821,149 @@ serve(async (req) => {
       return jsonResponse({ success: false, error: "Access denied. Admin only." }, 403);
     }
 
+    if (action === "get-sync-health") {
+      const settings = await getOrCreateSyncSettings(supabase);
+      const [activeJob, latestCompletedJob, latestMirrorSyncedAt] = await Promise.all([
+        getActiveSyncJob(supabase),
+        getLatestCompletedSyncJob(supabase),
+        getLatestMirrorSyncedAt(supabase),
+      ]);
+      const latestCompletedAt = getLatestJobTimestampIso(latestCompletedJob);
+      const now = new Date();
+      const lagHours = latestMirrorSyncedAt
+        ? Math.max(0, (now.getTime() - new Date(latestMirrorSyncedAt).getTime()) / (1000 * 60 * 60))
+        : null;
+      const lagStatus = computeLagStatus(lagHours, settings.max_lag_hours, Boolean(activeJob));
+      const nextScheduledRunAt = computeNextScheduledRunAt(settings, latestCompletedAt, now);
+      const dueState = isScheduledSyncDue(settings, latestCompletedAt, latestMirrorSyncedAt, activeJob, now);
+
+      return jsonResponse({
+        success: true,
+        data: {
+          settings,
+          activeJob,
+          latestCompletedJob,
+          latestMirrorSyncedAt,
+          lagHours,
+          lagMinutes: lagHours === null ? null : Math.round(lagHours * 60),
+          lagStatus,
+          nextScheduledRunAt,
+          dueNow: dueState.due,
+          dueReason: dueState.reason,
+          checkedAt: now.toISOString(),
+        },
+      });
+    }
+
+    if (action === "upsert-sync-settings") {
+      const settings = await upsertSyncSettings(supabase, {
+        enabled: data?.enabled,
+        target_hour_utc: data?.targetHourUtc,
+        target_minute_utc: data?.targetMinuteUtc,
+        min_interval_hours: data?.minIntervalHours,
+        max_lag_hours: data?.maxLagHours,
+        include_deleted: data?.includeDeleted,
+        batch_size: data?.batchSize,
+        max_batches_per_invocation: data?.maxBatchesPerInvocation,
+        metadata: data?.metadata,
+      });
+      return jsonResponse({
+        success: true,
+        data: settings,
+        message: "Sync settings updated.",
+      });
+    }
+
+    if (action === "run-scheduled-sync") {
+      const settings = await getOrCreateSyncSettings(supabase);
+      const [activeJob, latestCompletedJob, latestMirrorSyncedAt] = await Promise.all([
+        getActiveSyncJob(supabase),
+        getLatestCompletedSyncJob(supabase),
+        getLatestMirrorSyncedAt(supabase),
+      ]);
+      const latestCompletedAt = getLatestJobTimestampIso(latestCompletedJob);
+      const dueState = isScheduledSyncDue(
+        settings,
+        latestCompletedAt,
+        latestMirrorSyncedAt,
+        activeJob,
+      );
+      if (!dueState.due) {
+        return jsonResponse({
+          success: true,
+          data: {
+            skipped: true,
+            reason: dueState.reason,
+            activeJob,
+            latestCompletedJob,
+          },
+          message: "Scheduled sync skipped (not due).",
+        });
+      }
+
+      const createdJob = await createSyncJob(supabase, {
+        requestedBy: profileName,
+        batchSize: settings.batch_size,
+        includeDeleted: settings.include_deleted,
+        metadata: {
+          source: "scheduled_sync",
+          trigger_reason: dueState.reason,
+          schedule_id: settings.id,
+        },
+      });
+
+      try {
+        await upsertSyncSettings(supabase, {
+          last_scheduled_run_at: new Date().toISOString(),
+        });
+      } catch (settingsErr) {
+        console.warn("[bullhorn-sync-clientcontacts] Failed to persist last_scheduled_run_at:", settingsErr);
+      }
+
+      queueProcessSyncJob(
+        supabase,
+        supabaseUrl,
+        supabaseServiceKey,
+        createdJob,
+        settings.max_batches_per_invocation,
+      );
+
+      return jsonResponse({
+        success: true,
+        data: createdJob,
+        message: "Scheduled sync started in background.",
+      });
+    }
+
     if (action === "start-sync") {
       const batchSize = normalizeBatchSize(data?.batchSize);
       const includeDeleted = Boolean(data?.includeDeleted);
       const maxBatchesPerInvocation = normalizeMaxBatches(data?.maxBatchesPerInvocation);
       const maxContacts = normalizeMaxContacts(data?.maxContacts);
 
-      const { data: runningJob } = await supabase
-        .from("bullhorn_sync_jobs")
-        .select("*")
-        .in("status", ["queued", "running"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
+      const runningJob = await getActiveSyncJob(supabase);
       if (runningJob) {
         return jsonResponse({ success: true, data: runningJob, message: "Existing sync job is already running." });
       }
 
-      const { data: createdJob, error: createError } = await supabase
-        .from("bullhorn_sync_jobs")
-        .insert({
-          requested_by: profileName,
-          status: "queued",
-          batch_size: maxContacts ? Math.min(batchSize, maxContacts) : batchSize,
-          total_expected: maxContacts,
-          include_deleted: includeDeleted,
-          metadata: {
-            source: "manual_start",
-            max_contacts: maxContacts,
-            mode: maxContacts === DEFAULT_TEST_BATCH_SIZE ? "test_5_contacts" : "full_sync",
-          },
-        })
-        .select("*")
-        .single();
+      const createdJob = await createSyncJob(supabase, {
+        requestedBy: profileName,
+        batchSize,
+        includeDeleted,
+        maxContacts,
+        metadata: {
+          source: "manual_start",
+          mode: maxContacts === DEFAULT_TEST_BATCH_SIZE ? "test_5_contacts" : "full_sync",
+        },
+      });
 
-      if (createError || !createdJob) {
-        throw new Error(createError?.message || "Failed to create sync job");
-      }
-
-      const promise = processSyncJob(
+      queueProcessSyncJob(
         supabase,
         supabaseUrl,
         supabaseServiceKey,
-        createdJob as SyncJob,
+        createdJob,
         maxBatchesPerInvocation,
-      ).catch(async (err) => {
-        console.error("[bullhorn-sync-clientcontacts] Sync failed:", err);
-        await markJobFailed(supabase, createdJob.id, err);
-      });
-
-      const edgeRuntime = (globalThis as any).EdgeRuntime;
-      if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
-        edgeRuntime.waitUntil(promise);
-      } else {
-        void promise;
-      }
+      );
 
       return jsonResponse({
         success: true,
@@ -3300,28 +3985,75 @@ serve(async (req) => {
         return jsonResponse({ success: true, data: job, message: "Sync job already finished." });
       }
 
-      const promise = processSyncJob(
+      queueProcessSyncJob(
         supabase,
         supabaseUrl,
         supabaseServiceKey,
         job as SyncJob,
         maxBatchesPerInvocation,
-      ).catch(async (err) => {
-        console.error("[bullhorn-sync-clientcontacts] Continuation failed:", err);
-        await markJobFailed(supabase, job.id, err);
-      });
-
-      const edgeRuntime = (globalThis as any).EdgeRuntime;
-      if (edgeRuntime?.waitUntil && typeof edgeRuntime.waitUntil === "function") {
-        edgeRuntime.waitUntil(promise);
-      } else {
-        void promise;
-      }
+      );
 
       return jsonResponse({
         success: true,
         data: { jobId, queued: true },
         message: "Continuation queued.",
+      });
+    }
+
+    if (action === "create-local-contact-note") {
+      const contactId = toFiniteNumber(data?.contactId);
+      const noteText = normalizeOptionalString(data?.noteText);
+      const noteLabel = normalizeOptionalString(data?.noteLabel) || "Local CRM Note";
+      if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+      if (!noteText) return jsonResponse({ success: false, error: "noteText is required" }, 400);
+
+      const inserted = await appendLocalContactNote(supabase, {
+        contactId,
+        noteText,
+        noteLabel,
+        profileName,
+      });
+
+      return jsonResponse({
+        success: true,
+        data: inserted,
+        message: "Local note saved.",
+      });
+    }
+
+    if (action === "update-local-contact-status") {
+      const contactId = toFiniteNumber(data?.contactId);
+      if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+
+      const hasAnyPayload =
+        data?.status !== undefined ||
+        data?.commStatusLabel !== undefined ||
+        data?.preferredContact !== undefined ||
+        data?.doNotContact !== undefined ||
+        data?.massMailOptOut !== undefined ||
+        data?.smsOptIn !== undefined ||
+        data?.emailBounced !== undefined;
+
+      if (!hasAnyPayload) {
+        return jsonResponse({ success: false, error: "No status fields provided for update" }, 400);
+      }
+
+      const updated = await updateLocalContactStatus(supabase, {
+        contactId,
+        profileName,
+        status: data?.status === undefined ? undefined : normalizeOptionalString(data?.status),
+        commStatusLabel: data?.commStatusLabel === undefined ? undefined : normalizeOptionalString(data?.commStatusLabel),
+        preferredContact: data?.preferredContact === undefined ? undefined : normalizeOptionalString(data?.preferredContact),
+        doNotContact: data?.doNotContact === undefined ? undefined : normalizeLooseBoolean(data?.doNotContact),
+        massMailOptOut: data?.massMailOptOut === undefined ? undefined : normalizeLooseBoolean(data?.massMailOptOut),
+        smsOptIn: data?.smsOptIn === undefined ? undefined : normalizeLooseBoolean(data?.smsOptIn),
+        emailBounced: data?.emailBounced === undefined ? undefined : normalizeLooseBoolean(data?.emailBounced),
+      });
+
+      return jsonResponse({
+        success: true,
+        data: updated,
+        message: "Local contact status updated.",
       });
     }
 
@@ -3364,7 +4096,7 @@ serve(async (req) => {
         .from("bullhorn_contact_timeline_events")
         .select("id,event_at,summary,details,actor_name,entity_name,entity_id,payload")
         .eq("bullhorn_contact_id", contactId)
-        .eq("event_source", "note")
+        .in("event_source", ["note", "local_note"])
         .order("event_at", { ascending: false, nullsFirst: false })
         .order("id", { ascending: false })
         .limit(25);
@@ -3503,7 +4235,7 @@ serve(async (req) => {
       const { data: localCompanyNoteRows } = await supabase
         .from("bullhorn_contact_timeline_events")
         .select("id,event_at,summary,details,actor_name,entity_name,entity_id,payload")
-        .eq("event_source", "note")
+        .in("event_source", ["note", "local_note"])
         .eq("entity_id", companyId)
         .ilike("entity_name", "ClientCorporation%")
         .order("event_at", { ascending: false, nullsFirst: false })
