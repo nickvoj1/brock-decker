@@ -179,7 +179,7 @@ export interface DistributionListContact {
   email: string | null;
   occupation: string | null;
   company_name: string | null;
-  contact_snapshot: Record<string, unknown> | null;
+  contact_snapshot?: Record<string, unknown> | null;
 }
 
 export type BullhornContactFilterField =
@@ -270,6 +270,7 @@ export async function listBullhornMirrorContacts(
     offset?: number;
     search?: string;
     filters?: BullhornContactFilterRow[];
+    enrichLatestNotes?: boolean;
   } = {},
 ) {
   return callBullhornSync<{
@@ -280,12 +281,20 @@ export async function listBullhornMirrorContacts(
   }>("list-mirror-contacts", profileName, options);
 }
 
-export async function getBullhornLiveContactDetail(profileName: string, contactId: number) {
-  return callBullhornSync<BullhornLiveContactDetail>("get-contact-detail", profileName, { contactId });
+export async function getBullhornLiveContactDetail(
+  profileName: string,
+  contactId: number,
+  options: { preferLive?: boolean } = {},
+) {
+  return callBullhornSync<BullhornLiveContactDetail>("get-contact-detail", profileName, { contactId, ...options });
 }
 
-export async function getBullhornLiveCompanyDetail(profileName: string, companyId: number) {
-  return callBullhornSync<BullhornLiveCompanyDetail>("get-company-detail", profileName, { companyId });
+export async function getBullhornLiveCompanyDetail(
+  profileName: string,
+  companyId: number,
+  options: { preferLive?: boolean } = {},
+) {
+  return callBullhornSync<BullhornLiveCompanyDetail>("get-company-detail", profileName, { companyId, ...options });
 }
 
 export async function getBullhornContactTimeline(

@@ -1491,7 +1491,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
 
     const livePromise = liveDetailApiSupported
-      ? getBullhornLiveContactDetail(ADMIN_PROFILE, row.contact.bullhorn_id)
+      ? getBullhornLiveContactDetail(ADMIN_PROFILE, row.contact.bullhorn_id, { preferLive: false })
       : Promise.resolve({ success: true, data: null } as Awaited<ReturnType<typeof getBullhornLiveContactDetail>>);
     const timelinePromise = parityApiSupported
       ? getBullhornContactTimeline(ADMIN_PROFILE, row.contact.bullhorn_id, { limit: 100, offset: 0 })
@@ -1582,7 +1582,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       return;
     }
 
-    const result = await getBullhornLiveCompanyDetail(ADMIN_PROFILE, companyId);
+    const result = await getBullhornLiveCompanyDetail(ADMIN_PROFILE, companyId, { preferLive: false });
     if (companyDetailRequestIdRef.current !== requestId) return;
 
     if (result.success && result.data) {
@@ -2382,7 +2382,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 <SheetTitle className="text-xl">{selectedContactProfile.fullName}</SheetTitle>
                 <SheetDescription>
                   Contact Profile • Bullhorn ID {selectedContactProfile.contact.bullhorn_id}
-                  {contactDetailLoading ? " • Loading live Bullhorn data..." : liveContactDetail ? " • Live data loaded" : ""}
+                  {contactDetailLoading ? " • Loading CRM data..." : liveContactDetail ? " • CRM data loaded" : ""}
                 </SheetDescription>
               </SheetHeader>
 
@@ -2555,7 +2555,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       ))
                     ) : (
                       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                        {contactDetailLoading ? "Loading notes from Bullhorn..." : "No notes found in synced or live Bullhorn payload for this contact."}
+                        {contactDetailLoading ? "Loading notes..." : "No notes found in synced CRM payload for this contact."}
                       </div>
                     )}
                   </TabsContent>
@@ -2631,7 +2631,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                 <SheetTitle className="text-xl">{companyOverview?.name || selectedCompanyData.name}</SheetTitle>
                 <SheetDescription>
                   Company Profile{(companyOverview?.id ?? selectedCompanyData.id) !== null ? ` • Bullhorn ID ${companyOverview?.id ?? selectedCompanyData.id}` : ""}
-                  {companyDetailLoading ? " • Loading live Bullhorn data..." : liveCompanyDetail ? " • Live data loaded" : ""}
+                  {companyDetailLoading ? " • Loading CRM data..." : liveCompanyDetail ? " • CRM data loaded" : ""}
                 </SheetDescription>
               </SheetHeader>
 
@@ -2726,7 +2726,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                       ))
                     ) : (
                       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                        {companyDetailLoading ? "Loading company notes from Bullhorn..." : "No company notes found in synced or live Bullhorn payload."}
+                        {companyDetailLoading ? "Loading company notes..." : "No company notes found in synced CRM payload."}
                       </div>
                     )}
                   </TabsContent>

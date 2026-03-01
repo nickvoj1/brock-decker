@@ -3328,9 +3328,89 @@ serve(async (req) => {
     if (action === "get-contact-detail") {
       const contactId = toFiniteNumber(data?.contactId);
       if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
+      const preferLive = Boolean(data?.preferLive);
+
+      const { data: mirrorFallback } = await supabase
+        .from("bullhorn_client_contacts_mirror")
+        .select("*")
+        .eq("bullhorn_id", contactId)
+        .maybeSingle();
+
+      const mirrorContact =
+        mirrorFallback?.raw && typeof mirrorFallback.raw === "object" && !Array.isArray(mirrorFallback.raw)
+          ? ({ ...(mirrorFallback.raw as Record<string, unknown>) } as Record<string, unknown>)
+          : null;
+      if (mirrorContact && !Number.isFinite(Number(mirrorContact.id))) {
+        mirrorContact.id = contactId;
+      }
+      if (mirrorContact) deriveCanonicalSkills(mirrorContact);
+
+      const mirrorCompanyFromRaw =
+        mirrorContact?.clientCorporation && typeof mirrorContact.clientCorporation === "object" &&
+          !Array.isArray(mirrorContact.clientCorporation)
+          ? (mirrorContact.clientCorporation as Record<string, unknown>)
+          : null;
+
+      const mirrorCompany =
+        mirrorCompanyFromRaw ||
+        (mirrorFallback?.client_corporation_id || mirrorFallback?.client_corporation_name
+          ? ({
+              id: mirrorFallback?.client_corporation_id ?? null,
+              name: mirrorFallback?.client_corporation_name ?? null,
+            } as Record<string, unknown>)
+          : null);
+
+      const { data: localNoteRows } = await supabase
+        .from("bullhorn_contact_timeline_events")
+        .select("id,event_at,summary,details,actor_name,entity_name,entity_id,payload")
+        .eq("bullhorn_contact_id", contactId)
+        .eq("event_source", "note")
+        .order("event_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .limit(25);
+
+      const localNotes = (Array.isArray(localNoteRows) ? localNoteRows : []).map((row: any) => {
+        const payload =
+          row?.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : null;
+        const payloadId = toFiniteNumber(payload?.id);
+        return {
+          id: payloadId ?? toFiniteNumber(row?.id),
+          action: normalizeOptionalString(row?.summary),
+          comments: normalizeOptionalString(row?.details) ?? normalizeOptionalString(row?.summary),
+          dateAdded: normalizeBullhornDate(row?.event_at),
+          personName: normalizeOptionalString(row?.actor_name),
+          targetEntityName: normalizeOptionalString(row?.entity_name) ?? "ClientContact",
+          targetEntityId: toFiniteNumber(row?.entity_id) ?? contactId,
+        };
+      });
+
+      if (!preferLive && mirrorContact) {
+        return jsonResponse({
+          success: true,
+          data: {
+            contact: mirrorContact,
+            company: mirrorCompany,
+            notes: localNotes,
+          },
+        });
+      }
 
       const tokens = await getStoredBullhornTokens(supabase);
-      if (!tokens) return jsonResponse({ success: false, error: "Bullhorn is not connected" }, 400);
+      if (!tokens) {
+        if (mirrorContact) {
+          return jsonResponse({
+            success: true,
+            data: {
+              contact: mirrorContact,
+              company: mirrorCompany,
+              notes: localNotes,
+            },
+          });
+        }
+        return jsonResponse({ success: false, error: "Bullhorn is not connected" }, 400);
+      }
 
       const supportedFields = await getClientContactMetaFields(tokens.rest_url, tokens.bh_rest_token);
       const contactFieldSelectors = Array.from(
@@ -3344,20 +3424,7 @@ serve(async (req) => {
         contactId,
         contactFieldSelectors,
       );
-
-      if (!contact) {
-        const { data: mirrorFallback } = await supabase
-          .from("bullhorn_client_contacts_mirror")
-          .select("*")
-          .eq("bullhorn_id", contactId)
-          .maybeSingle();
-        const rawFallback =
-          mirrorFallback?.raw && typeof mirrorFallback.raw === "object" && !Array.isArray(mirrorFallback.raw)
-            ? (mirrorFallback.raw as Record<string, unknown>)
-            : null;
-        if (rawFallback) contact = rawFallback;
-      }
-
+      if (!contact && mirrorContact) contact = mirrorContact;
       if (!contact) return jsonResponse({ success: false, error: "Contact not found in Bullhorn" }, 404);
 
       deriveCanonicalSkills(contact);
@@ -3367,15 +3434,16 @@ serve(async (req) => {
         toFiniteNumber((contact as any).clientCorporationID) ??
         null;
 
-      let company: Record<string, unknown> | null = null;
+      let company: Record<string, unknown> | null = mirrorCompany;
       if (companyId) {
-        company = await fetchEntityByIdWithFallback(
+        const liveCompany = await fetchEntityByIdWithFallback(
           tokens.rest_url,
           tokens.bh_rest_token,
           "ClientCorporation",
           companyId,
           COMPANY_DETAIL_FIELD_SELECTORS,
         );
+        if (liveCompany) company = liveCompany;
       }
 
       const notes = await fetchBullhornNotesForEntity(
@@ -3391,7 +3459,7 @@ serve(async (req) => {
         data: {
           contact,
           company,
-          notes,
+          notes: notes.length ? notes : localNotes,
         },
       });
     }
@@ -3399,9 +3467,88 @@ serve(async (req) => {
     if (action === "get-company-detail") {
       const companyId = toFiniteNumber(data?.companyId);
       if (!companyId) return jsonResponse({ success: false, error: "companyId is required" }, 400);
+      const preferLive = Boolean(data?.preferLive);
+
+      const { data: mirrorContactsRows, error: mirrorContactsError } = await supabase
+        .from("bullhorn_client_contacts_mirror")
+        .select("*")
+        .eq("client_corporation_id", companyId)
+        .eq("is_deleted", false)
+        .order("bullhorn_id", { ascending: false })
+        .limit(250);
+      if (mirrorContactsError) throw mirrorContactsError;
+
+      const mirrorContacts = (mirrorContactsRows || []).map((row: any) => {
+        const raw =
+          row?.raw && typeof row.raw === "object" && !Array.isArray(row.raw)
+            ? ({ ...(row.raw as Record<string, unknown>) } as Record<string, unknown>)
+            : ({} as Record<string, unknown>);
+        if (!Number.isFinite(Number(raw.id))) raw.id = row.bullhorn_id;
+        if (!raw.name && row.name) raw.name = row.name;
+        if (!raw.email && row.email) raw.email = row.email;
+        if (!raw.occupation && row.occupation) raw.occupation = row.occupation;
+        deriveCanonicalSkills(raw);
+        return raw;
+      });
+
+      const mirrorCompany =
+        mirrorContacts.find(
+          (row) => row?.clientCorporation && typeof row.clientCorporation === "object" && !Array.isArray(row.clientCorporation),
+        )?.clientCorporation as Record<string, unknown> | undefined;
+      const companyFromMirror = mirrorCompany || {
+        id: companyId,
+        name: normalizeOptionalString((mirrorContactsRows || [])[0]?.client_corporation_name),
+      };
+
+      const { data: localCompanyNoteRows } = await supabase
+        .from("bullhorn_contact_timeline_events")
+        .select("id,event_at,summary,details,actor_name,entity_name,entity_id,payload")
+        .eq("event_source", "note")
+        .eq("entity_id", companyId)
+        .ilike("entity_name", "ClientCorporation%")
+        .order("event_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .limit(25);
+
+      const localCompanyNotes = (Array.isArray(localCompanyNoteRows) ? localCompanyNoteRows : []).map((row: any) => {
+        const payload =
+          row?.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : null;
+        const payloadId = toFiniteNumber(payload?.id);
+        return {
+          id: payloadId ?? toFiniteNumber(row?.id),
+          action: normalizeOptionalString(row?.summary),
+          comments: normalizeOptionalString(row?.details) ?? normalizeOptionalString(row?.summary),
+          dateAdded: normalizeBullhornDate(row?.event_at),
+          personName: normalizeOptionalString(row?.actor_name),
+          targetEntityName: normalizeOptionalString(row?.entity_name) ?? "ClientCorporation",
+          targetEntityId: toFiniteNumber(row?.entity_id) ?? companyId,
+        };
+      });
+
+      if (!preferLive) {
+        return jsonResponse({
+          success: true,
+          data: {
+            company: companyFromMirror || null,
+            contacts: mirrorContacts,
+            notes: localCompanyNotes,
+          },
+        });
+      }
 
       const tokens = await getStoredBullhornTokens(supabase);
-      if (!tokens) return jsonResponse({ success: false, error: "Bullhorn is not connected" }, 400);
+      if (!tokens) {
+        return jsonResponse({
+          success: true,
+          data: {
+            company: companyFromMirror || null,
+            contacts: mirrorContacts,
+            notes: localCompanyNotes,
+          },
+        });
+      }
 
       let company = await fetchEntityByIdWithFallback(
         tokens.rest_url,
@@ -3410,25 +3557,7 @@ serve(async (req) => {
         companyId,
         COMPANY_DETAIL_FIELD_SELECTORS,
       );
-
-      if (!company) {
-        const { data: mirrorContact } = await supabase
-          .from("bullhorn_client_contacts_mirror")
-          .select("raw")
-          .eq("client_corporation_id", companyId)
-          .order("synced_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const raw =
-          mirrorContact?.raw && typeof mirrorContact.raw === "object" && !Array.isArray(mirrorContact.raw)
-            ? (mirrorContact.raw as Record<string, unknown>)
-            : null;
-        const fromRaw =
-          raw?.clientCorporation && typeof raw.clientCorporation === "object" && !Array.isArray(raw.clientCorporation)
-            ? (raw.clientCorporation as Record<string, unknown>)
-            : null;
-        if (fromRaw) company = fromRaw;
-      }
+      if (!company) company = companyFromMirror;
 
       const liveContacts = await fetchQueryRowsWithFallback(
         tokens.rest_url,
@@ -3440,7 +3569,7 @@ serve(async (req) => {
         CONTACTS_BY_COMPANY_FIELD_SELECTORS,
       );
 
-      const contacts = liveContacts
+      const contacts = (liveContacts.length ? liveContacts : mirrorContacts)
         .filter((row) => !(row && typeof row === "object" && (row as any).isDeleted))
         .map((row) => {
           if (row && typeof row === "object") {
@@ -3454,7 +3583,7 @@ serve(async (req) => {
         tokens.bh_rest_token,
         "ClientCorporation",
         companyId,
-        company,
+        company || undefined,
       );
 
       return jsonResponse({
@@ -3462,7 +3591,7 @@ serve(async (req) => {
         data: {
           company: company || null,
           contacts,
-          notes,
+          notes: notes.length ? notes : localCompanyNotes,
         },
       });
     }
@@ -3734,6 +3863,7 @@ serve(async (req) => {
       const searchTerm = normalizeSearchTerm(data?.search);
       const filterRows = normalizeFilterRows(data?.filters);
       const useAdvancedFiltering = filterRows.length > 0;
+      const enrichLatestNotes = Boolean(data?.enrichLatestNotes);
 
       if (!useAdvancedFiltering) {
         let query = supabase
@@ -3751,11 +3881,13 @@ serve(async (req) => {
         const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
 
         if (error) throw error;
-        const enrichedContacts = await enrichContactsWithLatestNotes(supabase, contacts || []);
+        const responseContacts = enrichLatestNotes
+          ? await enrichContactsWithLatestNotes(supabase, contacts || [])
+          : (contacts || []);
         return jsonResponse({
           success: true,
           data: {
-            contacts: enrichedContacts,
+            contacts: responseContacts,
             total: count || 0,
             limit,
             offset,
@@ -3794,11 +3926,13 @@ serve(async (req) => {
         if (rows.length < chunkSize) break;
       }
 
-      const enrichedPagedContacts = await enrichContactsWithLatestNotes(supabase, pagedContacts);
+      const responseContacts = enrichLatestNotes
+        ? await enrichContactsWithLatestNotes(supabase, pagedContacts)
+        : pagedContacts;
       return jsonResponse({
         success: true,
         data: {
-          contacts: enrichedPagedContacts,
+          contacts: responseContacts,
           total: matchedTotal,
           limit,
           offset,
@@ -3817,15 +3951,18 @@ serve(async (req) => {
       const countByList = new Map<string, number>();
 
       if (listIds.length) {
-        const { data: countRows, error: countError } = await supabase
-          .from("distribution_list_contacts")
-          .select("list_id")
-          .in("list_id", listIds);
-        if (countError) throw countError;
-        for (const row of countRows || []) {
-          const listId = String((row as any)?.list_id || "").trim();
-          if (!listId) continue;
-          countByList.set(listId, (countByList.get(listId) || 0) + 1);
+        const counts = await Promise.all(
+          listIds.map(async (listId) => {
+            const { count, error: countError } = await supabase
+              .from("distribution_list_contacts")
+              .select("*", { count: "exact", head: true })
+              .eq("list_id", listId);
+            if (countError) throw countError;
+            return [listId, Number(count || 0)] as const;
+          }),
+        );
+        for (const [listId, count] of counts) {
+          countByList.set(listId, count);
         }
       }
 
@@ -3989,7 +4126,7 @@ serve(async (req) => {
 
       let query = supabase
         .from("distribution_list_contacts")
-        .select("*", { count: "exact" })
+        .select("list_id,bullhorn_id,added_at,added_by,name,email,occupation,company_name", { count: "exact" })
         .eq("list_id", listId)
         .order("added_at", { ascending: false });
 
