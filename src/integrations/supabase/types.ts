@@ -501,6 +501,54 @@ export type Database = {
         }
         Relationships: []
       }
+      bullhorn_sync_settings: {
+        Row: {
+          batch_size: number
+          created_at: string
+          enabled: boolean
+          id: string
+          include_deleted: boolean
+          last_scheduled_run_at: string | null
+          max_batches_per_invocation: number
+          max_lag_hours: number
+          metadata: Json
+          min_interval_hours: number
+          target_hour_utc: number
+          target_minute_utc: number
+          updated_at: string
+        }
+        Insert: {
+          batch_size?: number
+          created_at?: string
+          enabled?: boolean
+          id: string
+          include_deleted?: boolean
+          last_scheduled_run_at?: string | null
+          max_batches_per_invocation?: number
+          max_lag_hours?: number
+          metadata?: Json
+          min_interval_hours?: number
+          target_hour_utc?: number
+          target_minute_utc?: number
+          updated_at?: string
+        }
+        Update: {
+          batch_size?: number
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          include_deleted?: boolean
+          last_scheduled_run_at?: string | null
+          max_batches_per_invocation?: number
+          max_lag_hours?: number
+          metadata?: Json
+          min_interval_hours?: number
+          target_hour_utc?: number
+          target_minute_utc?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bullhorn_tokens: {
         Row: {
           access_token: string
@@ -1319,6 +1367,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       app_role: "admin" | "user"
