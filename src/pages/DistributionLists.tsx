@@ -4,9 +4,12 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
   DistributionListContact,
+  DistributionListEvent,
   DistributionListSummary,
+  createDistributionListNote,
   createDistributionList,
   deleteDistributionList,
+  listDistributionListEvents,
   listDistributionListContacts,
   listDistributionLists,
   removeContactsFromDistributionList,
@@ -48,6 +51,10 @@ export default function DistributionLists() {
   const [selectedContactIds, setSelectedContactIds] = useState<Set<number>>(new Set());
   const [deleteListLoading, setDeleteListLoading] = useState(false);
   const [removeContactsLoading, setRemoveContactsLoading] = useState(false);
+  const [events, setEvents] = useState<DistributionListEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [newEventNote, setNewEventNote] = useState("");
+  const [eventNoteSaving, setEventNoteSaving] = useState(false);
 
   useEffect(() => {
     if (profileName && profileName !== ADMIN_PROFILE) {
@@ -159,6 +166,38 @@ export default function DistributionLists() {
     setSelectedContactIds(new Set());
     void loadContacts(selectedListId, { reset: true, search: searchValue });
   }, [loadContacts, searchValue, selectedListId]);
+
+  const loadEvents = useCallback(async (
+    listId: string,
+    options: { silent?: boolean } = {},
+  ) => {
+    if (!listId) {
+      setEvents([]);
+      return;
+    }
+    if (!options.silent) setEventsLoading(true);
+    try {
+      const result = await listDistributionListEvents(ADMIN_PROFILE, listId, { limit: 25, offset: 0 });
+      if (!result.success || !result.data) {
+        if (!options.silent) toast.error(result.error || "Failed to load list activity");
+        return;
+      }
+      setEvents(result.data.rows || []);
+    } catch {
+      if (!options.silent) toast.error("Failed to load list activity");
+    } finally {
+      if (!options.silent) setEventsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedListId) {
+      setEvents([]);
+      setNewEventNote("");
+      return;
+    }
+    void loadEvents(selectedListId, { silent: true });
+  }, [selectedListId, loadEvents]);
 
   const selectedList = useMemo(
     () => lists.find((item) => item.id === selectedListId) || null,
@@ -288,6 +327,7 @@ export default function DistributionLists() {
       setSelectedContactIds(new Set());
       await loadLists({ silent: true });
       await loadContacts(selectedListId, { reset: true, search: searchValue, silent: true });
+      await loadEvents(selectedListId, { silent: true });
 
       const removed = Number(result.data.removed || 0);
       const skipped = Number(result.data.skipped || 0);
@@ -298,6 +338,32 @@ export default function DistributionLists() {
       );
     } finally {
       setRemoveContactsLoading(false);
+    }
+  };
+
+  const handleCreateEventNote = async () => {
+    if (!selectedListId) {
+      toast.error("Select a distribution list first");
+      return;
+    }
+    const noteText = newEventNote.trim();
+    if (!noteText) {
+      toast.error("Enter a note first");
+      return;
+    }
+
+    setEventNoteSaving(true);
+    try {
+      const result = await createDistributionListNote(ADMIN_PROFILE, selectedListId, noteText);
+      if (!result.success) {
+        toast.error(result.error || "Failed to save list note");
+        return;
+      }
+      setNewEventNote("");
+      toast.success("List note saved");
+      await loadEvents(selectedListId, { silent: true });
+    } finally {
+      setEventNoteSaving(false);
     }
   };
 
@@ -419,6 +485,39 @@ export default function DistributionLists() {
               <p className="text-sm text-muted-foreground">Select a distribution list to view contacts.</p>
             ) : (
               <div className="space-y-3">
+                <div className="rounded-md border p-3">
+                  <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">List Note / Activity</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={newEventNote}
+                      onChange={(e) => setNewEventNote(e.target.value)}
+                      placeholder="Add note for this distribution list"
+                    />
+                    <Button onClick={handleCreateEventNote} disabled={eventNoteSaving}>
+                      {eventNoteSaving ? "Saving..." : "Save Note"}
+                    </Button>
+                  </div>
+                  <div className="mt-3 max-h-[160px] space-y-2 overflow-y-auto">
+                    {eventsLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading list activity...</p>
+                    ) : events.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No activity yet.</p>
+                    ) : (
+                      events.map((event) => (
+                        <div key={event.id} className="rounded-md border p-2 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium">{event.event_type.replace(/_/g, " ")}</p>
+                            <p className="text-xs text-muted-foreground">{new Date(event.created_at).toLocaleString()}</p>
+                          </div>
+                          {event.note_text ? (
+                            <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">{event.note_text}</p>
+                          ) : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
                 <div className="overflow-auto rounded-md border">
                   <Table>
                     <TableHeader>

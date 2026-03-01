@@ -323,6 +323,12 @@ function normalizeSearchTerm(input: unknown): string {
     .slice(0, 80);
 }
 
+function isArchivedStatusValue(value: unknown): boolean {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("archiv");
+}
+
 function normalizeDistributionListName(input: unknown): string {
   return String(input || "")
     .replace(/\s+/g, " ")
@@ -3277,6 +3283,95 @@ function isScheduledSyncDue(
   return { due: false, reason: "already_synced_today" };
 }
 
+async function maybeTriggerScheduledSync(
+  supabase: any,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  options: {
+    requestedBy: string;
+    triggerSource: string;
+    force?: boolean;
+  },
+): Promise<{
+  started: boolean;
+  skipped: boolean;
+  reason: string;
+  job: SyncJob | null;
+  settings: SyncSettingsRow;
+}> {
+  const settings = await getOrCreateSyncSettings(supabase);
+  const [activeJob, latestCompletedJob, latestMirrorSyncedAt] = await Promise.all([
+    getActiveSyncJob(supabase),
+    getLatestCompletedSyncJob(supabase),
+    getLatestMirrorSyncedAt(supabase),
+  ]);
+  const latestCompletedAt = getLatestJobTimestampIso(latestCompletedJob);
+  const dueState = options.force
+    ? { due: true, reason: "forced" }
+    : isScheduledSyncDue(settings, latestCompletedAt, latestMirrorSyncedAt, activeJob);
+
+  if (!dueState.due) {
+    return {
+      started: false,
+      skipped: true,
+      reason: dueState.reason,
+      job: activeJob,
+      settings,
+    };
+  }
+
+  const recheckedActiveJob = await getActiveSyncJob(supabase);
+  if (recheckedActiveJob) {
+    return {
+      started: false,
+      skipped: true,
+      reason: "active_job_present",
+      job: recheckedActiveJob,
+      settings,
+    };
+  }
+
+  const createdJob = await createSyncJob(supabase, {
+    requestedBy: options.requestedBy || ADMIN_PROFILE,
+    batchSize: settings.batch_size,
+    includeDeleted: settings.include_deleted,
+    metadata: {
+      source: "scheduled_sync",
+      trigger_reason: dueState.reason,
+      trigger_source: options.triggerSource,
+      schedule_id: settings.id,
+    },
+  });
+
+  try {
+    await upsertSyncSettings(supabase, {
+      last_scheduled_run_at: new Date().toISOString(),
+      metadata: {
+        last_trigger_source: options.triggerSource,
+        last_trigger_reason: dueState.reason,
+      },
+    });
+  } catch (settingsErr) {
+    console.warn("[bullhorn-sync-clientcontacts] Failed to persist scheduled sync metadata:", settingsErr);
+  }
+
+  queueProcessSyncJob(
+    supabase,
+    supabaseUrl,
+    supabaseServiceKey,
+    createdJob,
+    settings.max_batches_per_invocation,
+  );
+
+  return {
+    started: true,
+    skipped: false,
+    reason: dueState.reason,
+    job: createdJob,
+    settings,
+  };
+}
+
 async function createSyncJob(
   supabase: any,
   payload: {
@@ -3748,6 +3843,113 @@ async function updateLocalContactStatus(
   return updatedMirror;
 }
 
+async function updateLocalContactStatusBatch(
+  supabase: any,
+  payload: {
+    contactIds: number[];
+    profileName: string;
+    status?: string | null;
+    commStatusLabel?: string | null;
+    preferredContact?: string | null;
+    doNotContact?: boolean | null;
+    massMailOptOut?: boolean | null;
+    smsOptIn?: boolean | null;
+    emailBounced?: boolean | null;
+  },
+) {
+  const uniqueIds = Array.from(new Set(payload.contactIds.filter((id) => Number.isFinite(id))));
+  const updated: any[] = [];
+  const failed: Array<{ contactId: number; error: string }> = [];
+
+  for (const contactId of uniqueIds) {
+    try {
+      const row = await updateLocalContactStatus(supabase, {
+        contactId,
+        profileName: payload.profileName,
+        status: payload.status,
+        commStatusLabel: payload.commStatusLabel,
+        preferredContact: payload.preferredContact,
+        doNotContact: payload.doNotContact,
+        massMailOptOut: payload.massMailOptOut,
+        smsOptIn: payload.smsOptIn,
+        emailBounced: payload.emailBounced,
+      });
+      if (row) updated.push(row);
+    } catch (error) {
+      failed.push({
+        contactId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    requested: uniqueIds.length,
+    updated: updated.length,
+    failed: failed.length,
+    failedContacts: failed,
+    contacts: updated,
+  };
+}
+
+async function appendLocalCompanyNote(
+  supabase: any,
+  payload: {
+    companyId: number;
+    noteText: string;
+    noteLabel: string;
+    profileName: string;
+  },
+) {
+  const nowIso = new Date().toISOString();
+  const metadata = {
+    local: true,
+    createdAt: nowIso,
+    createdBy: payload.profileName,
+  };
+  const { data, error } = await supabase
+    .from("bullhorn_company_local_notes")
+    .insert({
+      company_id: payload.companyId,
+      note_label: payload.noteLabel,
+      note_text: payload.noteText,
+      created_by: payload.profileName,
+      metadata,
+    })
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to create local company note");
+  }
+
+  return data;
+}
+
+async function appendDistributionListEvent(
+  supabase: any,
+  payload: {
+    listId: string;
+    eventType: string;
+    profileName: string;
+    noteText?: string | null;
+    eventPayload?: Record<string, unknown>;
+  },
+) {
+  const { error } = await supabase
+    .from("distribution_list_events")
+    .insert({
+      list_id: payload.listId,
+      event_type: payload.eventType,
+      created_by: payload.profileName,
+      note_text: payload.noteText || null,
+      payload: payload.eventPayload || {},
+    });
+  if (error) {
+    console.warn("[bullhorn-sync-clientcontacts] Failed to append distribution list event:", error.message);
+  }
+}
+
 serve(async (req) => {
   if (!bootLogged) {
     console.log(`[BHSYNC] boot ${BUILD_MARKER}`);
@@ -3822,6 +4024,21 @@ serve(async (req) => {
     }
 
     if (action === "get-sync-health") {
+      const autoRunDue = data?.autoRunDue === undefined ? true : Boolean(data?.autoRunDue);
+      let schedulerAction: Record<string, unknown> | null = null;
+      if (autoRunDue) {
+        const scheduled = await maybeTriggerScheduledSync(supabase, supabaseUrl, supabaseServiceKey, {
+          requestedBy: profileName,
+          triggerSource: "get_sync_health",
+        });
+        schedulerAction = {
+          started: scheduled.started,
+          skipped: scheduled.skipped,
+          reason: scheduled.reason,
+          jobId: scheduled.job?.id || null,
+        };
+      }
+
       const settings = await getOrCreateSyncSettings(supabase);
       const [activeJob, latestCompletedJob, latestMirrorSyncedAt] = await Promise.all([
         getActiveSyncJob(supabase),
@@ -3851,6 +4068,7 @@ serve(async (req) => {
           dueNow: dueState.due,
           dueReason: dueState.reason,
           checkedAt: now.toISOString(),
+          schedulerAction,
         },
       });
     }
@@ -3875,63 +4093,43 @@ serve(async (req) => {
     }
 
     if (action === "run-scheduled-sync") {
-      const settings = await getOrCreateSyncSettings(supabase);
-      const [activeJob, latestCompletedJob, latestMirrorSyncedAt] = await Promise.all([
-        getActiveSyncJob(supabase),
-        getLatestCompletedSyncJob(supabase),
-        getLatestMirrorSyncedAt(supabase),
-      ]);
-      const latestCompletedAt = getLatestJobTimestampIso(latestCompletedJob);
-      const dueState = isScheduledSyncDue(
-        settings,
-        latestCompletedAt,
-        latestMirrorSyncedAt,
-        activeJob,
-      );
-      if (!dueState.due) {
+      const scheduled = await maybeTriggerScheduledSync(supabase, supabaseUrl, supabaseServiceKey, {
+        requestedBy: profileName,
+        triggerSource: "manual_run_scheduled_sync",
+      });
+      if (!scheduled.started) {
         return jsonResponse({
           success: true,
           data: {
             skipped: true,
-            reason: dueState.reason,
-            activeJob,
-            latestCompletedJob,
+            reason: scheduled.reason,
+            activeJob: scheduled.job,
+            latestCompletedJob: null,
           },
           message: "Scheduled sync skipped (not due).",
         });
       }
 
-      const createdJob = await createSyncJob(supabase, {
-        requestedBy: profileName,
-        batchSize: settings.batch_size,
-        includeDeleted: settings.include_deleted,
-        metadata: {
-          source: "scheduled_sync",
-          trigger_reason: dueState.reason,
-          schedule_id: settings.id,
-        },
-      });
-
-      try {
-        await upsertSyncSettings(supabase, {
-          last_scheduled_run_at: new Date().toISOString(),
-        });
-      } catch (settingsErr) {
-        console.warn("[bullhorn-sync-clientcontacts] Failed to persist last_scheduled_run_at:", settingsErr);
-      }
-
-      queueProcessSyncJob(
-        supabase,
-        supabaseUrl,
-        supabaseServiceKey,
-        createdJob,
-        settings.max_batches_per_invocation,
-      );
-
       return jsonResponse({
         success: true,
-        data: createdJob,
+        data: scheduled.job,
         message: "Scheduled sync started in background.",
+      });
+    }
+
+    if (action === "scheduler-heartbeat") {
+      const scheduled = await maybeTriggerScheduledSync(supabase, supabaseUrl, supabaseServiceKey, {
+        requestedBy: profileName,
+        triggerSource: "scheduler_heartbeat",
+      });
+      return jsonResponse({
+        success: true,
+        data: {
+          started: scheduled.started,
+          skipped: scheduled.skipped,
+          reason: scheduled.reason,
+          job: scheduled.job,
+        },
       });
     }
 
@@ -4021,6 +4219,52 @@ serve(async (req) => {
       });
     }
 
+    if (action === "create-local-company-note") {
+      const companyId = toFiniteNumber(data?.companyId);
+      const noteText = normalizeOptionalString(data?.noteText);
+      const noteLabel = normalizeOptionalString(data?.noteLabel) || "Local CRM Note";
+      if (!companyId) return jsonResponse({ success: false, error: "companyId is required" }, 400);
+      if (!noteText) return jsonResponse({ success: false, error: "noteText is required" }, 400);
+
+      const inserted = await appendLocalCompanyNote(supabase, {
+        companyId,
+        noteText,
+        noteLabel,
+        profileName,
+      });
+
+      return jsonResponse({
+        success: true,
+        data: inserted,
+        message: "Local company note saved.",
+      });
+    }
+
+    if (action === "list-local-company-notes") {
+      const companyId = toFiniteNumber(data?.companyId);
+      if (!companyId) return jsonResponse({ success: false, error: "companyId is required" }, 400);
+      const limit = normalizeListLimit(data?.limit);
+      const offset = normalizeListOffset(data?.offset);
+
+      const { data: rows, count, error } = await supabase
+        .from("bullhorn_company_local_notes")
+        .select("*", { count: "exact" })
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (error) throw error;
+
+      return jsonResponse({
+        success: true,
+        data: {
+          rows: rows || [],
+          total: Number(count || 0),
+          limit,
+          offset,
+        },
+      });
+    }
+
     if (action === "update-local-contact-status") {
       const contactId = toFiniteNumber(data?.contactId);
       if (!contactId) return jsonResponse({ success: false, error: "contactId is required" }, 400);
@@ -4054,6 +4298,45 @@ serve(async (req) => {
         success: true,
         data: updated,
         message: "Local contact status updated.",
+      });
+    }
+
+    if (action === "update-local-contact-status-batch") {
+      const contactIds = Array.isArray(data?.contactIds)
+        ? data.contactIds
+            .map((value: unknown) => toFiniteNumber(value))
+            .filter((id: number | null): id is number => Number.isFinite(id))
+        : [];
+      if (!contactIds.length) return jsonResponse({ success: false, error: "contactIds is required" }, 400);
+
+      const hasAnyPayload =
+        data?.status !== undefined ||
+        data?.commStatusLabel !== undefined ||
+        data?.preferredContact !== undefined ||
+        data?.doNotContact !== undefined ||
+        data?.massMailOptOut !== undefined ||
+        data?.smsOptIn !== undefined ||
+        data?.emailBounced !== undefined;
+      if (!hasAnyPayload) {
+        return jsonResponse({ success: false, error: "No status fields provided for update" }, 400);
+      }
+
+      const result = await updateLocalContactStatusBatch(supabase, {
+        contactIds,
+        profileName,
+        status: data?.status === undefined ? undefined : normalizeOptionalString(data?.status),
+        commStatusLabel: data?.commStatusLabel === undefined ? undefined : normalizeOptionalString(data?.commStatusLabel),
+        preferredContact: data?.preferredContact === undefined ? undefined : normalizeOptionalString(data?.preferredContact),
+        doNotContact: data?.doNotContact === undefined ? undefined : normalizeLooseBoolean(data?.doNotContact),
+        massMailOptOut: data?.massMailOptOut === undefined ? undefined : normalizeLooseBoolean(data?.massMailOptOut),
+        smsOptIn: data?.smsOptIn === undefined ? undefined : normalizeLooseBoolean(data?.smsOptIn),
+        emailBounced: data?.emailBounced === undefined ? undefined : normalizeLooseBoolean(data?.emailBounced),
+      });
+
+      return jsonResponse({
+        success: true,
+        data: result,
+        message: `Updated ${result.updated} contacts.`,
       });
     }
 
@@ -4233,29 +4516,22 @@ serve(async (req) => {
       };
 
       const { data: localCompanyNoteRows } = await supabase
-        .from("bullhorn_contact_timeline_events")
-        .select("id,event_at,summary,details,actor_name,entity_name,entity_id,payload")
-        .in("event_source", ["note", "local_note"])
-        .eq("entity_id", companyId)
-        .ilike("entity_name", "ClientCorporation%")
-        .order("event_at", { ascending: false, nullsFirst: false })
-        .order("id", { ascending: false })
+        .from("bullhorn_company_local_notes")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
         .limit(25);
 
       const localCompanyNotes = (Array.isArray(localCompanyNoteRows) ? localCompanyNoteRows : []).map((row: any) => {
-        const payload =
-          row?.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
-            ? (row.payload as Record<string, unknown>)
-            : null;
-        const payloadId = toFiniteNumber(payload?.id);
         return {
-          id: payloadId ?? toFiniteNumber(row?.id),
-          action: normalizeOptionalString(row?.summary),
-          comments: normalizeOptionalString(row?.details) ?? normalizeOptionalString(row?.summary),
-          dateAdded: normalizeBullhornDate(row?.event_at),
-          personName: normalizeOptionalString(row?.actor_name),
-          targetEntityName: normalizeOptionalString(row?.entity_name) ?? "ClientCorporation",
-          targetEntityId: toFiniteNumber(row?.entity_id) ?? companyId,
+          id: normalizeOptionalString(row?.id) ?? toFiniteNumber(row?.id),
+          action: normalizeOptionalString(row?.note_label) || "Local CRM Note",
+          comments: normalizeOptionalString(row?.note_text),
+          dateAdded: normalizeBullhornDate(row?.created_at),
+          personName: normalizeOptionalString(row?.created_by),
+          targetEntityName: "ClientCorporation",
+          targetEntityId: companyId,
+          metadata: row?.metadata ?? null,
         };
       });
 
@@ -4266,6 +4542,7 @@ serve(async (req) => {
             company: companyFromMirror || null,
             contacts: mirrorContacts,
             notes: localCompanyNotes,
+            localNotes: localCompanyNotes,
           },
         });
       }
@@ -4278,6 +4555,7 @@ serve(async (req) => {
             company: companyFromMirror || null,
             contacts: mirrorContacts,
             notes: localCompanyNotes,
+            localNotes: localCompanyNotes,
           },
         });
       }
@@ -4324,6 +4602,7 @@ serve(async (req) => {
           company: company || null,
           contacts,
           notes: notes.length ? notes : localCompanyNotes,
+          localNotes: localCompanyNotes,
         },
       });
     }
@@ -4596,78 +4875,137 @@ serve(async (req) => {
       const filterRows = normalizeFilterRows(data?.filters);
       const useAdvancedFiltering = filterRows.length > 0;
       const enrichLatestNotes = Boolean(data?.enrichLatestNotes);
+      const useDbSearch = data?.useDbSearch === undefined ? true : Boolean(data?.useDbSearch);
+      const autoRunScheduled = data?.autoRunScheduled === undefined ? true : Boolean(data?.autoRunScheduled);
 
-      if (!useAdvancedFiltering) {
-        let query = supabase
-          .from("bullhorn_client_contacts_mirror")
-          .select("*", { count: "exact" })
-          .order("bullhorn_id", { ascending: false });
-
-        if (searchTerm) {
-          const like = `%${searchTerm}%`;
-          query = query.or(
-            `name.ilike.${like},email.ilike.${like},client_corporation_name.ilike.${like},occupation.ilike.${like},address_city.ilike.${like}`,
-          );
-        }
-
-        const { data: contacts, count, error } = await query.range(offset, offset + limit - 1);
-
-        if (error) throw error;
-        const responseContacts = enrichLatestNotes
-          ? await enrichContactsWithLatestNotes(supabase, contacts || [])
-          : (contacts || []);
-        return jsonResponse({
-          success: true,
-          data: {
-            contacts: responseContacts,
-            total: count || 0,
-            limit,
-            offset,
-          },
+      let schedulerAction: Record<string, unknown> | null = null;
+      if (autoRunScheduled && offset === 0) {
+        const scheduled = await maybeTriggerScheduledSync(supabase, supabaseUrl, supabaseServiceKey, {
+          requestedBy: profileName,
+          triggerSource: "list_mirror_contacts",
         });
+        schedulerAction = {
+          started: scheduled.started,
+          skipped: scheduled.skipped,
+          reason: scheduled.reason,
+          jobId: scheduled.job?.id || null,
+        };
       }
 
-      // Advanced filter mode (Bullhorn-style): OR within row values, AND between rows.
-      const chunkSize = 500;
-      let cursor = 0;
-      let matchedTotal = 0;
-      const pagedContacts: any[] = [];
+      const queryStartedAt = Date.now();
+      let contacts: any[] = [];
+      let total = 0;
+      let queryMode = "legacy";
+      let fallbackReason: string | null = null;
 
-      while (true) {
-        const { data: batch, error } = await supabase
-          .from("bullhorn_client_contacts_mirror")
-          .select("*")
-          .order("bullhorn_id", { ascending: false })
-          .range(cursor, cursor + chunkSize - 1);
+      if (useDbSearch) {
+        const { data: rpcRows, error: rpcError } = await supabase.rpc("crm_search_contacts", {
+          p_search: searchTerm || null,
+          p_filters: filterRows,
+          p_limit: limit,
+          p_offset: offset,
+          p_exclude_archived: true,
+        });
 
-        if (error) throw error;
-        const rows = Array.isArray(batch) ? batch : [];
-        if (!rows.length) break;
+        if (!rpcError && Array.isArray(rpcRows)) {
+          queryMode = "rpc";
+          const parsedRows = rpcRows as Array<{ contact: unknown; total_count: number | null }>;
+          contacts = parsedRows
+            .map((row) => (row?.contact && typeof row.contact === "object" ? row.contact : null))
+            .filter((row): row is Record<string, unknown> => Boolean(row));
+          total = Number(parsedRows[0]?.total_count || 0);
 
-        for (const contact of rows) {
-          if (!contactMatchesQuickSearch(contact, searchTerm)) continue;
-          if (!contactMatchesFilterRows(contact, filterRows)) continue;
-
-          if (matchedTotal >= offset && pagedContacts.length < limit) {
-            pagedContacts.push(contact);
+          if (!parsedRows.length && offset > 0) {
+            const { data: probeRows, error: probeError } = await supabase.rpc("crm_search_contacts", {
+              p_search: searchTerm || null,
+              p_filters: filterRows,
+              p_limit: 1,
+              p_offset: 0,
+              p_exclude_archived: true,
+            });
+            if (!probeError && Array.isArray(probeRows) && probeRows.length > 0) {
+              total = Number((probeRows[0] as { total_count?: number | null })?.total_count || 0);
+            }
           }
-          matchedTotal += 1;
+        } else if (rpcError) {
+          fallbackReason = rpcError.message || "rpc_search_failed";
+          console.warn("[bullhorn-sync-clientcontacts] crm_search_contacts fallback:", fallbackReason);
         }
+      }
 
-        cursor += rows.length;
-        if (rows.length < chunkSize) break;
+      if (queryMode !== "rpc") {
+        if (!useAdvancedFiltering) {
+          let query = supabase
+            .from("bullhorn_client_contacts_mirror")
+            .select("*", { count: "exact" })
+            .order("bullhorn_id", { ascending: false });
+
+          if (searchTerm) {
+            const like = `%${searchTerm}%`;
+            query = query.or(
+              `name.ilike.${like},email.ilike.${like},client_corporation_name.ilike.${like},occupation.ilike.${like},address_city.ilike.${like}`,
+            );
+          }
+
+          const { data: directContacts, count, error } = await query.range(offset, offset + limit - 1);
+          if (error) throw error;
+          contacts = directContacts || [];
+          total = Number(count || 0);
+        } else {
+          const chunkSize = 500;
+          let cursor = 0;
+          let matchedTotal = 0;
+          const pagedContacts: any[] = [];
+
+          while (true) {
+            const { data: batch, error } = await supabase
+              .from("bullhorn_client_contacts_mirror")
+              .select("*")
+              .order("bullhorn_id", { ascending: false })
+              .range(cursor, cursor + chunkSize - 1);
+
+            if (error) throw error;
+            const rows = Array.isArray(batch) ? batch : [];
+            if (!rows.length) break;
+
+            for (const contact of rows) {
+              if (isArchivedStatusValue((contact as any)?.status)) continue;
+              if (!contactMatchesQuickSearch(contact, searchTerm)) continue;
+              if (!contactMatchesFilterRows(contact, filterRows)) continue;
+
+              if (matchedTotal >= offset && pagedContacts.length < limit) {
+                pagedContacts.push(contact);
+              }
+              matchedTotal += 1;
+            }
+
+            cursor += rows.length;
+            if (rows.length < chunkSize) break;
+          }
+
+          contacts = pagedContacts;
+          total = matchedTotal;
+        }
       }
 
       const responseContacts = enrichLatestNotes
-        ? await enrichContactsWithLatestNotes(supabase, pagedContacts)
-        : pagedContacts;
+        ? await enrichContactsWithLatestNotes(supabase, contacts)
+        : contacts;
+      const queryDurationMs = Math.max(0, Date.now() - queryStartedAt);
+
       return jsonResponse({
         success: true,
         data: {
           contacts: responseContacts,
-          total: matchedTotal,
+          total,
           limit,
           offset,
+          meta: {
+            queryMode,
+            queryDurationMs,
+            fallbackReason,
+            schedulerAction,
+          },
         },
       });
     }
@@ -4683,18 +5021,15 @@ serve(async (req) => {
       const countByList = new Map<string, number>();
 
       if (listIds.length) {
-        const counts = await Promise.all(
-          listIds.map(async (listId) => {
-            const { count, error: countError } = await supabase
-              .from("distribution_list_contacts")
-              .select("*", { count: "exact", head: true })
-              .eq("list_id", listId);
-            if (countError) throw countError;
-            return [listId, Number(count || 0)] as const;
-          }),
-        );
-        for (const [listId, count] of counts) {
-          countByList.set(listId, count);
+        const { data: countRows, error: countError } = await supabase
+          .from("distribution_list_contacts")
+          .select("list_id")
+          .in("list_id", listIds);
+        if (countError) throw countError;
+        for (const row of countRows || []) {
+          const listId = String((row as any)?.list_id || "").trim();
+          if (!listId) continue;
+          countByList.set(listId, (countByList.get(listId) || 0) + 1);
         }
       }
 
@@ -4729,6 +5064,16 @@ serve(async (req) => {
         }
         throw error;
       }
+
+      await appendDistributionListEvent(supabase, {
+        listId: created.id,
+        eventType: "list_created",
+        profileName,
+        noteText: `Created list "${created.name}"`,
+        eventPayload: {
+          listName: created.name,
+        },
+      });
 
       return jsonResponse({
         success: true,
@@ -4838,6 +5183,19 @@ serve(async (req) => {
       const inserted = Math.max(0, Number(afterCount || 0) - Number(beforeCount || 0));
       const skipped = Math.max(0, uniqueContactIds.length - inserted);
 
+      await appendDistributionListEvent(supabase, {
+        listId,
+        eventType: "contacts_added",
+        profileName,
+        noteText: `Added ${inserted} contacts${skipped ? ` (${skipped} skipped)` : ""}`,
+        eventPayload: {
+          inserted,
+          skipped,
+          requested: uniqueContactIds.length,
+          contactIds: uniqueContactIds,
+        },
+      });
+
       return jsonResponse({
         success: true,
         data: {
@@ -4919,6 +5277,19 @@ serve(async (req) => {
         .eq("list_id", listId);
       if (countError) throw countError;
 
+      await appendDistributionListEvent(supabase, {
+        listId,
+        eventType: "contacts_removed",
+        profileName,
+        noteText: `Removed ${removed} contacts${uniqueContactIds.length - removed > 0 ? ` (${uniqueContactIds.length - removed} skipped)` : ""}`,
+        eventPayload: {
+          removed,
+          skipped: Math.max(0, uniqueContactIds.length - removed),
+          requested: uniqueContactIds.length,
+          contactIds: uniqueContactIds,
+        },
+      });
+
       return jsonResponse({
         success: true,
         data: {
@@ -4928,6 +5299,65 @@ serve(async (req) => {
           skipped: Math.max(0, uniqueContactIds.length - removed),
           totalInList: Number(totalInList || 0),
         },
+      });
+    }
+
+    if (action === "list-distribution-list-events") {
+      const listId = String(data?.listId || "").trim();
+      if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
+      const limit = normalizeListLimit(data?.limit);
+      const offset = normalizeListOffset(data?.offset);
+
+      const { data: rows, count, error } = await supabase
+        .from("distribution_list_events")
+        .select("*", { count: "exact" })
+        .eq("list_id", listId)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (error) throw error;
+
+      return jsonResponse({
+        success: true,
+        data: {
+          rows: rows || [],
+          total: Number(count || 0),
+          limit,
+          offset,
+        },
+      });
+    }
+
+    if (action === "create-distribution-list-note") {
+      const listId = String(data?.listId || "").trim();
+      const noteText = normalizeOptionalString(data?.noteText);
+      if (!listId) return jsonResponse({ success: false, error: "listId is required" }, 400);
+      if (!noteText) return jsonResponse({ success: false, error: "noteText is required" }, 400);
+
+      const { data: existingList, error: listError } = await supabase
+        .from("distribution_lists")
+        .select("id,name")
+        .eq("id", listId)
+        .maybeSingle();
+      if (listError) throw listError;
+      if (!existingList) return jsonResponse({ success: false, error: "Distribution list not found" }, 404);
+
+      await appendDistributionListEvent(supabase, {
+        listId,
+        eventType: "note",
+        profileName,
+        noteText,
+        eventPayload: {
+          listName: existingList.name,
+        },
+      });
+
+      return jsonResponse({
+        success: true,
+        data: {
+          listId,
+          noteText,
+        },
+        message: "Distribution list note saved.",
       });
     }
 

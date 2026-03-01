@@ -187,6 +187,18 @@ export interface BullhornLiveCompanyDetail {
   company: Record<string, unknown> | null;
   contacts: Record<string, unknown>[];
   notes: BullhornLiveNote[];
+  localNotes?: BullhornLiveNote[];
+}
+
+export interface BullhornCompanyLocalNote {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  company_id: number;
+  note_label: string;
+  note_text: string;
+  created_by: string;
+  metadata: Record<string, unknown> | null;
 }
 
 export interface DistributionListSummary {
@@ -208,6 +220,28 @@ export interface DistributionListContact {
   occupation: string | null;
   company_name: string | null;
   contact_snapshot?: Record<string, unknown> | null;
+}
+
+export interface DistributionListEvent {
+  id: number;
+  created_at: string;
+  list_id: string;
+  event_type: string;
+  created_by: string;
+  note_text: string | null;
+  payload: Record<string, unknown> | null;
+}
+
+export interface BullhornMirrorContactsMeta {
+  queryMode: "rpc" | "legacy";
+  queryDurationMs: number;
+  fallbackReason: string | null;
+  schedulerAction?: {
+    started: boolean;
+    skipped: boolean;
+    reason: string;
+    jobId: string | null;
+  } | null;
 }
 
 export type BullhornContactFilterField =
@@ -336,6 +370,7 @@ export async function listBullhornMirrorContacts(
     total: number;
     limit: number;
     offset: number;
+    meta?: BullhornMirrorContactsMeta;
   }>("list-mirror-contacts", profileName, options);
 }
 
@@ -460,6 +495,33 @@ export async function listDistributionListContacts(
   }>("list-distribution-list-contacts", profileName, { listId, ...options });
 }
 
+export async function listDistributionListEvents(
+  profileName: string,
+  listId: string,
+  options: {
+    limit?: number;
+    offset?: number;
+  } = {},
+) {
+  return callBullhornSync<{
+    rows: DistributionListEvent[];
+    total: number;
+    limit: number;
+    offset: number;
+  }>("list-distribution-list-events", profileName, { listId, ...options });
+}
+
+export async function createDistributionListNote(
+  profileName: string,
+  listId: string,
+  noteText: string,
+) {
+  return callBullhornSync<{
+    listId: string;
+    noteText: string;
+  }>("create-distribution-list-note", profileName, { listId, noteText });
+}
+
 export async function removeContactsFromDistributionList(
   profileName: string,
   listId: string,
@@ -489,6 +551,37 @@ export async function createBullhornLocalContactNote(
   });
 }
 
+export async function createBullhornLocalCompanyNote(
+  profileName: string,
+  companyId: number,
+  noteText: string,
+  options: {
+    noteLabel?: string;
+  } = {},
+) {
+  return callBullhornSync<BullhornCompanyLocalNote>("create-local-company-note", profileName, {
+    companyId,
+    noteText,
+    ...options,
+  });
+}
+
+export async function listBullhornLocalCompanyNotes(
+  profileName: string,
+  companyId: number,
+  options: {
+    limit?: number;
+    offset?: number;
+  } = {},
+) {
+  return callBullhornSync<{
+    rows: BullhornCompanyLocalNote[];
+    total: number;
+    limit: number;
+    offset: number;
+  }>("list-local-company-notes", profileName, { companyId, ...options });
+}
+
 export async function updateBullhornLocalContactStatus(
   profileName: string,
   contactId: number,
@@ -504,6 +597,31 @@ export async function updateBullhornLocalContactStatus(
 ) {
   return callBullhornSync<BullhornMirrorContact>("update-local-contact-status", profileName, {
     contactId,
+    ...options,
+  });
+}
+
+export async function updateBullhornLocalContactStatusBatch(
+  profileName: string,
+  contactIds: number[],
+  options: {
+    status?: string | null;
+    commStatusLabel?: string | null;
+    preferredContact?: string | null;
+    doNotContact?: boolean | null;
+    massMailOptOut?: boolean | null;
+    smsOptIn?: boolean | null;
+    emailBounced?: boolean | null;
+  },
+) {
+  return callBullhornSync<{
+    requested: number;
+    updated: number;
+    failed: number;
+    failedContacts: Array<{ contactId: number; error: string }>;
+    contacts: BullhornMirrorContact[];
+  }>("update-local-contact-status-batch", profileName, {
+    contactIds,
     ...options,
   });
 }

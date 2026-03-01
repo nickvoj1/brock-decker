@@ -4,9 +4,11 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { useProfileName } from "@/hooks/useProfileName";
 import {
   BullhornContactCommsStatus,
+  BullhornCompanyLocalNote,
   BullhornContactDocument,
   DistributionListSummary,
   BullhornSyncHealth,
+  BullhornMirrorContactsMeta,
   BullhornTimelineEvent,
   addContactsToDistributionList,
   BullhornContactFilterField,
@@ -17,6 +19,7 @@ import {
   BullhornMirrorContact,
   BullhornSyncJob,
   createDistributionList,
+  createBullhornLocalCompanyNote,
   createBullhornLocalContactNote,
   getBullhornContactCommsStatus,
   getBullhornContactDocuments,
@@ -26,11 +29,14 @@ import {
   getBullhornMirrorStats,
   getBullhornSyncHealth,
   listDistributionLists,
+  listBullhornLocalCompanyNotes,
   listBullhornMirrorContacts,
   listBullhornSyncJobs,
   runBullhornScheduledSync,
   startBullhornClientContactSync,
+  upsertBullhornSyncSettings,
   updateBullhornLocalContactStatus,
+  updateBullhornLocalContactStatusBatch,
 } from "@/lib/bullhornSyncApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +51,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowDown, ArrowUp, ArrowUpDown, Briefcase, Building2, Calendar, Clock, Database, Mail, Phone, Plus, RefreshCw, User, X } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { ArrowDown, ArrowUp, ArrowUpDown, Briefcase, Building2, Calendar, Clock, Database, Mail, Phone, Plus, RefreshCw, Settings2, User, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -293,6 +300,27 @@ type LocalContactStatusDraft = {
   emailBounced: boolean;
 };
 
+type BatchStatusDraft = {
+  status: string;
+  commStatusLabel: string;
+  preferredContact: string;
+  doNotContact: "keep" | "true" | "false";
+  massMailOptOut: "keep" | "true" | "false";
+  smsOptIn: "keep" | "true" | "false";
+  emailBounced: "keep" | "true" | "false";
+};
+
+type SyncSettingsDraft = {
+  enabled: boolean;
+  targetHourUtc: number;
+  targetMinuteUtc: number;
+  minIntervalHours: number;
+  maxLagHours: number;
+  includeDeleted: boolean;
+  batchSize: number;
+  maxBatchesPerInvocation: number;
+};
+
 type CompanyProfileData = {
   id: number | null;
   name: string;
@@ -482,6 +510,24 @@ function formatLagLabel(health: BullhornSyncHealth | null): string {
   if (health.lagHours === null || !Number.isFinite(health.lagHours)) return "Lag: -";
   if (health.lagHours < 1) return `Lag: ${Math.max(1, Math.round(health.lagHours * 60))}m`;
   return `Lag: ${health.lagHours.toFixed(1)}h`;
+}
+
+function mapHealthSettingsToDraft(health: BullhornSyncHealth | null): SyncSettingsDraft {
+  return {
+    enabled: health?.settings?.enabled ?? true,
+    targetHourUtc: Number(health?.settings?.target_hour_utc ?? 2),
+    targetMinuteUtc: Number(health?.settings?.target_minute_utc ?? 0),
+    minIntervalHours: Number(health?.settings?.min_interval_hours ?? 20),
+    maxLagHours: Number(health?.settings?.max_lag_hours ?? 24),
+    includeDeleted: Boolean(health?.settings?.include_deleted ?? false),
+    batchSize: Number(health?.settings?.batch_size ?? 500),
+    maxBatchesPerInvocation: Number(health?.settings?.max_batches_per_invocation ?? 8),
+  };
+}
+
+function normalizeTriStateBoolean(value: "keep" | "true" | "false"): boolean | undefined {
+  if (value === "keep") return undefined;
+  return value === "true";
 }
 
 function normalizeSortableText(value: string): string {
@@ -874,8 +920,11 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [syncJobLoading, setSyncJobLoading] = useState(false);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
   const [scheduledSyncActionLoading, setScheduledSyncActionLoading] = useState(false);
+  const [syncSettingsDraft, setSyncSettingsDraft] = useState<SyncSettingsDraft>(() => mapHealthSettingsToDraft(null));
+  const [syncSettingsSaving, setSyncSettingsSaving] = useState(false);
   const [mirrorCount, setMirrorCount] = useState(0);
   const [syncHealth, setSyncHealth] = useState<BullhornSyncHealth | null>(null);
+  const [contactsQueryMeta, setContactsQueryMeta] = useState<BullhornMirrorContactsMeta | null>(null);
   const [contacts, setContacts] = useState<BullhornMirrorContact[]>([]);
   const [contactsTotal, setContactsTotal] = useState(0);
   const [contactsLoading, setContactsLoading] = useState(false);
@@ -916,7 +965,21 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
   const [companyDetailLoading, setCompanyDetailLoading] = useState(false);
   const [localNoteDraft, setLocalNoteDraft] = useState("");
   const [localNoteSaving, setLocalNoteSaving] = useState(false);
+  const [localCompanyNotes, setLocalCompanyNotes] = useState<BullhornCompanyLocalNote[]>([]);
+  const [localCompanyNoteDraft, setLocalCompanyNoteDraft] = useState("");
+  const [localCompanyNoteSaving, setLocalCompanyNoteSaving] = useState(false);
   const [localStatusSaving, setLocalStatusSaving] = useState(false);
+  const [batchStatusSaving, setBatchStatusSaving] = useState(false);
+  const [isBatchStatusDialogOpen, setIsBatchStatusDialogOpen] = useState(false);
+  const [batchStatusDraft, setBatchStatusDraft] = useState<BatchStatusDraft>({
+    status: "",
+    commStatusLabel: "",
+    preferredContact: "",
+    doNotContact: "keep",
+    massMailOptOut: "keep",
+    smsOptIn: "keep",
+    emailBounced: "keep",
+  });
   const [localStatusDraft, setLocalStatusDraft] = useState<LocalContactStatusDraft>({
     status: "",
     commStatusLabel: "",
@@ -1061,6 +1124,19 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
   }, []);
 
+  useEffect(() => {
+    setSyncSettingsDraft(mapHealthSettingsToDraft(syncHealth));
+  }, [
+    syncHealth?.settings?.enabled,
+    syncHealth?.settings?.target_hour_utc,
+    syncHealth?.settings?.target_minute_utc,
+    syncHealth?.settings?.min_interval_hours,
+    syncHealth?.settings?.max_lag_hours,
+    syncHealth?.settings?.include_deleted,
+    syncHealth?.settings?.batch_size,
+    syncHealth?.settings?.max_batches_per_invocation,
+  ]);
+
   const loadBullhornMirrorContacts = useCallback(async (
     options: {
       silent?: boolean;
@@ -1086,6 +1162,7 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       });
 
       if (result.success && result.data) {
+        setContactsQueryMeta(result.data.meta || null);
         const rawBatch = result.data.contacts || [];
         const visibleContacts = (result.data.contacts || []).filter((contact) => {
           const directStatus = contact.status;
@@ -1224,6 +1301,32 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       toast.error("Failed to run scheduled sync check");
     } finally {
       setScheduledSyncActionLoading(false);
+    }
+  };
+
+  const saveSyncSettings = async () => {
+    setSyncSettingsSaving(true);
+    try {
+      const result = await upsertBullhornSyncSettings(ADMIN_PROFILE, {
+        enabled: syncSettingsDraft.enabled,
+        targetHourUtc: Math.max(0, Math.min(23, Math.floor(syncSettingsDraft.targetHourUtc || 0))),
+        targetMinuteUtc: Math.max(0, Math.min(59, Math.floor(syncSettingsDraft.targetMinuteUtc || 0))),
+        minIntervalHours: Math.max(1, Math.min(168, Math.floor(syncSettingsDraft.minIntervalHours || 1))),
+        maxLagHours: Math.max(1, Math.min(336, Math.floor(syncSettingsDraft.maxLagHours || 1))),
+        includeDeleted: syncSettingsDraft.includeDeleted,
+        batchSize: Math.max(5, Math.min(2000, Math.floor(syncSettingsDraft.batchSize || 5))),
+        maxBatchesPerInvocation: Math.max(1, Math.min(40, Math.floor(syncSettingsDraft.maxBatchesPerInvocation || 1))),
+      });
+      if (!result.success) {
+        toast.error(result.error || "Failed to save sync settings");
+        return;
+      }
+      toast.success("Sync settings saved");
+      await loadBullhornSyncData({ silent: true });
+    } catch {
+      toast.error("Failed to save sync settings");
+    } finally {
+      setSyncSettingsSaving(false);
     }
   };
 
@@ -1366,6 +1469,19 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     () => mapLiveNotesToProfileEntries(liveCompanyDetail?.notes),
     [liveCompanyDetail?.notes],
   );
+  const selectedLocalCompanyNotes = useMemo(
+    () =>
+      localCompanyNotes.map((note) => ({
+        label: note.note_label || "Local CRM Note",
+        value: note.note_text,
+        date: formatMirrorDate(note.created_at) === "-" ? null : formatMirrorDate(note.created_at),
+      })),
+    [localCompanyNotes],
+  );
+  const displayedCompanyNotes = useMemo(() => {
+    const baseNotes = selectedLiveCompanyNotes.length ? selectedLiveCompanyNotes : selectedCompanyData?.notes || [];
+    return [...selectedLocalCompanyNotes, ...baseNotes];
+  }, [selectedCompanyData?.notes, selectedLiveCompanyNotes, selectedLocalCompanyNotes]);
 
   const contactOverview = useMemo(() => {
     if (!selectedContactProfile) return null;
@@ -1780,6 +1896,107 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     }
   }, [localStatusDraft, selectedContactProfile, openContactProfile, loadBullhornMirrorContacts]);
 
+  const saveBatchLocalStatus = useCallback(async () => {
+    const contactIds = Array.from(selectedContactIds);
+    if (!contactIds.length) {
+      toast.error("Select at least one contact first");
+      return;
+    }
+
+    const payload = {
+      status: batchStatusDraft.status.trim() || undefined,
+      commStatusLabel: batchStatusDraft.commStatusLabel.trim() || undefined,
+      preferredContact: batchStatusDraft.preferredContact.trim() || undefined,
+      doNotContact: normalizeTriStateBoolean(batchStatusDraft.doNotContact),
+      massMailOptOut: normalizeTriStateBoolean(batchStatusDraft.massMailOptOut),
+      smsOptIn: normalizeTriStateBoolean(batchStatusDraft.smsOptIn),
+      emailBounced: normalizeTriStateBoolean(batchStatusDraft.emailBounced),
+    };
+
+    const hasAnyChange = Object.values(payload).some((value) => value !== undefined);
+    if (!hasAnyChange) {
+      toast.error("Set at least one field for batch update");
+      return;
+    }
+
+    setBatchStatusSaving(true);
+    try {
+      const result = await updateBullhornLocalContactStatusBatch(
+        ADMIN_PROFILE,
+        contactIds,
+        payload,
+      );
+      if (!result.success || !result.data) {
+        toast.error(result.error || "Batch status update failed");
+        return;
+      }
+
+      const failed = Number(result.data.failed || 0);
+      const updated = Number(result.data.updated || 0);
+      if (failed > 0) {
+        toast.warning(`Updated ${updated} contacts (${failed} failed)`);
+      } else {
+        toast.success(`Updated ${updated} contacts`);
+      }
+
+      setIsBatchStatusDialogOpen(false);
+      await loadBullhornMirrorContacts({ silent: true, reset: true });
+    } catch {
+      toast.error("Batch status update failed");
+    } finally {
+      setBatchStatusSaving(false);
+    }
+  }, [batchStatusDraft, selectedContactIds, loadBullhornMirrorContacts]);
+
+  const loadLocalCompanyNotes = useCallback(async (companyId: number, options: { silent?: boolean } = {}) => {
+    try {
+      const result = await listBullhornLocalCompanyNotes(ADMIN_PROFILE, companyId, { limit: 50, offset: 0 });
+      if (!result.success || !result.data) {
+        if (!options.silent) toast.error(result.error || "Failed to load local company notes");
+        return;
+      }
+      setLocalCompanyNotes(result.data.rows || []);
+    } catch {
+      if (!options.silent) toast.error("Failed to load local company notes");
+    }
+  }, []);
+
+  const saveLocalCompanyNote = useCallback(async () => {
+    if (!selectedCompanyProfile) return;
+    const companyId = extractCompanyIdFromRow(selectedCompanyProfile);
+    if (!companyId) {
+      toast.error("No company ID available for this profile");
+      return;
+    }
+
+    const noteText = localCompanyNoteDraft.trim();
+    if (!noteText) {
+      toast.error("Enter note text before saving");
+      return;
+    }
+
+    setLocalCompanyNoteSaving(true);
+    try {
+      const result = await createBullhornLocalCompanyNote(
+        ADMIN_PROFILE,
+        companyId,
+        noteText,
+      );
+      if (!result.success) {
+        toast.error(result.error || "Failed to save local company note");
+        return;
+      }
+
+      toast.success("Local company note saved");
+      setLocalCompanyNoteDraft("");
+      await loadLocalCompanyNotes(companyId, { silent: true });
+    } catch {
+      toast.error("Failed to save local company note");
+    } finally {
+      setLocalCompanyNoteSaving(false);
+    }
+  }, [loadLocalCompanyNotes, localCompanyNoteDraft, selectedCompanyProfile]);
+
   useEffect(() => {
     if (!urlContactId) {
       if (selectedContactProfile) {
@@ -1793,6 +2010,20 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
     if (!row) return;
     void openContactProfile(row, { preserveActiveTab: true });
   }, [urlContactId, allContactRowsById, openContactProfile, selectedContactProfile, resetSelectedContactProfile]);
+
+  useEffect(() => {
+    if (!selectedCompanyProfile) {
+      setLocalCompanyNotes([]);
+      setLocalCompanyNoteDraft("");
+      return;
+    }
+    const companyId = extractCompanyIdFromRow(selectedCompanyProfile);
+    if (!companyId) {
+      setLocalCompanyNotes([]);
+      return;
+    }
+    void loadLocalCompanyNotes(companyId, { silent: true });
+  }, [selectedCompanyProfile, loadLocalCompanyNotes]);
 
   const visibleContactIds = useMemo(
     () => displayedContacts.map(({ contact }) => contact.bullhorn_id),
@@ -2022,6 +2253,110 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </div>
             </div>
 
+            <div className="rounded-md border p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    <Settings2 className="h-4 w-4" />
+                    Scheduler Settings
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Controls automatic Bullhorn mirror sync cadence.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Enabled</span>
+                  <Switch
+                    checked={syncSettingsDraft.enabled}
+                    onCheckedChange={(checked) => setSyncSettingsDraft((prev) => ({ ...prev, enabled: checked }))}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Hour (UTC)</p>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={syncSettingsDraft.targetHourUtc}
+                    onChange={(e) => setSyncSettingsDraft((prev) => ({ ...prev, targetHourUtc: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Minute (UTC)</p>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={59}
+                    value={syncSettingsDraft.targetMinuteUtc}
+                    onChange={(e) => setSyncSettingsDraft((prev) => ({ ...prev, targetMinuteUtc: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Min Interval (h)</p>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={168}
+                    value={syncSettingsDraft.minIntervalHours}
+                    onChange={(e) => setSyncSettingsDraft((prev) => ({ ...prev, minIntervalHours: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Lag Alert (h)</p>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={336}
+                    value={syncSettingsDraft.maxLagHours}
+                    onChange={(e) => setSyncSettingsDraft((prev) => ({ ...prev, maxLagHours: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Batch Size</p>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={2000}
+                    value={syncSettingsDraft.batchSize}
+                    onChange={(e) => setSyncSettingsDraft((prev) => ({ ...prev, batchSize: Number(e.target.value) }))}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Batches / Invocation</p>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={40}
+                    value={syncSettingsDraft.maxBatchesPerInvocation}
+                    onChange={(e) =>
+                      setSyncSettingsDraft((prev) => ({ ...prev, maxBatchesPerInvocation: Number(e.target.value) }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Include Deleted</p>
+                  <div className="flex h-10 items-center rounded-md border px-3">
+                    <Switch
+                      checked={syncSettingsDraft.includeDeleted}
+                      onCheckedChange={(checked) => setSyncSettingsDraft((prev) => ({ ...prev, includeDeleted: checked }))}
+                    />
+                    <span className="ml-2 text-sm text-muted-foreground">
+                      {syncSettingsDraft.includeDeleted ? "Include deleted contacts" : "Skip deleted contacts"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 flex justify-end">
+                <Button size="sm" onClick={saveSyncSettings} disabled={syncSettingsSaving}>
+                  {syncSettingsSaving ? "Saving..." : "Save Scheduler Settings"}
+                </Button>
+              </div>
+            </div>
+
             <ScrollArea className="h-[320px]">
               <Table>
                 <TableHeader>
@@ -2111,6 +2446,26 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </Button>
               <Button
                 size="sm"
+                variant="default"
+                className="h-8 bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={() => {
+                  setBatchStatusDraft({
+                    status: "",
+                    commStatusLabel: "",
+                    preferredContact: "",
+                    doNotContact: "keep",
+                    massMailOptOut: "keep",
+                    smsOptIn: "keep",
+                    emailBounced: "keep",
+                  });
+                  setIsBatchStatusDialogOpen(true);
+                }}
+                disabled={selectedContactIds.size === 0}
+              >
+                Batch Status ({selectedContactIds.size})
+              </Button>
+              <Button
+                size="sm"
                 variant="outline"
                 className="h-8"
                 onClick={() => {
@@ -2148,6 +2503,9 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </Button>
               <Badge variant="outline" className={`h-8 px-2 text-xs ${getLagStatusColor(syncHealth?.lagStatus)}`}>
                 {formatLagLabel(syncHealth)}
+              </Badge>
+              <Badge variant="outline" className="h-8 px-2 text-xs">
+                {contactsQueryMeta?.queryMode === "rpc" ? "DB-RPC" : "Legacy"} {contactsQueryMeta?.queryDurationMs ?? 0}ms
               </Badge>
             </div>
           </div>
@@ -2331,6 +2689,83 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
               </Button>
               <Button onClick={addSelectedContactsToList} disabled={addToListLoading}>
                 {addToListLoading ? "Adding..." : "Add Selected Contacts"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={isBatchStatusDialogOpen} onOpenChange={setIsBatchStatusDialogOpen}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Batch Update Contact Status</DialogTitle>
+              <DialogDescription>
+                Update selected contacts in local CRM mirror only. Unset fields stay unchanged.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
+                <Input
+                  className="h-9"
+                  value={batchStatusDraft.status}
+                  onChange={(e) => setBatchStatusDraft((prev) => ({ ...prev, status: e.target.value }))}
+                  placeholder="Contact status"
+                />
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Comms Status</p>
+                <Input
+                  className="h-9"
+                  value={batchStatusDraft.commStatusLabel}
+                  onChange={(e) => setBatchStatusDraft((prev) => ({ ...prev, commStatusLabel: e.target.value }))}
+                  placeholder="Comms status"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Preferred Contact</p>
+                <Input
+                  className="h-9"
+                  value={batchStatusDraft.preferredContact}
+                  onChange={(e) => setBatchStatusDraft((prev) => ({ ...prev, preferredContact: e.target.value }))}
+                  placeholder="Preferred contact channel"
+                />
+              </div>
+              {[
+                { key: "doNotContact", label: "Do Not Contact" },
+                { key: "massMailOptOut", label: "Mass Mail Opt-out" },
+                { key: "smsOptIn", label: "SMS Opt-in" },
+                { key: "emailBounced", label: "Email Bounced" },
+              ].map((row) => (
+                <div key={row.key} className="space-y-2">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">{row.label}</p>
+                  <Select
+                    value={batchStatusDraft[row.key as keyof BatchStatusDraft] as string}
+                    onValueChange={(value) =>
+                      setBatchStatusDraft((prev) => ({
+                        ...prev,
+                        [row.key]: value as BatchStatusDraft["doNotContact"],
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="keep">Keep current</SelectItem>
+                      <SelectItem value="true">Set true</SelectItem>
+                      <SelectItem value="false">Set false</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsBatchStatusDialogOpen(false)} disabled={batchStatusSaving}>
+                Cancel
+              </Button>
+              <Button onClick={saveBatchLocalStatus} disabled={batchStatusSaving}>
+                {batchStatusSaving ? "Updating..." : "Apply to Selected"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -2998,8 +3433,22 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
                   </TabsContent>
 
                   <TabsContent value="notes" className="space-y-3">
-                    {(selectedLiveCompanyNotes.length ? selectedLiveCompanyNotes : selectedCompanyData.notes).length ? (
-                      (selectedLiveCompanyNotes.length ? selectedLiveCompanyNotes : selectedCompanyData.notes).map((note, index) => (
+                    <div className="rounded-md border p-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Add Local Company Note</p>
+                      <Textarea
+                        value={localCompanyNoteDraft}
+                        onChange={(e) => setLocalCompanyNoteDraft(e.target.value)}
+                        placeholder="Add private CRM note for this company..."
+                        className="min-h-[90px]"
+                      />
+                      <div className="mt-2 flex justify-end">
+                        <Button size="sm" onClick={saveLocalCompanyNote} disabled={localCompanyNoteSaving}>
+                          {localCompanyNoteSaving ? "Saving..." : "Save Local Note"}
+                        </Button>
+                      </div>
+                    </div>
+                    {displayedCompanyNotes.length ? (
+                      displayedCompanyNotes.map((note, index) => (
                         <div key={`${note.label}-${index}`} className="rounded-md border p-3">
                           <div className="mb-2 flex items-center justify-between gap-2">
                             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{note.label}</p>
