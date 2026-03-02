@@ -25,7 +25,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Signal, submitSignalFeedback } from "@/lib/signalsApi";
+import { Signal, submitSignalFeedback, perplexityDeepDive } from "@/lib/signalsApi";
 import { formatDistanceToNow } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -162,6 +162,7 @@ export const SignalCard = memo(function SignalCard({
   const [showInsight, setShowInsight] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [deepDiving, setDeepDiving] = useState(false);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const [dismissModalOpen, setDismissModalOpen] = useState(false);
   
@@ -231,6 +232,34 @@ export const SignalCard = memo(function SignalCard({
       toast.error("Failed to submit feedback");
     } finally {
       setFeedbackLoading(false);
+    }
+  };
+
+  const handleDeepDive = async () => {
+    setDeepDiving(true);
+    toast.info(`🔍 Deep diving into ${signal.company || "company"}...`, { duration: 15000, id: `deep-dive-${signal.id}` });
+    try {
+      const result = await perplexityDeepDive(signal.id);
+      if (result.success) {
+        toast.success("Deep dive complete — insight updated", { id: `deep-dive-${signal.id}` });
+        // Fetch updated signal
+        const { data: updated } = await supabase
+          .from("signals")
+          .select("*")
+          .eq("id", signal.id)
+          .single();
+        if (updated && onSignalUpdated) {
+          onSignalUpdated(updated as Signal);
+        }
+        setShowInsight(true);
+      } else {
+        toast.error(result.error || "Deep dive failed", { id: `deep-dive-${signal.id}` });
+      }
+    } catch (e) {
+      console.error("Deep dive error:", e);
+      toast.error("Deep dive failed", { id: `deep-dive-${signal.id}` });
+    } finally {
+      setDeepDiving(false);
     }
   };
   
@@ -490,6 +519,24 @@ export const SignalCard = memo(function SignalCard({
                   <>
                     <UserSearch className="h-3 w-3 mr-1" />
                     TA {signal.contacts_found > 0 && `(${signal.contacts_found})`}
+                  </>
+                )}
+              </Button>
+              
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleDeepDive}
+                disabled={deepDiving}
+                className="h-7 text-xs"
+                title="Perplexity deep dive"
+              >
+                {deepDiving ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <>
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    Deep Dive
                   </>
                 )}
               </Button>
