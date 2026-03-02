@@ -1731,6 +1731,56 @@ function toFiniteNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function extractMeaningfulLiveNoteText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const sanitized = sanitizeLatestNoteText(value);
+    if (sanitized) return sanitized;
+
+    const parsed = parseJsonLikeString(value);
+    if (parsed !== null) {
+      const resolved = extractMeaningfulLiveNoteText(parsed);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const resolved = extractMeaningfulLiveNoteText(entry);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (isLikelyIdOnlyNoteRecord(record)) return null;
+
+    const prioritizedKeys = [
+      "comments",
+      "comment",
+      "notes",
+      "note",
+      "description",
+      "text",
+      "value",
+      "body",
+      "content",
+      "summary",
+      "data",
+    ];
+    for (const key of prioritizedKeys) {
+      if (!(key in record)) continue;
+      const resolved = extractMeaningfulLiveNoteText(record[key]);
+      if (resolved) return resolved;
+    }
+  }
+
+  return null;
+}
+
 function normalizeLiveNoteRow(input: any): Record<string, unknown> {
   const base = input && typeof input === "object" ? input : {};
   const personReference =
@@ -1739,17 +1789,12 @@ function normalizeLiveNoteRow(input: any): Record<string, unknown> {
     base.targetEntity && typeof base.targetEntity === "object" ? (base.targetEntity as Record<string, unknown>) : null;
   const normalizedAction = base.action ? String(base.action).trim() : "";
   const normalizedComments =
-    base.comments !== undefined && base.comments !== null
-      ? String(base.comments).trim()
-      : base.comment !== undefined && base.comment !== null
-        ? String(base.comment).trim()
-        : base.notes !== undefined && base.notes !== null
-          ? String(base.notes).trim()
-          : base.note !== undefined && base.note !== null
-            ? String(base.note).trim()
-            : base.description !== undefined && base.description !== null
-              ? String(base.description).trim()
-              : "";
+    extractMeaningfulLiveNoteText(base.comments) ??
+    extractMeaningfulLiveNoteText(base.comment) ??
+    extractMeaningfulLiveNoteText(base.notes) ??
+    extractMeaningfulLiveNoteText(base.note) ??
+    extractMeaningfulLiveNoteText(base.description) ??
+    "";
   return {
     id: toFiniteNumber(base.id),
     action: normalizedAction || null,
@@ -1917,16 +1962,37 @@ async function fetchBullhornNotesForEntity(
     if (results.length) break;
   }
 
-  if (results.length) return dedupeLiveNotes(results);
+  const queryNotes = dedupeLiveNotes(results);
+  const queryHasMeaningfulText = queryNotes.some((note) => Boolean(extractMeaningfulLiveNoteText(note.comments)));
+  if (queryNotes.length && queryHasMeaningfulText) return queryNotes;
 
   const viaAssociation = await fetchBullhornNotesViaAssociation(restUrl, bhRestToken, entityName, entityId);
-  if (viaAssociation.length) return viaAssociation;
+  const associationHasMeaningfulText = viaAssociation.some((note) => Boolean(extractMeaningfulLiveNoteText(note.comments)));
+  if (viaAssociation.length && associationHasMeaningfulText) return viaAssociation;
 
-  const noteIds = extractNoteIdsFromEntityRecord(entityRecord || null);
+  const noteIdsFromQuery = queryNotes
+    .map((note) => toFiniteNumber(note.id))
+    .filter((noteId): noteId is number => Number.isFinite(noteId));
+  const noteIdsFromAssociation = viaAssociation
+    .map((note) => toFiniteNumber(note.id))
+    .filter((noteId): noteId is number => Number.isFinite(noteId));
+  const noteIds = Array.from(
+    new Set([
+      ...noteIdsFromQuery,
+      ...noteIdsFromAssociation,
+      ...extractNoteIdsFromEntityRecord(entityRecord || null),
+    ]),
+  );
+
   if (noteIds.length) {
     const viaIds = await fetchBullhornNotesByIds(restUrl, bhRestToken, noteIds);
+    const idFetchHasMeaningfulText = viaIds.some((note) => Boolean(extractMeaningfulLiveNoteText(note.comments)));
+    if (viaIds.length && idFetchHasMeaningfulText) return viaIds;
     if (viaIds.length) return viaIds;
   }
+
+  if (queryNotes.length) return queryNotes;
+  if (viaAssociation.length) return viaAssociation;
 
   return [];
 }

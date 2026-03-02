@@ -763,6 +763,62 @@ function uniqueText(values: string[]): string[] {
   return out;
 }
 
+function sanitizeProfileNoteText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === "-" || trimmed.toLowerCase() === "[object object]") return null;
+    if (/^\d{4,14}$/.test(trimmed)) return null;
+
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const resolved = sanitizeProfileNoteText(parsed);
+        if (resolved) return resolved;
+      } catch {
+        // Keep as-is for non-JSON note text.
+      }
+    }
+
+    return trimmed;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const resolved = sanitizeProfileNoteText(entry);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+
+  const record = asRecord(value);
+  if (!record) return null;
+  if (isIdOnlyRelationRecord(record)) return null;
+
+  const preferredKeys = [
+    "comments",
+    "comment",
+    "notes",
+    "note",
+    "description",
+    "text",
+    "value",
+    "body",
+    "content",
+    "summary",
+  ];
+
+  for (const key of preferredKeys) {
+    if (!(key in record)) continue;
+    const resolved = sanitizeProfileNoteText(record[key]);
+    if (resolved) return resolved;
+  }
+
+  const fallback = uniqueText(extractTextChunks(record))[0];
+  return fallback || null;
+}
+
 function extractContactNotes(contact: BullhornMirrorContact): ProfileNoteEntry[] {
   const raw = getRawRecord(contact);
   const dateHint = formatMirrorDate(raw.dateLastComment ?? raw.dateLastModified ?? contact.date_last_modified);
@@ -886,11 +942,14 @@ function mapLiveNotesToProfileEntries(notes: unknown): ProfileNoteEntry[] {
     .map((entry) => {
       const record = asRecord(entry);
       if (!record) return null;
-      const comments = uniqueText(
-        extractTextChunks(
-          record.comments ?? record.comment ?? record.notes ?? record.note ?? record.description,
-        ),
-      )[0];
+      const comments = sanitizeProfileNoteText(
+        record.comments ??
+          record.comment ??
+          record.notes ??
+          record.note ??
+          record.description ??
+          record,
+      );
       if (!comments) return null;
       const action = formatMirrorValue(record.action ?? record.type);
       return {
