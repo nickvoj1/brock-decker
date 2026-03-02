@@ -61,6 +61,8 @@ import {
   huntPEFunds,
   perplexityDiscover,
   perplexityEnrich,
+  perplexityCVScore,
+  perplexityIdealProfile,
   Signal,
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
