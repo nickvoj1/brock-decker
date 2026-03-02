@@ -12,6 +12,7 @@ import { LocationSuggestions } from "@/components/upload/LocationSuggestions";
 import { RoleSelector } from "@/components/upload/RoleSelector";
 import { RoleSuggestions } from "@/components/upload/RoleSuggestions";
 import { SearchDebugPanel } from "@/components/upload/SearchDebugPanel";
+import { PerplexityCVInsights } from "@/components/upload/PerplexityCVInsights";
 import { ContactPreviewModal, Contact } from "@/components/upload/ContactPreviewModal";
 import { SavedProfilesSelector, SavedProfile } from "@/components/upload/SavedProfilesSelector";
 import { SignalContextCard } from "@/components/signals/SignalContextCard";
@@ -711,6 +712,34 @@ export default function UploadRun() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Perplexity Market Intelligence - shown after CV is parsed */}
+        {cvData && !isQuickSearch && (
+          <PerplexityCVInsights
+            cvData={cvData}
+            onApplyIndustries={(industries) => {
+              const newIndustries = [...selectedIndustries];
+              industries.forEach(ind => {
+                if (!newIndustries.includes(ind)) newIndustries.push(ind);
+              });
+              setSelectedIndustries(newIndustries);
+            }}
+            onApplyLocations={(locations) => {
+              const newLocations = [...selectedLocations];
+              locations.forEach(loc => {
+                if (!newLocations.includes(loc)) newLocations.push(loc);
+              });
+              setSelectedLocations(newLocations);
+            }}
+            onApplyRoles={(roles) => {
+              const newRoles = [...selectedRoles];
+              roles.forEach(role => {
+                if (!newRoles.includes(role)) newRoles.push(role);
+              });
+              setSelectedRoles(newRoles);
+            }}
+          />
+        )}
 
         {/* Step 2: Select Locations */}
         <Card className="animate-slide-up" style={{ animationDelay: '0.1s' }}>
