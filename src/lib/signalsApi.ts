@@ -594,6 +594,86 @@ export async function huntPEFunds(regions?: string[]): Promise<{
   }
 }
 
+// Perplexity AI - Signal Discovery
+export async function perplexityDiscover(region: string): Promise<{
+  success: boolean;
+  discovered?: number;
+  inserted?: number;
+  citations?: string[];
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-signals", {
+      body: { action: "discover", region },
+    });
+
+    if (error) {
+      console.error("Perplexity discover error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity discover failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Perplexity AI - Company Deep Dive
+export async function perplexityDeepDive(signalId: string): Promise<{
+  success: boolean;
+  company_overview?: string;
+  recent_news?: string[];
+  funding_history?: string;
+  key_executives?: string[];
+  competitors?: string[];
+  hiring_signals?: string;
+  recruitment_angle?: string;
+  risk_factors?: string;
+  citations?: string[];
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-signals", {
+      body: { action: "deep-dive", signalId },
+    });
+
+    if (error) {
+      console.error("Perplexity deep dive error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity deep dive failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Perplexity AI - Enrich signals with web search
+export async function perplexityEnrich(signalIds: string[]): Promise<{
+  success: boolean;
+  enriched?: number;
+  total?: number;
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-signals", {
+      body: { action: "enrich", signalIds },
+    });
+
+    if (error) {
+      console.error("Perplexity enrich error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity enrich failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // Export signals to CSV
 export function exportSignalsToCSV(signals: Signal[]): string {
   const headers = [

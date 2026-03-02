@@ -77,3 +77,6 @@ verify_jwt = false
 
 [functions.bullhorn-sync-clientcontacts]
 verify_jwt = false
+
+[functions.perplexity-signals]
+verify_jwt = false

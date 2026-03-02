@@ -59,6 +59,8 @@ import {
   runRegionalSurge,
   submitSignalFeedback,
   huntPEFunds,
+  perplexityDiscover,
+  perplexityEnrich,
   Signal,
 } from "@/lib/signalsApi";
 import { runSignalAutoSearch, SignalSearchResult } from "@/lib/signalAutoSearch";
@@ -237,6 +239,7 @@ export default function SignalsDashboard() {
   const [minScore, setMinScore] = useState<number>(0);
   const [isSurgeRunning, setIsSurgeRunning] = useState(false);
   const [isHunting, setIsHunting] = useState(false);
+  const [isPerplexitySearching, setIsPerplexitySearching] = useState(false);
   const [activeTab, setActiveTab] = useState<TabView>("signals");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [searchQuery, setSearchQuery] = useState("");
@@ -566,6 +569,60 @@ export default function SignalsDashboard() {
       toast.error("Failed to fetch signals");
     } finally {
       setIsSurgeRunning(false);
+    }
+  };
+
+  // Perplexity AI Search - discover new signals via web search
+  const handlePerplexitySearch = async () => {
+    setIsPerplexitySearching(true);
+    toast.info(`🔍 Perplexity searching ${REGION_CONFIG[activeRegion].label} for signals...`, { duration: 20000, id: "perplexity" });
+    
+    try {
+      const result = await perplexityDiscover(activeRegion);
+      if (result.success) {
+        toast.success(
+          `Found ${result.discovered || 0} signals, ${result.inserted || 0} new added`,
+          { id: "perplexity", duration: 5000 }
+        );
+        
+        if (result.inserted && result.inserted > 0) {
+          await fetchSignals({ withLoading: false, silent: true });
+        }
+      } else {
+        toast.error(result.error || "Perplexity search failed", { id: "perplexity" });
+      }
+    } catch (error) {
+      console.error("Perplexity search error:", error);
+      toast.error("Failed to search with Perplexity", { id: "perplexity" });
+    } finally {
+      setIsPerplexitySearching(false);
+    }
+  };
+
+  // Perplexity Enrich - enrich unenriched signals with web search
+  const handlePerplexityEnrich = async () => {
+    const unenrichedSignals = signals.filter(s => !s.ai_enriched_at && s.region === activeRegion);
+    if (unenrichedSignals.length === 0) {
+      toast.info("All signals already enriched");
+      return;
+    }
+    
+    setIsRefreshing(true);
+    toast.info(`Enriching ${unenrichedSignals.length} signals with Perplexity...`, { duration: 15000 });
+    
+    try {
+      const result = await perplexityEnrich(unenrichedSignals.map(s => s.id));
+      if (result.success) {
+        toast.success(`Perplexity enriched ${result.enriched} signals`);
+        await fetchSignals({ withLoading: false, silent: true });
+      } else {
+        toast.error(result.error || "Perplexity enrichment failed");
+      }
+    } catch (error) {
+      console.error("Perplexity enrich error:", error);
+      toast.error("Failed to enrich with Perplexity");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -1015,7 +1072,16 @@ export default function SignalsDashboard() {
                     <ChevronDown className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onClick={handlePerplexitySearch} disabled={isPerplexitySearching || isSurgeRunning}>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    {isPerplexitySearching ? "Searching..." : "Perplexity Search"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handlePerplexityEnrich} disabled={isRefreshing || isSurgeRunning}>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Perplexity Enrich
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleHuntPEFunds} disabled={isHunting || isSurgeRunning}>
                     <Target className="h-4 w-4 mr-2" />
                     Hunt All Regions
