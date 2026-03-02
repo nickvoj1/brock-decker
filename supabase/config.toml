@@ -84,5 +84,8 @@ verify_jwt = false
 [functions.perplexity-cv-research]
 verify_jwt = false
 
+[functions.perplexity-cv-match]
+verify_jwt = false
+
 [functions.fetch-bullhorn-emails]
 verify_jwt = false

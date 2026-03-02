@@ -674,6 +674,87 @@ export async function perplexityEnrich(signalIds: string[]): Promise<{
   }
 }
 
+// Perplexity CV Match - Score CVs against a signal
+export async function perplexityCVScore(signalId: string, profileName: string): Promise<{
+  success: boolean;
+  matches?: Array<{
+    candidateId: string;
+    name: string;
+    currentTitle: string | null;
+    location: string | null;
+    score: number;
+    reasons: string[];
+    fitSummary: string;
+  }>;
+  bestMatch?: {
+    candidateId: string;
+    name: string;
+    explanation: string;
+  } | null;
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-cv-match", {
+      body: { action: "score-cvs", signalId, profileName },
+    });
+
+    if (error) {
+      console.error("Perplexity CV score error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity CV score failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Perplexity CV Match - Get ideal candidate profile for a signal
+export async function perplexityIdealProfile(signalId: string): Promise<{
+  success: boolean;
+  idealProfile?: {
+    idealProfile: {
+      titles: string[];
+      seniority: string;
+      mustHaveSkills: string[];
+      niceToHaveSkills: string[];
+      experienceYears: string;
+      industryBackground: string[];
+      reasoning: string;
+    };
+    companyHiringContext: {
+      recentHires: string;
+      teamSize: string;
+      culture: string;
+      compensation: string;
+    };
+    matchCriteria: {
+      strongMatch: string[];
+      weakMatch: string[];
+      dealbreakers: string[];
+    };
+  };
+  citations?: string[];
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-cv-match", {
+      body: { action: "ideal-profile", signalId },
+    });
+
+    if (error) {
+      console.error("Perplexity ideal profile error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity ideal profile failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // Export signals to CSV
 export function exportSignalsToCSV(signals: Signal[]): string {
   const headers = [
