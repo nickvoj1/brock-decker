@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { History, Download, Eye, Filter, Inbox, Users, Trash2, Upload, Loader2, CheckCircle2, RefreshCw, Sparkles, Database, MessageSquare, Building2, Copy } from "lucide-react";
@@ -42,7 +42,9 @@ import { SkillsReviewModal } from "@/components/upload/SkillsReviewModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type RunStatus = 'pending' | 'running' | 'success' | 'partial' | 'failed';
+type RunsTabKey = "searches" | "special" | "additional";
 const RUNS_HISTORY_VIEWED_KEY_PREFIX = "runs-history-last-viewed-at";
+const TERMINAL_RUN_STATUSES = new Set<string>(["success", "partial", "failed"]);
 
 interface ApolloContact {
   name: string;
@@ -71,6 +73,7 @@ interface BullhornOverlapData {
 interface EnrichmentRun {
   id: string;
   created_at: string;
+  updated_at?: string | null;
   search_counter: number;
   candidates_count: number;
   processed_count: number;
@@ -96,7 +99,41 @@ export default function RunsHistory() {
   const [removedContacts, setRemovedContacts] = useState<Set<string>>(new Set());
   const [exportingRunId, setExportingRunId] = useState<string | null>(null);
   const [checkingRunId, setCheckingRunId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<RunsTabKey>("searches");
   
+  const [tabSeenTimestamps, setTabSeenTimestamps] = useState<Record<RunsTabKey, number>>({
+    searches: 0,
+    special: 0,
+    additional: 0,
+  });
+  const viewedStorageKey = profileName ? `${RUNS_HISTORY_VIEWED_KEY_PREFIX}:${profileName}` : null;
+  const [viewedBaselineIso, setViewedBaselineIso] = useState<string>("");
+
+  useEffect(() => {
+    if (!viewedStorageKey) {
+      setViewedBaselineIso("");
+      return;
+    }
+    setViewedBaselineIso(localStorage.getItem(viewedStorageKey) || "");
+  }, [viewedStorageKey]);
+
+  useEffect(() => {
+    if (!profileName) return;
+    setTabSeenTimestamps({
+      searches: 0,
+      special: 0,
+      additional: 0,
+    });
+  }, [profileName]);
+
+  useEffect(() => {
+    if (!profileName) return;
+    setTabSeenTimestamps((prev) => ({
+      ...prev,
+      [activeTab]: Date.now(),
+    }));
+  }, [activeTab, profileName]);
+
   // Skills review modal state
   const [skillsReviewRun, setSkillsReviewRun] = useState<EnrichmentRun | null>(null);
   const [skillsReviewExcludedEmails, setSkillsReviewExcludedEmails] = useState<string[]>([]);
@@ -112,10 +149,9 @@ export default function RunsHistory() {
   });
 
   useEffect(() => {
-    if (!profileName) return;
-    const key = `${RUNS_HISTORY_VIEWED_KEY_PREFIX}:${profileName}`;
+    if (!viewedStorageKey) return;
     const markViewed = () => {
-      localStorage.setItem(key, new Date().toISOString());
+      localStorage.setItem(viewedStorageKey, new Date().toISOString());
       window.dispatchEvent(new Event("runs-history-viewed"));
     };
 
@@ -123,7 +159,7 @@ export default function RunsHistory() {
     markViewed();
     const intervalId = window.setInterval(markViewed, 5000);
     return () => window.clearInterval(intervalId);
-  }, [profileName]);
+  }, [viewedStorageKey]);
   
 
   const selectedRunPreferences = selectedRun
@@ -425,11 +461,41 @@ export default function RunsHistory() {
     return type === 'signal_ta' || type === 'jobboard_contact_search';
   };
 
-  const [activeTab, setActiveTab] = useState<string>("searches");
-
   const regularRuns = runs?.filter(r => !isSpecialRequest(r) && !isAdditionalRun(r));
   const specialRuns = runs?.filter(r => isSpecialRequest(r));
   const additionalRuns = runs?.filter(r => isAdditionalRun(r));
+
+  const getRunCompletionTimestamp = (run: EnrichmentRun): number | null => {
+    const status = String(run?.status || "").toLowerCase();
+    if (!TERMINAL_RUN_STATUSES.has(status)) return null;
+    const ts = Date.parse(String(run?.updated_at || run?.created_at || ""));
+    return Number.isFinite(ts) ? ts : null;
+  };
+
+  const getEffectiveSeenTimestamp = (tab: RunsTabKey): number => {
+    const baselineTs = Date.parse(viewedBaselineIso || "");
+    const safeBaselineTs = Number.isFinite(baselineTs) ? baselineTs : 0;
+    return Math.max(safeBaselineTs, tabSeenTimestamps[tab] || 0);
+  };
+
+  const isRunUnreadForTab = (run: EnrichmentRun, tab: RunsTabKey): boolean => {
+    const completionTs = getRunCompletionTimestamp(run);
+    if (!completionTs) return false;
+    return completionTs > getEffectiveSeenTimestamp(tab);
+  };
+
+  const unreadByTab = useMemo(() => {
+    const countUnread = (items: EnrichmentRun[] | undefined, tab: RunsTabKey): number => {
+      if (!items || !items.length) return 0;
+      return items.reduce((count, run) => (isRunUnreadForTab(run, tab) ? count + 1 : count), 0);
+    };
+
+    return {
+      searches: countUnread(regularRuns, "searches"),
+      special: countUnread(specialRuns, "special"),
+      additional: countUnread(additionalRuns, "additional"),
+    };
+  }, [regularRuns, specialRuns, additionalRuns, viewedBaselineIso, tabSeenTimestamps]);
 
   const copySpecialEmails = (run: EnrichmentRun) => {
     const contacts = (run.enriched_data as unknown) as ApolloContact[];
@@ -487,19 +553,43 @@ export default function RunsHistory() {
           </CardHeader>
         </Card>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunsTabKey)}>
           <TabsList className="mb-4">
             <TabsTrigger value="searches" className="gap-2">
               <History className="h-4 w-4" />
               Contact Searches ({regularRuns?.length || 0})
+              {unreadByTab.searches > 0 && (
+                <span
+                  className="ml-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground"
+                  title={`${unreadByTab.searches} new completed result(s)`}
+                >
+                  {unreadByTab.searches}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="special" className="gap-2">
               <Building2 className="h-4 w-4" />
               Special Requests ({specialRuns?.length || 0})
+              {unreadByTab.special > 0 && (
+                <span
+                  className="ml-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground"
+                  title={`${unreadByTab.special} new completed result(s)`}
+                >
+                  {unreadByTab.special}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="additional" className="gap-2">
               <Sparkles className="h-4 w-4" />
               Additional ({additionalRuns?.length || 0})
+              {unreadByTab.additional > 0 && (
+                <span
+                  className="ml-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-medium text-destructive-foreground"
+                  title={`${unreadByTab.additional} new completed result(s)`}
+                >
+                  {unreadByTab.additional}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 
@@ -548,13 +638,23 @@ export default function RunsHistory() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {regularRuns.map((run) => (
-                    <TableRow key={run.id} className="animate-fade-in">
+                  {regularRuns.map((run) => {
+                    const isUnread = isRunUnreadForTab(run, "searches");
+                    return (
+                    <TableRow key={run.id} className={`animate-fade-in ${isUnread ? "bg-destructive/5" : ""}`}>
                       <TableCell className="font-medium">
                         {getCandidateName(run)}
                       </TableCell>
                       <TableCell>
-                        {format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}
+                        <div className="flex items-center gap-2">
+                          {isUnread && (
+                            <span
+                              className="inline-flex h-2 w-2 rounded-full bg-destructive"
+                              title="New completed result"
+                            />
+                          )}
+                          {format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -654,7 +754,8 @@ export default function RunsHistory() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             ) : (
@@ -718,12 +819,23 @@ export default function RunsHistory() {
                     <TableBody>
                       {specialRuns.map((run) => {
                         const prefs = (run.preferences_data as any[])?.[0] || {};
+                        const isUnread = isRunUnreadForTab(run, "special");
                         return (
-                          <TableRow key={run.id} className="animate-fade-in">
+                          <TableRow key={run.id} className={`animate-fade-in ${isUnread ? "bg-destructive/5" : ""}`}>
                             <TableCell className="font-medium">{getCandidateName(run)}</TableCell>
                             <TableCell>{prefs.company || '-'}</TableCell>
                             <TableCell>{prefs.country || '-'}</TableCell>
-                            <TableCell>{format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {isUnread && (
+                                  <span
+                                    className="inline-flex h-2 w-2 rounded-full bg-destructive"
+                                    title="New completed result"
+                                  />
+                                )}
+                                {format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}
+                              </div>
+                            </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 <Users className="h-4 w-4 text-muted-foreground" />
@@ -812,11 +924,22 @@ export default function RunsHistory() {
                         const typeLabel = prefs.type === "signal_ta" ? "Signal TA" : "Job Board Apollo";
                         const target =
                           prefs.company || prefs.targetCompany || getCandidateName(run) || "Unknown";
+                        const isUnread = isRunUnreadForTab(run, "additional");
                         return (
-                          <TableRow key={run.id} className="animate-fade-in">
+                          <TableRow key={run.id} className={`animate-fade-in ${isUnread ? "bg-destructive/5" : ""}`}>
                             <TableCell className="font-medium">{typeLabel}</TableCell>
                             <TableCell>{target}</TableCell>
-                            <TableCell>{format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {isUnread && (
+                                  <span
+                                    className="inline-flex h-2 w-2 rounded-full bg-destructive"
+                                    title="New completed result"
+                                  />
+                                )}
+                                {format(new Date(run.created_at), 'MMM d, yyyy HH:mm')}
+                              </div>
+                            </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 <Users className="h-4 w-4 text-muted-foreground" />
