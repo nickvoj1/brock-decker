@@ -89,3 +89,6 @@ verify_jwt = false
 
 [functions.fetch-bullhorn-emails]
 verify_jwt = false
+
+[functions.perplexity-job-research]
+verify_jwt = false

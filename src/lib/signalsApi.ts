@@ -755,6 +755,113 @@ export async function perplexityIdealProfile(signalId: string): Promise<{
   }
 }
 
+// Perplexity Job Research - Deep research a job posting
+export async function perplexityJobResearch(job: {
+  title: string;
+  company: string;
+  location?: string;
+  salary?: string;
+  description?: string;
+}): Promise<{
+  success: boolean;
+  research?: {
+    companyProfile: {
+      overview: string;
+      sector: string;
+      aum: string;
+      recentDeals: string[];
+      teamSize: string;
+      culture: string;
+      reputation: string;
+    };
+    jobRequirements: {
+      mustHaveSkills: string[];
+      niceToHaveSkills: string[];
+      experienceLevel: string;
+      educationPreferences: string[];
+      certifications: string[];
+      keyResponsibilities: string[];
+    };
+    candidateProfile: {
+      idealTitles: string[];
+      idealCompanies: string[];
+      seniority: string;
+      compensationRange: string;
+      relocationLikelihood: string;
+    };
+    competitiveContext: {
+      similarRoles: string[];
+      marketDemand: string;
+      timeToFill: string;
+      talentPool: string;
+    };
+    recruitmentAngle: {
+      pitchPoints: string[];
+      redFlags: string[];
+      approachStrategy: string;
+    };
+  };
+  citations?: string[];
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-job-research", {
+      body: { action: "research-job", job },
+    });
+
+    if (error) {
+      console.error("Perplexity job research error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity job research failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// Perplexity Job Research - Match candidates against a job posting
+export async function perplexityJobMatch(
+  job: { title: string; company: string; location?: string; description?: string },
+  profileName: string,
+): Promise<{
+  success: boolean;
+  matches?: Array<{
+    candidateId: string;
+    name: string;
+    currentTitle: string | null;
+    location: string | null;
+    score: number;
+    reasons: string[];
+    fitSummary: string;
+    submissionReady: boolean;
+  }>;
+  bestMatch?: {
+    candidateId: string;
+    name: string;
+    explanation: string;
+  } | null;
+  submissionNotes?: string;
+  error?: string;
+}> {
+  try {
+    const { data: response, error } = await supabase.functions.invoke("perplexity-job-research", {
+      body: { action: "match-candidates", job, profileName },
+    });
+
+    if (error) {
+      console.error("Perplexity job match error:", error);
+      return { success: false, error: error.message };
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Perplexity job match failed:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 // Export signals to CSV
 export function exportSignalsToCSV(signals: Signal[]): string {
   const headers = [
