@@ -1145,54 +1145,89 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
       reset?: boolean;
       append?: boolean;
       offset?: number;
+      loadAllMatching?: boolean;
     } = {},
   ) => {
+    const filterVisibleContacts = (batch: BullhornMirrorContact[]) =>
+      batch.filter((contact) => {
+        const directStatus = contact.status;
+        const rawStatus =
+          contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
+            ? (contact.raw as Record<string, unknown>).status
+            : null;
+        return !isArchivedStatus(directStatus) && !isArchivedStatus(rawStatus);
+      });
+
+    const mergeContactRows = (rows: BullhornMirrorContact[]) => {
+      const merged = new Map<number, BullhornMirrorContact>();
+      for (const row of rows) merged.set(row.bullhorn_id, row);
+      return Array.from(merged.values());
+    };
+
     const isReset = Boolean(options.reset);
     if (!options.silent) setContactsLoading(true);
     if (options.append) setIsLoadingMore(true);
     try {
       const search = options.search ?? contactsSearch;
       const filters = options.filters ?? appliedFilters;
-      const offset = isReset ? 0 : options.offset ?? 0;
-      const result = await listBullhornMirrorContacts(ADMIN_PROFILE, {
-        limit: CONTACTS_PAGE_SIZE,
-        offset,
-        search,
-        filters,
-      });
+      const shouldLoadAllMatching =
+        options.loadAllMatching ??
+        (search.trim().length > 0 || filters.length > 0);
+      let offset = isReset ? 0 : options.offset ?? 0;
+      let totalCount = 0;
+      let aggregatedVisible: BullhornMirrorContact[] = [];
 
-      if (result.success && result.data) {
-        setContactsQueryMeta(result.data.meta || null);
-        const rawBatch = result.data.contacts || [];
-        const visibleContacts = (result.data.contacts || []).filter((contact) => {
-          const directStatus = contact.status;
-          const rawStatus =
-            contact.raw && typeof contact.raw === "object" && !Array.isArray(contact.raw)
-              ? (contact.raw as Record<string, unknown>).status
-              : null;
-          return !isArchivedStatus(directStatus) && !isArchivedStatus(rawStatus);
+      while (true) {
+        const result = await listBullhornMirrorContacts(ADMIN_PROFILE, {
+          limit: CONTACTS_PAGE_SIZE,
+          offset,
+          search,
+          filters,
         });
+
+        if (!result.success || !result.data) {
+          if (!options.silent) toast.error(result.error || "Failed to load synced contacts");
+          break;
+        }
+        setContactsQueryMeta(result.data.meta || null);
+
+        const rawBatch = result.data.contacts || [];
+        const visibleContacts = filterVisibleContacts(rawBatch);
+        totalCount = Number(result.data.total || 0);
+        const nextOffset = offset + rawBatch.length;
+        const reachedEnd =
+          rawBatch.length < CONTACTS_PAGE_SIZE ||
+          (totalCount > 0 && nextOffset >= totalCount);
+
+        if (shouldLoadAllMatching && !options.append) {
+          aggregatedVisible = aggregatedVisible.concat(visibleContacts);
+          if (!reachedEnd) {
+            offset = nextOffset;
+            continue;
+          }
+
+          const mergedAll = mergeContactRows(aggregatedVisible);
+          if (isReset) {
+            setContacts(mergedAll);
+          } else {
+            setContacts((prev) => mergeContactRows([...prev, ...mergedAll]));
+          }
+          setContactsTotal(totalCount);
+          setContactsOffset(nextOffset);
+          setHasMoreContacts(false);
+          break;
+        }
 
         if (isReset) {
           setContacts(visibleContacts);
         } else {
-          setContacts((prev) => {
-            const merged = new Map<number, BullhornMirrorContact>();
-            for (const row of prev) merged.set(row.bullhorn_id, row);
-            for (const row of visibleContacts) merged.set(row.bullhorn_id, row);
-            return Array.from(merged.values());
-          });
+          setContacts((prev) => mergeContactRows([...prev, ...visibleContacts]));
         }
 
-        setContactsTotal(result.data.total || 0);
-        const nextOffset = offset + rawBatch.length;
+        setContactsTotal(totalCount);
         setContactsOffset(nextOffset);
-        const reachedEnd =
-          rawBatch.length < CONTACTS_PAGE_SIZE ||
-          (Number(result.data.total || 0) > 0 && nextOffset >= Number(result.data.total || 0));
         setHasMoreContacts(!reachedEnd);
-      } else if (!options.silent) {
-        toast.error(result.error || "Failed to load synced contacts");
+        break;
       }
     } catch {
       if (!options.silent) toast.error("Failed to load synced contacts");
@@ -1204,7 +1239,8 @@ export default function BullhornSyncAdmin({ tableOnly = false }: BullhornSyncAdm
 
   useEffect(() => {
     if (profileName === ADMIN_PROFILE) {
-      loadBullhornMirrorContacts({ reset: true });
+      const hasSearchOrFilters = contactsSearch.trim().length > 0 || appliedFilters.length > 0;
+      loadBullhornMirrorContacts({ reset: true, loadAllMatching: hasSearchOrFilters });
     }
   }, [profileName, contactsSearch, appliedFilters, loadBullhornMirrorContacts]);
 
