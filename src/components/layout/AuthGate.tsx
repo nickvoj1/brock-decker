@@ -15,7 +15,6 @@ const DEFAULT_PROFILE_NAMES = [
   "Arturs Salcevich",
   "Nick Bulmeistar",
   "Rainer Grote",
-  "Vadzim Valasevich",
   "Nikita Vojevoda",
 ];
 
@@ -32,7 +31,7 @@ export function AuthGate({ children, onAuthenticated }: AuthGateProps) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     const verified = sessionStorage.getItem(PROFILE_VERIFIED_KEY);
     const profile = localStorage.getItem(PROFILE_NAME_KEY);
-    return verified === "true" && !!profile;
+    return verified === "true" && !!profile && DEFAULT_PROFILE_NAMES.includes(profile);
   });
   
   const [step, setStep] = useState<"select" | "verify" | "setup">("select");
@@ -51,10 +50,13 @@ export function AuthGate({ children, onAuthenticated }: AuthGateProps) {
     // Check if already authenticated on mount
     const verified = sessionStorage.getItem(PROFILE_VERIFIED_KEY);
     const profile = localStorage.getItem(PROFILE_NAME_KEY);
-    if (verified === "true" && profile) {
+    if (verified === "true" && profile && DEFAULT_PROFILE_NAMES.includes(profile)) {
       setIsAuthenticated(true);
       onAuthenticated(profile);
+      return;
     }
+    localStorage.removeItem(PROFILE_NAME_KEY);
+    sessionStorage.removeItem(PROFILE_VERIFIED_KEY);
   }, [onAuthenticated]);
 
   const checkAllProfilePinStatus = async () => {

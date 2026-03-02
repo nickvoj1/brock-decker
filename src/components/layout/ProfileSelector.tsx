@@ -28,7 +28,6 @@ const DEFAULT_PROFILE_NAMES = [
   "Arturs Salcevich",
   "Nick Bulmeistar",
   "Rainer Grote",
-  "Vadzim Valasevich",
   "Nikita Vojevoda",
 ];
 
@@ -54,7 +53,12 @@ export function ProfileSelector({ onProfileChange }: ProfileSelectorProps) {
     // Only restore if verified in this session
     const verified = sessionStorage.getItem(PROFILE_VERIFIED_KEY);
     if (verified === "true") {
-      return localStorage.getItem(PROFILE_NAME_KEY) || "";
+      const storedProfile = localStorage.getItem(PROFILE_NAME_KEY) || "";
+      if (DEFAULT_PROFILE_NAMES.includes(storedProfile)) {
+        return storedProfile;
+      }
+      localStorage.removeItem(PROFILE_NAME_KEY);
+      sessionStorage.removeItem(PROFILE_VERIFIED_KEY);
     }
     return "";
   });
