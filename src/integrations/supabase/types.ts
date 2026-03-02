@@ -178,6 +178,89 @@ export type Database = {
           },
         ]
       }
+      bullhorn_client_corporations_mirror: {
+        Row: {
+          address1: string | null
+          address2: string | null
+          bullhorn_id: number
+          city: string | null
+          country_id: number | null
+          country_name: string | null
+          created_at: string
+          date_added: string | null
+          date_last_modified: string | null
+          industry: string | null
+          is_deleted: boolean
+          last_synced_job_id: string | null
+          name: string | null
+          owner_id: number | null
+          owner_name: string | null
+          phone: string | null
+          raw: Json
+          state: string | null
+          status: string | null
+          synced_at: string
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          address1?: string | null
+          address2?: string | null
+          bullhorn_id: number
+          city?: string | null
+          country_id?: number | null
+          country_name?: string | null
+          created_at?: string
+          date_added?: string | null
+          date_last_modified?: string | null
+          industry?: string | null
+          is_deleted?: boolean
+          last_synced_job_id?: string | null
+          name?: string | null
+          owner_id?: number | null
+          owner_name?: string | null
+          phone?: string | null
+          raw?: Json
+          state?: string | null
+          status?: string | null
+          synced_at?: string
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          address1?: string | null
+          address2?: string | null
+          bullhorn_id?: number
+          city?: string | null
+          country_id?: number | null
+          country_name?: string | null
+          created_at?: string
+          date_added?: string | null
+          date_last_modified?: string | null
+          industry?: string | null
+          is_deleted?: boolean
+          last_synced_job_id?: string | null
+          name?: string | null
+          owner_id?: number | null
+          owner_name?: string | null
+          phone?: string | null
+          raw?: Json
+          state?: string | null
+          status?: string | null
+          synced_at?: string
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_client_corporations_mirror_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bullhorn_company_local_notes: {
         Row: {
           company_id: number
@@ -210,6 +293,68 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      bullhorn_company_notes_mirror: {
+        Row: {
+          company_id: number
+          created_at: string
+          external_key: string
+          id: number
+          is_deleted: boolean
+          last_synced_job_id: string | null
+          note_action: string | null
+          note_date: string | null
+          note_id: number | null
+          note_text: string | null
+          payload: Json
+          person_name: string | null
+          target_entity_id: number | null
+          target_entity_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: number
+          created_at?: string
+          external_key: string
+          id?: number
+          is_deleted?: boolean
+          last_synced_job_id?: string | null
+          note_action?: string | null
+          note_date?: string | null
+          note_id?: number | null
+          note_text?: string | null
+          payload?: Json
+          person_name?: string | null
+          target_entity_id?: number | null
+          target_entity_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: number
+          created_at?: string
+          external_key?: string
+          id?: number
+          is_deleted?: boolean
+          last_synced_job_id?: string | null
+          note_action?: string | null
+          note_date?: string | null
+          note_id?: number | null
+          note_text?: string | null
+          payload?: Json
+          person_name?: string | null
+          target_entity_id?: number | null
+          target_entity_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bullhorn_company_notes_mirror_last_synced_job_id_fkey"
+            columns: ["last_synced_job_id"]
+            isOneToOne: false
+            referencedRelation: "bullhorn_sync_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       bullhorn_contact_comms_status: {
         Row: {
