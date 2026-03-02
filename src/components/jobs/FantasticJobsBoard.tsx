@@ -9,11 +9,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
 import { supabase } from "@/integrations/supabase/client";
 import { createEnrichmentRun, startEnrichmentRun, waitForEnrichmentRunCompletion } from "@/lib/dataApi";
-import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users, ChevronDown } from "lucide-react";
+import { perplexityJobResearch, perplexityJobMatch } from "@/lib/signalsApi";
+import { Search, RefreshCw, Download, ExternalLink, MapPin, Building2, Calendar, Banknote, X, Users, ChevronDown, Sparkles, Trophy, CheckCircle2, AlertTriangle } from "lucide-react";
 import { format, isValid, parseISO } from "date-fns";
 
 interface Job {
@@ -672,7 +675,27 @@ export function FantasticJobsBoard() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [total, setTotal] = useState(0);
   const [apolloLoadingByJob, setApolloLoadingByJob] = useState<Record<string, boolean>>({});
+  const [researchLoadingByJob, setResearchLoadingByJob] = useState<Record<string, boolean>>({});
+  const [matchLoadingByJob, setMatchLoadingByJob] = useState<Record<string, boolean>>({});
   const [apolloContacts, setApolloContacts] = useState<ApolloJobContact[]>([]);
+  const [researchModalOpen, setResearchModalOpen] = useState(false);
+  const [researchTargetJob, setResearchTargetJob] = useState<Job | null>(null);
+  const [researchData, setResearchData] = useState<Record<string, unknown> | null>(null);
+  const [researchCitations, setResearchCitations] = useState<string[]>([]);
+  const [matchData, setMatchData] = useState<{
+    matches: Array<{
+      candidateId: string;
+      name: string;
+      currentTitle: string | null;
+      location: string | null;
+      score: number;
+      reasons: string[];
+      fitSummary: string;
+      submissionReady: boolean;
+    }>;
+    bestMatch: { candidateId: string; name: string; explanation: string } | null;
+    submissionNotes: string;
+  } | null>(null);
   const [apolloTargetJob, setApolloTargetJob] = useState<Job | null>(null);
   const [apolloModalOpen, setApolloModalOpen] = useState(false);
   const [warnedOutdatedBackend, setWarnedOutdatedBackend] = useState(false);
@@ -1346,6 +1369,91 @@ export function FantasticJobsBoard() {
     }
   };
 
+  const runPerplexityResearch = async (job: Job) => {
+    setResearchLoadingByJob((prev) => ({ ...prev, [job.id]: true }));
+    try {
+      const result = await perplexityJobResearch({
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        salary: job.salary || undefined,
+        description: job.description,
+      });
+
+      if (!result.success) throw new Error(result.error || "Research failed");
+
+      setResearchData(result.research as Record<string, unknown> || null);
+      setResearchCitations(result.citations || []);
+      setResearchTargetJob(job);
+      setMatchData(null);
+      setResearchModalOpen(true);
+
+      toast({
+        title: "Research complete",
+        description: `Deep research completed for ${job.company} – ${job.title}.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Research failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setResearchLoadingByJob((prev) => ({ ...prev, [job.id]: false }));
+    }
+  };
+
+  const runPerplexityMatch = async (job: Job) => {
+    if (!profileName) {
+      toast({
+        title: "Profile required",
+        description: "Select your profile first to match candidates.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setMatchLoadingByJob((prev) => ({ ...prev, [job.id]: true }));
+    try {
+      const result = await perplexityJobMatch(
+        {
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          description: job.description,
+        },
+        profileName,
+      );
+
+      if (!result.success) throw new Error(result.error || "Matching failed");
+
+      setMatchData({
+        matches: result.matches || [],
+        bestMatch: result.bestMatch || null,
+        submissionNotes: result.submissionNotes || "",
+      });
+      setResearchTargetJob(job);
+      if (!researchModalOpen) {
+        setResearchData(null);
+        setResearchCitations([]);
+      }
+      setResearchModalOpen(true);
+
+      toast({
+        title: "Candidate matching complete",
+        description: `Found ${(result.matches || []).length} matching candidates for ${job.company}.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Matching failed",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setMatchLoadingByJob((prev) => ({ ...prev, [job.id]: false }));
+    }
+  };
+
   const handleCopyContactEmail = async (email: string | null | undefined) => {
     const value = (email || "").trim();
     if (!value) return;
@@ -1905,7 +2013,7 @@ export function FantasticJobsBoard() {
                       Posted {sortBy === "posted" ? (sortOrder === "desc" ? "↓" : "↑") : ""}
                     </TableHead>
                     <TableHead className="min-w-[110px] mono-label">Source</TableHead>
-                    <TableHead className="w-[170px] mono-label">Actions</TableHead>
+                    <TableHead className="w-[320px] mono-label">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1956,6 +2064,36 @@ export function FantasticJobsBoard() {
                           ) : (
                             <span className="text-muted-foreground text-xs mr-1">—</span>
                           )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            disabled={Boolean(researchLoadingByJob[job.id])}
+                            onClick={() => runPerplexityResearch(job)}
+                            title="Deep research this job with Perplexity AI"
+                          >
+                            {researchLoadingByJob[job.id] ? (
+                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3 w-3 mr-1" />
+                            )}
+                            {researchLoadingByJob[job.id] ? "Researching..." : "Research"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            disabled={Boolean(matchLoadingByJob[job.id])}
+                            onClick={() => runPerplexityMatch(job)}
+                            title="Match your CVs against this job"
+                          >
+                            {matchLoadingByJob[job.id] ? (
+                              <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <Trophy className="h-3 w-3 mr-1" />
+                            )}
+                            {matchLoadingByJob[job.id] ? "Matching..." : "Match CVs"}
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -2031,6 +2169,372 @@ export function FantasticJobsBoard() {
               </TableBody>
             </Table>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Perplexity Research & CV Match Modal */}
+      <Dialog open={researchModalOpen} onOpenChange={setResearchModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              {researchTargetJob ? `${researchTargetJob.company} – ${researchTargetJob.title}` : "Job Research"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <Tabs defaultValue={researchData ? "research" : "candidates"} className="flex-1 overflow-hidden flex flex-col">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="research" disabled={!researchData}>
+                <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                Research
+              </TabsTrigger>
+              <TabsTrigger value="candidates" disabled={!matchData}>
+                <Trophy className="h-3.5 w-3.5 mr-1.5" />
+                Candidate Matches
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="research" className="flex-1 overflow-hidden">
+              <ScrollArea className="h-[60vh]">
+                {researchData ? (
+                  <div className="space-y-4 p-1">
+                    {/* Company Profile */}
+                    {(researchData as any).companyProfile && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <Building2 className="h-4 w-4" /> Company Profile
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm space-y-2">
+                          <p>{(researchData as any).companyProfile.overview || "—"}</p>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            {(researchData as any).companyProfile.sector && (
+                              <div><span className="font-medium text-muted-foreground">Sector:</span> {(researchData as any).companyProfile.sector}</div>
+                            )}
+                            {(researchData as any).companyProfile.aum && (
+                              <div><span className="font-medium text-muted-foreground">AUM:</span> {(researchData as any).companyProfile.aum}</div>
+                            )}
+                            {(researchData as any).companyProfile.teamSize && (
+                              <div><span className="font-medium text-muted-foreground">Team Size:</span> {(researchData as any).companyProfile.teamSize}</div>
+                            )}
+                            {(researchData as any).companyProfile.reputation && (
+                              <div><span className="font-medium text-muted-foreground">Reputation:</span> {(researchData as any).companyProfile.reputation}</div>
+                            )}
+                          </div>
+                          {Array.isArray((researchData as any).companyProfile.recentDeals) && (researchData as any).companyProfile.recentDeals.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Recent Deals:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(researchData as any).companyProfile.recentDeals.map((deal: string, i: number) => (
+                                  <Badge key={i} variant="secondary" className="text-xs">{deal}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Job Requirements */}
+                    {(researchData as any).jobRequirements && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4" /> Job Requirements
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm space-y-2">
+                          {Array.isArray((researchData as any).jobRequirements.mustHaveSkills) && (researchData as any).jobRequirements.mustHaveSkills.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Must-Have Skills:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(researchData as any).jobRequirements.mustHaveSkills.map((skill: string, i: number) => (
+                                  <Badge key={i} variant="default" className="text-xs">{skill}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {Array.isArray((researchData as any).jobRequirements.niceToHaveSkills) && (researchData as any).jobRequirements.niceToHaveSkills.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Nice-to-Have:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(researchData as any).jobRequirements.niceToHaveSkills.map((skill: string, i: number) => (
+                                  <Badge key={i} variant="outline" className="text-xs">{skill}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            {(researchData as any).jobRequirements.experienceLevel && (
+                              <div><span className="font-medium text-muted-foreground">Experience:</span> {(researchData as any).jobRequirements.experienceLevel}</div>
+                            )}
+                            {Array.isArray((researchData as any).jobRequirements.certifications) && (researchData as any).jobRequirements.certifications.length > 0 && (
+                              <div><span className="font-medium text-muted-foreground">Certifications:</span> {(researchData as any).jobRequirements.certifications.join(", ")}</div>
+                            )}
+                          </div>
+                          {Array.isArray((researchData as any).jobRequirements.keyResponsibilities) && (researchData as any).jobRequirements.keyResponsibilities.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Key Responsibilities:</p>
+                              <ul className="list-disc list-inside text-xs space-y-0.5">
+                                {(researchData as any).jobRequirements.keyResponsibilities.map((r: string, i: number) => (
+                                  <li key={i}>{r}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Candidate Profile */}
+                    {(researchData as any).candidateProfile && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <Users className="h-4 w-4" /> Ideal Candidate Profile
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-sm space-y-2">
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            {(researchData as any).candidateProfile.seniority && (
+                              <div><span className="font-medium text-muted-foreground">Seniority:</span> {(researchData as any).candidateProfile.seniority}</div>
+                            )}
+                            {(researchData as any).candidateProfile.compensationRange && (
+                              <div><span className="font-medium text-muted-foreground">Compensation:</span> {(researchData as any).candidateProfile.compensationRange}</div>
+                            )}
+                          </div>
+                          {Array.isArray((researchData as any).candidateProfile.idealTitles) && (researchData as any).candidateProfile.idealTitles.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Ideal Current Titles:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(researchData as any).candidateProfile.idealTitles.map((t: string, i: number) => (
+                                  <Badge key={i} variant="secondary" className="text-xs">{t}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {Array.isArray((researchData as any).candidateProfile.idealCompanies) && (researchData as any).candidateProfile.idealCompanies.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-muted-foreground mb-1">Source From:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(researchData as any).candidateProfile.idealCompanies.map((c: string, i: number) => (
+                                  <Badge key={i} variant="outline" className="text-xs">{c}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Competitive Context */}
+                    {(researchData as any).competitiveContext && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm flex items-center gap-2">
+                            <AlertTriangle className="h-4 w-4" /> Market Context
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-xs space-y-1">
+                          {(researchData as any).competitiveContext.marketDemand && (
+                            <p><span className="font-medium text-muted-foreground">Market Demand:</span> <Badge variant={(researchData as any).competitiveContext.marketDemand === "high" ? "destructive" : "secondary"} className="text-xs ml-1">{(researchData as any).competitiveContext.marketDemand}</Badge></p>
+                          )}
+                          {(researchData as any).competitiveContext.timeToFill && (
+                            <p><span className="font-medium text-muted-foreground">Time to Fill:</span> {(researchData as any).competitiveContext.timeToFill}</p>
+                          )}
+                          {(researchData as any).competitiveContext.talentPool && (
+                            <p><span className="font-medium text-muted-foreground">Talent Pool:</span> {(researchData as any).competitiveContext.talentPool}</p>
+                          )}
+                          {Array.isArray((researchData as any).competitiveContext.similarRoles) && (researchData as any).competitiveContext.similarRoles.length > 0 && (
+                            <div>
+                              <span className="font-medium text-muted-foreground">Also Hiring:</span>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {(researchData as any).competitiveContext.similarRoles.map((r: string, i: number) => (
+                                  <Badge key={i} variant="outline" className="text-xs">{r}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Recruitment Angle */}
+                    {(researchData as any).recruitmentAngle && (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">Recruitment Angle</CardTitle>
+                        </CardHeader>
+                        <CardContent className="text-xs space-y-2">
+                          {Array.isArray((researchData as any).recruitmentAngle.pitchPoints) && (researchData as any).recruitmentAngle.pitchPoints.length > 0 && (
+                            <div>
+                              <p className="font-medium text-muted-foreground mb-1">Pitch Points:</p>
+                              <ul className="list-disc list-inside space-y-0.5">
+                                {(researchData as any).recruitmentAngle.pitchPoints.map((p: string, i: number) => (
+                                  <li key={i}>{p}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {(researchData as any).recruitmentAngle.approachStrategy && (
+                            <p><span className="font-medium text-muted-foreground">Approach:</span> {(researchData as any).recruitmentAngle.approachStrategy}</p>
+                          )}
+                          {Array.isArray((researchData as any).recruitmentAngle.redFlags) && (researchData as any).recruitmentAngle.redFlags.length > 0 && (
+                            <div>
+                              <p className="font-medium text-muted-foreground mb-1">Red Flags:</p>
+                              <div className="flex flex-wrap gap-1">
+                                {(researchData as any).recruitmentAngle.redFlags.map((f: string, i: number) => (
+                                  <Badge key={i} variant="destructive" className="text-xs">{f}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Citations */}
+                    {researchCitations.length > 0 && (
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        <p className="font-medium">Sources:</p>
+                        {researchCitations.map((url, i) => (
+                          <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block text-primary hover:underline truncate">
+                            [{i + 1}] {url}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Action: Match CVs from research tab */}
+                    <div className="flex gap-2 pt-2">
+                      <Button
+                        size="sm"
+                        disabled={Boolean(researchTargetJob && matchLoadingByJob[researchTargetJob.id])}
+                        onClick={() => researchTargetJob && runPerplexityMatch(researchTargetJob)}
+                      >
+                        <Trophy className="h-3.5 w-3.5 mr-1.5" />
+                        {researchTargetJob && matchLoadingByJob[researchTargetJob.id] ? "Matching..." : "Match Candidates"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Sparkles className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                    <p className="text-sm">Click "Research" on a job to see deep intelligence here.</p>
+                  </div>
+                )}
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="candidates" className="flex-1 overflow-hidden">
+              <ScrollArea className="h-[60vh]">
+                {matchData ? (
+                  <div className="space-y-4 p-1">
+                    {/* Best Match Banner */}
+                    {matchData.bestMatch && (
+                      <Card className="border-primary/40 bg-primary/5">
+                        <CardContent className="p-4">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Trophy className="h-4 w-4 text-primary" />
+                            <span className="text-sm font-semibold">Best Match: {matchData.bestMatch.name}</span>
+                            <Badge variant="default" className="text-xs ml-auto">Top Pick</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{matchData.bestMatch.explanation}</p>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Submission Notes */}
+                    {matchData.submissionNotes && (
+                      <div className="text-xs bg-muted/40 rounded-md p-3">
+                        <p className="font-medium text-muted-foreground mb-1">Submission Notes:</p>
+                        <p>{matchData.submissionNotes}</p>
+                      </div>
+                    )}
+
+                    {/* Candidate Scores Table */}
+                    {matchData.matches.length > 0 ? (
+                      <div className="rounded-md border overflow-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-[40px]">Score</TableHead>
+                              <TableHead>Name</TableHead>
+                              <TableHead>Title</TableHead>
+                              <TableHead>Fit Summary</TableHead>
+                              <TableHead className="w-[80px]">Submit?</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {matchData.matches
+                              .sort((a, b) => b.score - a.score)
+                              .map((m) => (
+                                <TableRow key={m.candidateId} className={m.submissionReady ? "bg-primary/5" : ""}>
+                                  <TableCell>
+                                    <Badge
+                                      variant={m.score >= 8 ? "default" : m.score >= 6 ? "secondary" : "outline"}
+                                      className="text-xs font-mono"
+                                    >
+                                      {m.score}/10
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="font-medium text-sm">{m.name}</TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">{m.currentTitle || "—"}</TableCell>
+                                  <TableCell className="text-xs max-w-[300px]">
+                                    <p>{m.fitSummary}</p>
+                                    {m.reasons.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {m.reasons.slice(0, 3).map((r, i) => (
+                                          <Badge key={i} variant="outline" className="text-[10px]">{r}</Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </TableCell>
+                                  <TableCell>
+                                    {m.submissionReady ? (
+                                      <Badge variant="default" className="text-xs gap-1">
+                                        <CheckCircle2 className="h-3 w-3" /> Yes
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">—</span>
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <p className="text-sm">No candidates scored 4+ against this job.</p>
+                      </div>
+                    )}
+
+                    {/* Action: Research from candidates tab */}
+                    {!researchData && (
+                      <div className="flex gap-2 pt-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(researchTargetJob && researchLoadingByJob[researchTargetJob.id])}
+                          onClick={() => researchTargetJob && runPerplexityResearch(researchTargetJob)}
+                        >
+                          <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                          {researchTargetJob && researchLoadingByJob[researchTargetJob.id] ? "Researching..." : "Run Deep Research"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Trophy className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                    <p className="text-sm">Click "Match CVs" on a job to score your candidates.</p>
+                  </div>
+                )}
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>
