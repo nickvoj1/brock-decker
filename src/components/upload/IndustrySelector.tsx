@@ -107,6 +107,7 @@ const INDUSTRY_CATEGORIES: IndustryCategory[] = [
       { value: "financial-advisory", label: "Financial Advisory" },
       { value: "transaction-advisory", label: "Transaction Advisory" },
       { value: "valuation-advisory", label: "Valuation Advisory" },
+      { value: "law-legal", label: "Law / Legal" },
     ],
   },
   {
