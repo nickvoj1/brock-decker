@@ -419,7 +419,29 @@ function normalizeToken(value: unknown): string {
 
 function readRawRecord(contact: any): Record<string, unknown> {
   const raw = contact?.raw;
-  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === "string") {
+    const parsed = parseJsonLikeString(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  }
+  return {};
+}
+
+function readRecordLike(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    const parsed = parseJsonLikeString(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  }
+  return {};
 }
 
 function findAddressRecord(contact: any): Record<string, unknown> {
@@ -439,6 +461,8 @@ function findAddressRecord(contact: any): Record<string, unknown> {
 
 function extractSkillTermsFromMirrorContact(contact: any): string[] {
   const rawRecord = readRawRecord(contact);
+  const customSummary = readRecordLike(contact?.custom_field_summary);
+  const topLevelRecord = readRecordLike(contact);
   const terms: string[] = [];
   const seen = new Set<string>();
 
@@ -449,19 +473,38 @@ function extractSkillTermsFromMirrorContact(contact: any): string[] {
     terms.push(normalized);
   };
 
-  for (const [key, value] of Object.entries(rawRecord)) {
-    const lower = key.toLowerCase();
-    if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
+  const ingestSkillCandidates = (record: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(record)) {
+      const lower = key.toLowerCase();
+      if (!SKILL_KEY_REGEX.test(lower) && !CUSTOM_FIELD_REGEX.test(lower)) continue;
 
-    const candidates = valueToSkillTerms(value);
-    for (const candidate of candidates) addTerm(candidate);
+      const candidates = valueToSkillTerms(value);
+      for (const candidate of candidates) addTerm(candidate);
 
-    if (typeof value === "string") {
-      const parsed = parseJsonLikeString(value);
-      if (parsed !== null) {
-        for (const candidate of valueToSkillTerms(parsed)) addTerm(candidate);
+      if (typeof value === "string") {
+        const parsed = parseJsonLikeString(value);
+        if (parsed !== null) {
+          for (const candidate of valueToSkillTerms(parsed)) addTerm(candidate);
+        }
       }
     }
+  };
+
+  ingestSkillCandidates(rawRecord);
+  ingestSkillCandidates(customSummary);
+  ingestSkillCandidates(topLevelRecord);
+
+  // Explicitly include canonical top-level skill fields if present.
+  const directFields = [
+    contact?.skills,
+    contact?.skillList,
+    contact?.skillIDList,
+    contact?.specialty,
+    contact?.specialities,
+    contact?.expertise,
+  ];
+  for (const value of directFields) {
+    for (const candidate of valueToSkillTerms(value)) addTerm(candidate);
   }
 
   return terms;
@@ -4874,8 +4917,10 @@ serve(async (req) => {
       const searchTerm = normalizeSearchTerm(data?.search);
       const filterRows = normalizeFilterRows(data?.filters);
       const useAdvancedFiltering = filterRows.length > 0;
+      const hasSkillsFilter = filterRows.some((row) => row.field === "skills");
       const enrichLatestNotes = Boolean(data?.enrichLatestNotes);
       const useDbSearch = data?.useDbSearch === undefined ? true : Boolean(data?.useDbSearch);
+      const useDbSearchForRequest = useDbSearch && !hasSkillsFilter;
       const autoRunScheduled = data?.autoRunScheduled === undefined ? true : Boolean(data?.autoRunScheduled);
 
       let schedulerAction: Record<string, unknown> | null = null;
@@ -4896,9 +4941,9 @@ serve(async (req) => {
       let contacts: any[] = [];
       let total = 0;
       let queryMode = "legacy";
-      let fallbackReason: string | null = null;
+      let fallbackReason: string | null = hasSkillsFilter ? "skills_filter_uses_legacy" : null;
 
-      if (useDbSearch) {
+      if (useDbSearchForRequest) {
         const { data: rpcRows, error: rpcError } = await supabase.rpc("crm_search_contacts", {
           p_search: searchTerm || null,
           p_filters: filterRows,
