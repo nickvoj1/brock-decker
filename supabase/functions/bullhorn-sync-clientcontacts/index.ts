@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const ADMIN_PROFILE = "Nikita Vojevoda";
-const BUILD_MARKER = "parser-hardened-v2";
+const BUILD_MARKER = "company-mirror-v1";
 let bootLogged = false;
 const DEFAULT_BATCH_SIZE = 500;
 const DEFAULT_MAX_BATCHES_PER_INVOCATION = 8;
@@ -158,6 +158,9 @@ const FILE_ATTACHMENT_SELECTORS = [
 const CONTACT_PARITY_ENTITY_META = ["ClientContact", "ClientCorporation", "Note", "Task", "Appointment"];
 const CONTACT_TIMELINE_PAGE_SIZE = 200;
 const CONTACT_TIMELINE_MAX_PAGES_PER_QUERY = 10;
+const COMPANY_NOTES_MIRROR_LIMIT = 25;
+const COMPANY_SYNC_CHUNK_SIZE = 40;
+const COMPANY_SYNC_NOTES_CONCURRENCY = 4;
 const SYNC_SETTINGS_ID = "clientcontacts";
 const DEFAULT_SYNC_LAG_WARNING_HOURS = 24;
 const DEFAULT_SYNC_SCHEDULE = {
@@ -321,6 +324,18 @@ function normalizeSearchTerm(input: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+function isMissingRelationError(error: unknown): boolean {
+  if (!error) return false;
+  const message = String((error as any)?.message || "").toLowerCase();
+  const code = String((error as any)?.code || "").toUpperCase();
+  return (
+    code === "42P01" ||
+    message.includes("does not exist") ||
+    message.includes("undefined table") ||
+    message.includes("schema cache")
+  );
 }
 
 function isArchivedStatusValue(value: unknown): boolean {
@@ -1914,6 +1929,276 @@ async function fetchBullhornNotesForEntity(
   }
 
   return [];
+}
+
+function extractCompanyIdFromContactRecord(contact: Record<string, unknown>): number | null {
+  const companyRecord =
+    contact?.clientCorporation && typeof contact.clientCorporation === "object" && !Array.isArray(contact.clientCorporation)
+      ? (contact.clientCorporation as Record<string, unknown>)
+      : null;
+  return (
+    toFiniteNumber(companyRecord?.id) ??
+    toFiniteNumber(contact.clientCorporationID) ??
+    toFiniteNumber(contact.clientCorporationId) ??
+    null
+  );
+}
+
+function extractCompanyRecordFromContact(contact: Record<string, unknown>): Record<string, unknown> | null {
+  const companyRecord =
+    contact?.clientCorporation && typeof contact.clientCorporation === "object" && !Array.isArray(contact.clientCorporation)
+      ? ({ ...(contact.clientCorporation as Record<string, unknown>) } as Record<string, unknown>)
+      : null;
+  const companyId = extractCompanyIdFromContactRecord(contact);
+  const companyName =
+    normalizeOptionalString(companyRecord?.name) ??
+    normalizeOptionalString(contact.clientCorporationName) ??
+    normalizeOptionalString(contact.clientCorporation);
+
+  if (!companyRecord && !companyId && !companyName) return null;
+  const out = companyRecord || {};
+  if (!Number.isFinite(Number(out.id)) && companyId) out.id = companyId;
+  if (!out.name && companyName) out.name = companyName;
+  return out;
+}
+
+function mapCompanyMirrorRow(company: Record<string, unknown>, jobId?: string | null): Record<string, unknown> {
+  const owner =
+    company.owner && typeof company.owner === "object" && !Array.isArray(company.owner)
+      ? (company.owner as Record<string, unknown>)
+      : null;
+
+  return {
+    bullhorn_id: Number(company.id),
+    synced_at: new Date().toISOString(),
+    last_synced_job_id: jobId || null,
+    name: normalizeOptionalString(company.name),
+    status: normalizeOptionalString(company.status),
+    url: normalizeOptionalString(company.url),
+    phone: normalizeOptionalString(company.phone),
+    industry: normalizeOptionalString(company.industry),
+    address1: normalizeOptionalString(company.address1),
+    address2: normalizeOptionalString(company.address2),
+    city: normalizeOptionalString(company.city),
+    state: normalizeOptionalString(company.state),
+    country_id: toFiniteNumber(company.countryID ?? company.countryId),
+    country_name: normalizeOptionalString(company.countryName ?? company.country),
+    owner_id: toFiniteNumber(owner?.id),
+    owner_name: normalizeOptionalString(owner?.name),
+    date_added: normalizeBullhornDate(company.dateAdded),
+    date_last_modified: normalizeBullhornDate(company.dateLastModified),
+    is_deleted: normalizeLooseBoolean(company.isDeleted) === true,
+    raw: company,
+  };
+}
+
+function mapMirrorCompanyRowToPayload(row: any): Record<string, unknown> | null {
+  if (!row || typeof row !== "object") return null;
+  const raw = row.raw && typeof row.raw === "object" && !Array.isArray(row.raw)
+    ? ({ ...(row.raw as Record<string, unknown>) } as Record<string, unknown>)
+    : ({} as Record<string, unknown>);
+
+  if (!Number.isFinite(Number(raw.id)) && Number.isFinite(Number(row.bullhorn_id))) raw.id = row.bullhorn_id;
+  if (!raw.name && row.name) raw.name = row.name;
+  if (!raw.status && row.status) raw.status = row.status;
+  if (!raw.url && row.url) raw.url = row.url;
+  if (!raw.phone && row.phone) raw.phone = row.phone;
+  if (!raw.industry && row.industry) raw.industry = row.industry;
+  if (!raw.address1 && row.address1) raw.address1 = row.address1;
+  if (!raw.address2 && row.address2) raw.address2 = row.address2;
+  if (!raw.city && row.city) raw.city = row.city;
+  if (!raw.state && row.state) raw.state = row.state;
+  if (!raw.countryID && row.country_id !== null && row.country_id !== undefined) raw.countryID = row.country_id;
+  if (!raw.countryName && row.country_name) raw.countryName = row.country_name;
+  if (!raw.dateAdded && row.date_added) raw.dateAdded = row.date_added;
+  if (!raw.dateLastModified && row.date_last_modified) raw.dateLastModified = row.date_last_modified;
+  if (!raw.owner && (row.owner_id || row.owner_name)) {
+    raw.owner = {
+      id: row.owner_id ?? null,
+      name: row.owner_name ?? null,
+    };
+  }
+
+  return Object.keys(raw).length ? raw : null;
+}
+
+function mapCompanyNoteMirrorRow(
+  companyId: number,
+  note: Record<string, unknown>,
+  jobId?: string | null,
+): Record<string, unknown> {
+  const noteId = toFiniteNumber(note.id);
+  const noteDate = normalizeBullhornDate(note.dateAdded);
+  const action = normalizeOptionalString(note.action);
+  const comments = normalizeOptionalString(note.comments);
+  const externalKey = noteId
+    ? `company-note:${companyId}:${noteId}`
+    : `company-note:${companyId}:${noteDate || "na"}:${(action || comments || "note").slice(0, 80)}`;
+
+  return {
+    company_id: companyId,
+    note_id: noteId,
+    note_action: action,
+    note_text: comments,
+    note_date: noteDate,
+    person_name: normalizeOptionalString(note.personName),
+    target_entity_name: normalizeOptionalString(note.targetEntityName) || "ClientCorporation",
+    target_entity_id: toFiniteNumber(note.targetEntityId) ?? companyId,
+    external_key: externalKey,
+    is_deleted: false,
+    payload: note,
+    last_synced_job_id: jobId || null,
+  };
+}
+
+function mapMirrorCompanyNoteRowToLiveNote(row: any): Record<string, unknown> {
+  const payload = row?.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+    ? (row.payload as Record<string, unknown>)
+    : null;
+  return {
+    id: toFiniteNumber(row?.note_id) ?? toFiniteNumber(payload?.id),
+    action: normalizeOptionalString(row?.note_action) ?? normalizeOptionalString(payload?.action),
+    comments: normalizeOptionalString(row?.note_text) ?? normalizeOptionalString(payload?.comments),
+    dateAdded: normalizeBullhornDate(row?.note_date) ?? normalizeBullhornDate(payload?.dateAdded),
+    personName: normalizeOptionalString(row?.person_name) ?? normalizeOptionalString(payload?.personName),
+    targetEntityName:
+      normalizeOptionalString(row?.target_entity_name) ??
+      normalizeOptionalString(payload?.targetEntityName) ??
+      "ClientCorporation",
+    targetEntityId: toFiniteNumber(row?.target_entity_id) ?? toFiniteNumber(payload?.targetEntityId),
+  };
+}
+
+function sortLiveNotesDesc(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  const dedupe = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const key = `${row.id ?? "none"}|${String(row.dateAdded || "")}|${String(row.comments || "").slice(0, 180)}`;
+    if (!dedupe.has(key)) dedupe.set(key, row);
+  }
+  return Array.from(dedupe.values()).sort((a, b) => {
+    const left = Date.parse(String(a.dateAdded || "")) || 0;
+    const right = Date.parse(String(b.dateAdded || "")) || 0;
+    return right - left;
+  });
+}
+
+async function fetchClientCorporationsByIds(
+  restUrl: string,
+  bhRestToken: string,
+  companyIds: number[],
+): Promise<Map<number, Record<string, unknown>>> {
+  const companyById = new Map<number, Record<string, unknown>>();
+  const uniqueIds = Array.from(new Set(companyIds.filter((id) => Number.isFinite(id))));
+  if (!uniqueIds.length) return companyById;
+
+  for (let i = 0; i < uniqueIds.length; i += COMPANY_SYNC_CHUNK_SIZE) {
+    const chunk = uniqueIds.slice(i, i + COMPANY_SYNC_CHUNK_SIZE);
+    const whereClause = `id IN (${chunk.join(",")})`;
+    const rows = await fetchQueryRowsWithFallback(
+      restUrl,
+      bhRestToken,
+      "ClientCorporation",
+      whereClause,
+      chunk.length,
+      0,
+      COMPANY_DETAIL_FIELD_SELECTORS,
+    );
+
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const id = toFiniteNumber((row as Record<string, unknown>).id);
+      if (!id) continue;
+      companyById.set(id, row as Record<string, unknown>);
+    }
+
+    const missingIds = chunk.filter((id) => !companyById.has(id));
+    for (const missingId of missingIds) {
+      const fallback = await fetchEntityByIdWithFallback(
+        restUrl,
+        bhRestToken,
+        "ClientCorporation",
+        missingId,
+        COMPANY_DETAIL_FIELD_SELECTORS,
+      );
+      if (fallback) companyById.set(missingId, fallback);
+    }
+  }
+
+  return companyById;
+}
+
+async function syncCompanyMirrorData(
+  supabase: any,
+  restUrl: string,
+  bhRestToken: string,
+  jobId: string,
+  contacts: Record<string, unknown>[],
+) {
+  const companyIds = Array.from(
+    new Set(
+      contacts
+        .map((contact) => extractCompanyIdFromContactRecord(contact))
+        .filter((id): id is number => Number.isFinite(Number(id))),
+    ),
+  );
+  if (!companyIds.length) return;
+
+  const companyById = await fetchClientCorporationsByIds(restUrl, bhRestToken, companyIds);
+  for (const contact of contacts) {
+    const companyId = extractCompanyIdFromContactRecord(contact);
+    if (!companyId || companyById.has(companyId)) continue;
+    const fromContact = extractCompanyRecordFromContact(contact);
+    if (!fromContact) continue;
+    companyById.set(companyId, fromContact);
+  }
+
+  const mappedCompanies = Array.from(companyById.values())
+    .map((company) => mapCompanyMirrorRow(company, jobId))
+    .filter((row) => Number.isFinite(Number(row.bullhorn_id)));
+
+  if (mappedCompanies.length) {
+    const { error: companyUpsertError } = await supabase
+      .from("bullhorn_client_corporations_mirror")
+      .upsert(mappedCompanies, { onConflict: "bullhorn_id" });
+    if (companyUpsertError && !isMissingRelationError(companyUpsertError)) {
+      throw new Error(`Company mirror upsert failed: ${companyUpsertError.message}`);
+    }
+  }
+
+  const mirrorNoteRows: Record<string, unknown>[] = [];
+  const queue = Array.from(companyById.entries());
+  const workerCount = Math.min(COMPANY_SYNC_NOTES_CONCURRENCY, queue.length);
+  const workers: Promise<void>[] = [];
+
+  const worker = async () => {
+    while (queue.length) {
+      const next = queue.shift();
+      if (!next) continue;
+      const [companyId, companyRecord] = next;
+      const liveNotes = await fetchBullhornNotesForEntity(
+        restUrl,
+        bhRestToken,
+        "ClientCorporation",
+        companyId,
+        companyRecord,
+      );
+      for (const note of liveNotes) {
+        mirrorNoteRows.push(mapCompanyNoteMirrorRow(companyId, note, jobId));
+      }
+    }
+  };
+
+  for (let i = 0; i < workerCount; i++) workers.push(worker());
+  await Promise.all(workers);
+
+  if (mirrorNoteRows.length) {
+    const { error: companyNotesError } = await supabase
+      .from("bullhorn_company_notes_mirror")
+      .upsert(mirrorNoteRows, { onConflict: "external_key" });
+    if (companyNotesError && !isMissingRelationError(companyNotesError)) {
+      throw new Error(`Company notes mirror upsert failed: ${companyNotesError.message}`);
+    }
+  }
 }
 
 function normalizeTimelineEventType(source: string, value: unknown, fallbackSummary: unknown): string {
@@ -3593,6 +3878,12 @@ async function processSyncJob(
       }
     }
 
+    try {
+      await syncCompanyMirrorData(supabase, tokens.rest_url, tokens.bh_rest_token, job.id, rows);
+    } catch (companySyncError) {
+      console.warn("[bullhorn-sync-clientcontacts] Company mirror sync warning:", companySyncError);
+    }
+
     nextStart += rows.length;
     totalSynced += rows.length;
     batchesProcessed += 1;
@@ -4409,7 +4700,24 @@ serve(async (req) => {
           ? (mirrorContact.clientCorporation as Record<string, unknown>)
           : null;
 
+      const mirrorCompanyId =
+        toFiniteNumber((mirrorCompanyFromRaw as any)?.id) ??
+        toFiniteNumber(mirrorFallback?.client_corporation_id) ??
+        null;
+
+      let mirrorCompanyFromTable: Record<string, unknown> | null = null;
+      if (mirrorCompanyId) {
+        const { data: companyMirrorRow, error: companyMirrorError } = await supabase
+          .from("bullhorn_client_corporations_mirror")
+          .select("*")
+          .eq("bullhorn_id", mirrorCompanyId)
+          .maybeSingle();
+        if (companyMirrorError && !isMissingRelationError(companyMirrorError)) throw companyMirrorError;
+        mirrorCompanyFromTable = mapMirrorCompanyRowToPayload(companyMirrorRow);
+      }
+
       const mirrorCompany =
+        mirrorCompanyFromTable ||
         mirrorCompanyFromRaw ||
         (mirrorFallback?.client_corporation_id || mirrorFallback?.client_corporation_name
           ? ({
@@ -4549,14 +4857,37 @@ serve(async (req) => {
         return raw;
       });
 
-      const mirrorCompany =
+      const { data: mirrorCompanyRow, error: mirrorCompanyError } = await supabase
+        .from("bullhorn_client_corporations_mirror")
+        .select("*")
+        .eq("bullhorn_id", companyId)
+        .maybeSingle();
+      if (mirrorCompanyError && !isMissingRelationError(mirrorCompanyError)) throw mirrorCompanyError;
+
+      const companyFromContactMirror =
         mirrorContacts.find(
           (row) => row?.clientCorporation && typeof row.clientCorporation === "object" && !Array.isArray(row.clientCorporation),
         )?.clientCorporation as Record<string, unknown> | undefined;
-      const companyFromMirror = mirrorCompany || {
+
+      const companyFromMirror =
+        mapMirrorCompanyRowToPayload(mirrorCompanyRow) ||
+        companyFromContactMirror || {
         id: companyId,
         name: normalizeOptionalString((mirrorContactsRows || [])[0]?.client_corporation_name),
       };
+
+      let mirrorCompanyNotesRows: any[] = [];
+      const { data: mirrorCompanyNotesData, error: mirrorCompanyNotesError } = await supabase
+        .from("bullhorn_company_notes_mirror")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("is_deleted", false)
+        .order("note_date", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .limit(COMPANY_NOTES_MIRROR_LIMIT);
+      if (mirrorCompanyNotesError && !isMissingRelationError(mirrorCompanyNotesError)) throw mirrorCompanyNotesError;
+      if (Array.isArray(mirrorCompanyNotesData)) mirrorCompanyNotesRows = mirrorCompanyNotesData;
+      const mirroredCompanyNotes = mirrorCompanyNotesRows.map((row: any) => mapMirrorCompanyNoteRowToLiveNote(row));
 
       const { data: localCompanyNoteRows } = await supabase
         .from("bullhorn_company_local_notes")
@@ -4578,13 +4909,18 @@ serve(async (req) => {
         };
       });
 
+      const cachedNotes = sortLiveNotesDesc([...mirroredCompanyNotes, ...localCompanyNotes]).slice(
+        0,
+        COMPANY_NOTES_MIRROR_LIMIT,
+      );
+
       if (!preferLive) {
         return jsonResponse({
           success: true,
           data: {
             company: companyFromMirror || null,
             contacts: mirrorContacts,
-            notes: localCompanyNotes,
+            notes: cachedNotes,
             localNotes: localCompanyNotes,
           },
         });
@@ -4597,7 +4933,7 @@ serve(async (req) => {
           data: {
             company: companyFromMirror || null,
             contacts: mirrorContacts,
-            notes: localCompanyNotes,
+            notes: cachedNotes,
             localNotes: localCompanyNotes,
           },
         });
@@ -4639,12 +4975,44 @@ serve(async (req) => {
         company || undefined,
       );
 
+      if (company && typeof company === "object") {
+        const mappedCompany = mapCompanyMirrorRow(company as Record<string, unknown>, null);
+        try {
+          const { error: companyUpsertError } = await supabase
+            .from("bullhorn_client_corporations_mirror")
+            .upsert(mappedCompany, { onConflict: "bullhorn_id" });
+          if (companyUpsertError && !isMissingRelationError(companyUpsertError)) {
+            console.warn("[bullhorn-sync-clientcontacts] Company mirror refresh warning:", companyUpsertError.message);
+          }
+        } catch (companyRefreshError) {
+          console.warn("[bullhorn-sync-clientcontacts] Company mirror refresh warning:", companyRefreshError);
+        }
+      }
+
+      if (notes.length) {
+        const mappedLiveNotes = notes.map((note) => mapCompanyNoteMirrorRow(companyId, note, null));
+        try {
+          const { error: notesUpsertError } = await supabase
+            .from("bullhorn_company_notes_mirror")
+            .upsert(mappedLiveNotes, { onConflict: "external_key" });
+          if (notesUpsertError && !isMissingRelationError(notesUpsertError)) {
+            console.warn("[bullhorn-sync-clientcontacts] Company notes mirror refresh warning:", notesUpsertError.message);
+          }
+        } catch (notesRefreshError) {
+          console.warn("[bullhorn-sync-clientcontacts] Company notes mirror refresh warning:", notesRefreshError);
+        }
+      }
+
+      const responseNotes = notes.length
+        ? sortLiveNotesDesc([...notes, ...localCompanyNotes]).slice(0, COMPANY_NOTES_MIRROR_LIMIT)
+        : cachedNotes;
+
       return jsonResponse({
         success: true,
         data: {
           company: company || null,
           contacts,
-          notes: notes.length ? notes : localCompanyNotes,
+          notes: responseNotes,
           localNotes: localCompanyNotes,
         },
       });
@@ -4878,6 +5246,12 @@ serve(async (req) => {
           .from("bullhorn_client_contacts_mirror")
           .upsert(mappedRows, { onConflict: "bullhorn_id" });
         if (upsertError) throw upsertError;
+      }
+
+      try {
+        await syncCompanyMirrorData(supabase, tokens.rest_url, tokens.bh_rest_token, parityJobId, contacts);
+      } catch (companySyncError) {
+        console.warn("[bullhorn-sync-clientcontacts] Company parity sync warning:", companySyncError);
       }
 
       return jsonResponse({
