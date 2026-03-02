@@ -1675,7 +1675,13 @@ async function createDistributionList(
   bhRestToken: string,
   listName: string,
   contactIds: number[]
-): Promise<number> {
+): Promise<{
+  listId: number
+  membersRequested: number
+  membersAdded: number
+  membersFailed: number
+  memberErrors: string[]
+}> {
   console.log(`Creating Distribution List: ${listName} with ${contactIds.length} contacts`)
   
   // Step 1: Create a DistributionList (NOT Tearsheet - Tearsheet = Hotlists)
@@ -1712,45 +1718,86 @@ async function createDistributionList(
   const listId = listData.changedEntityId
   console.log(`DistributionList created with ID: ${listId}`)
 
-  // Step 2: Add contacts using the to-many association endpoint
-  // DistributionList has a 'members' to-many field (associatedEntity: Person)
-  // Bullhorn uses: PUT /entity/DistributionList/{listId}/members/{personId1,personId2,...}
+  // Step 2: Add contacts using the to-many association endpoint.
+  // IMPORTANT: Bullhorn can reject larger member batches depending on portal settings/rate state.
+  // We recursively split failed batches to avoid partial silent exports.
   console.log(`Adding ${contactIds.length} contacts to distribution list via 'members' field...`)
-  
-  // Batch the contact IDs to avoid URL length limits (max ~50 at a time)
-  const BATCH_SIZE = 50
-  let successCount = 0
-  
-  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
-    const batch = contactIds.slice(i, i + BATCH_SIZE)
-    const batchIds = batch.join(',')
-    
+
+  const memberErrors: string[] = []
+
+  const addMembersWithAdaptiveBatching = async (ids: number[]): Promise<number> => {
+    if (!ids.length) return 0
+
+    const batchIds = ids.join(',')
     try {
-      // Use the 'members' to-many association endpoint (Person entities)
       const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
       })
-      
+
       if (assocResponse.ok) {
-        successCount += batch.length
-        console.log(`Added batch of ${batch.length} contacts to distribution list (${successCount}/${contactIds.length} total)`)
         await assocResponse.text() // consume response
-      } else {
-        const errorText = await assocResponse.text()
-        console.error(`Failed to add batch of contacts to distribution list via 'members': ${errorText}`)
+        return ids.length
       }
+
+      const errorText = await assocResponse.text()
+
+      // If batch > 1, split and retry smaller chunks to work around API constraints/throttling.
+      if (ids.length > 1) {
+        const mid = Math.ceil(ids.length / 2)
+        const left = ids.slice(0, mid)
+        const right = ids.slice(mid)
+        const leftAdded = await addMembersWithAdaptiveBatching(left)
+        const rightAdded = await addMembersWithAdaptiveBatching(right)
+        return leftAdded + rightAdded
+      }
+
+      const msg = `Failed to add member ${ids[0]} to list ${listId}: ${errorText}`
+      console.error(msg)
+      memberErrors.push(msg)
+      return 0
     } catch (err: any) {
-      console.error(`Error adding batch of contacts: ${err.message}`)
+      if (ids.length > 1) {
+        const mid = Math.ceil(ids.length / 2)
+        const left = ids.slice(0, mid)
+        const right = ids.slice(mid)
+        const leftAdded = await addMembersWithAdaptiveBatching(left)
+        const rightAdded = await addMembersWithAdaptiveBatching(right)
+        return leftAdded + rightAdded
+      }
+
+      const msg = `Error adding member ${ids[0]} to list ${listId}: ${err?.message || 'Unknown error'}`
+      console.error(msg)
+      memberErrors.push(msg)
+      return 0
     }
-    
-    // Small delay between batches
+  }
+
+  const INITIAL_BATCH_SIZE = 50
+  let membersAdded = 0
+  for (let i = 0; i < contactIds.length; i += INITIAL_BATCH_SIZE) {
+    const batch = contactIds.slice(i, i + INITIAL_BATCH_SIZE)
+    const added = await addMembersWithAdaptiveBatching(batch)
+    membersAdded += added
+    console.log(`Distribution list progress: ${membersAdded}/${contactIds.length} members added`)
     await sleep(100)
   }
-  
-  console.log(`Successfully added ${successCount}/${contactIds.length} contacts to distribution list ${listId}`)
-  return listId
+
+  const membersFailed = Math.max(0, contactIds.length - membersAdded)
+  if (membersFailed > 0) {
+    console.warn(`Distribution list partial add: ${membersAdded}/${contactIds.length} members added`)
+  } else {
+    console.log(`Successfully added ${membersAdded}/${contactIds.length} members to distribution list ${listId}`)
+  }
+
+  return {
+    listId,
+    membersRequested: contactIds.length,
+    membersAdded,
+    membersFailed,
+    memberErrors,
+  }
 }
 
 async function assertDistributionListsApiAvailable(restUrl: string, bhRestToken: string): Promise<void> {
@@ -2094,13 +2141,25 @@ Deno.serve(async (req) => {
 
     // Create Distribution List with exported contacts
     console.log(`Creating distribution list: ${listName}`)
-    const listId = await createDistributionList(
+    const distributionListResult = await createDistributionList(
       tokens.restUrl,
       tokens.bhRestToken,
       listName,
       contactIds
     )
-    console.log(`Distribution list created with ID: ${listId}`)
+    const listId = distributionListResult.listId
+    console.log(
+      `Distribution list created with ID: ${listId} (members ${distributionListResult.membersAdded}/${distributionListResult.membersRequested})`
+    )
+
+    if (distributionListResult.membersFailed > 0) {
+      errors.push(
+        `Distribution List partial add: ${distributionListResult.membersAdded}/${distributionListResult.membersRequested} members added`
+      )
+      for (const memberError of distributionListResult.memberErrors.slice(0, 20)) {
+        errors.push(memberError)
+      }
+    }
 
     await supabase
       .from('enrichment_runs')
@@ -2118,6 +2177,9 @@ Deno.serve(async (req) => {
         listName,
         listId,
         contactsExported: contactIds.length,
+        contactsInDistributionList: distributionListResult.membersAdded,
+        distributionListMembersRequested: distributionListResult.membersRequested,
+        distributionListMembersFailed: distributionListResult.membersFailed,
         newContacts: newContactIds.length,
         existingContacts: existingContactIds.length,
         contactsSkipped: skippedContacts.length,

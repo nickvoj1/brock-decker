@@ -204,11 +204,30 @@ export default function RunsHistory() {
     },
     onSuccess: (data) => {
       const listCreated = data?.listId !== null && data?.listId !== undefined;
+      const contactsExported = Number(data?.contactsExported || 0);
+      const contactsInDistributionList =
+        Number.isFinite(Number(data?.contactsInDistributionList))
+          ? Number(data?.contactsInDistributionList)
+          : contactsExported;
+      const distributionListMembersRequested =
+        Number.isFinite(Number(data?.distributionListMembersRequested))
+          ? Number(data?.distributionListMembersRequested)
+          : contactsExported;
+      const distributionListMembersFailed =
+        Number.isFinite(Number(data?.distributionListMembersFailed))
+          ? Number(data?.distributionListMembersFailed)
+          : Math.max(0, distributionListMembersRequested - contactsInDistributionList);
+
+      const distributionNote =
+        distributionListMembersFailed > 0
+          ? ` Distribution list members: ${contactsInDistributionList}/${distributionListMembersRequested} (partial).`
+          : ` Distribution list members: ${contactsInDistributionList}.`;
+
       toast({
         title: "Exported to Bullhorn",
         description: listCreated
-          ? `Distribution list "${data.listName}" created with ${data.contactsExported} contacts${data.newContacts ? ` (${data.newContacts} new, ${data.existingContacts} existing)` : ''}.`
-          : `Exported ${data.contactsExported} contacts. (No Distribution List was created — your Bullhorn instance currently doesn't allow list creation via API.)`,
+          ? `Distribution list "${data.listName}" created from ${contactsExported} contacts${data.newContacts ? ` (${data.newContacts} new, ${data.existingContacts} existing)` : ''}.${distributionNote}`
+          : `Exported ${contactsExported} contacts. (No Distribution List was created — your Bullhorn instance currently doesn't allow list creation via API.)`,
       });
       queryClient.invalidateQueries({ queryKey: ['enrichment-runs'] });
       setPendingClassifiedContacts(null);
