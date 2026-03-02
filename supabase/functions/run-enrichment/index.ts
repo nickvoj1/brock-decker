@@ -1100,8 +1100,11 @@ Deno.serve(async (req) => {
 
     const candidateData = (run.candidates_data as CandidateData[])?.[0]
     const preferences = run.preferences_data as Preference[]
-    const maxContacts = run.search_counter || 100 // Use search_counter as max contacts
-    const maxPerCompany = 4 // Allow up to 4 contacts per company for better coverage
+    const requestedContacts = Number(run.search_counter || 100)
+    const maxContacts = Number.isFinite(requestedContacts)
+      ? Math.max(10, Math.min(500, Math.floor(requestedContacts)))
+      : 100 // Use search_counter as max contacts
+    const baseMaxPerCompany = 4 // Baseline limit; can scale for high-volume searches
     const searchType = String((preferences[0] as any)?.type || '').toLowerCase()
     const isJobBoardSearch = searchType === 'jobboard_contact_search'
     const isSpecialRequestSearch = searchType === 'special_request'
@@ -1215,9 +1218,35 @@ Deno.serve(async (req) => {
       : 0
     const searchTargetContacts = targetCompany ? targetCompanyGoalContacts : maxContacts
     const searchStartedAt = Date.now()
+    const dynamicMaxPerCompany = targetCompany
+      ? 50
+      : (
+          searchTargetContacts >= 300
+            ? 10
+            : searchTargetContacts >= 200
+              ? 8
+              : searchTargetContacts >= 120
+                ? 6
+                : baseMaxPerCompany
+        )
+    const dynamicMaxPagesPerCombo = targetCompany
+      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
+      : (
+          searchTargetContacts >= 300
+            ? 8
+            : searchTargetContacts >= 200
+              ? 6
+              : searchTargetContacts >= 120
+                ? 4
+                : 2
+        )
+    const nonTargetBudgetMs = Math.min(
+      6 * 60 * 1000,
+      Math.max(60 * 1000, 45 * 1000 + (searchTargetContacts * 750))
+    )
     const SEARCH_BUDGET_MS = targetCompany
       ? ((isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
-      : 60000
+      : nonTargetBudgetMs
     const hasTimeBudgetExceeded = () => (Date.now() - searchStartedAt) >= SEARCH_BUDGET_MS
     
     if (targetCompany) {
@@ -1227,6 +1256,11 @@ Deno.serve(async (req) => {
       if (skipUsedContactsExclusion) {
         console.log('Used-contacts exclusion disabled for this run (jobboard/special request)')
       }
+    } else {
+      console.log(`General search target: ${searchTargetContacts} contacts`)
+      console.log(`Dynamic max per company: ${dynamicMaxPerCompany}`)
+      console.log(`Dynamic max pages per combination: ${dynamicMaxPagesPerCombo}`)
+      console.log(`Search time budget: ${Math.round(SEARCH_BUDGET_MS / 1000)}s`)
     }
     
     // Expand target roles with native language translations based on selected locations
@@ -1569,9 +1603,7 @@ Deno.serve(async (req) => {
         }
         
         // Speed mode defaults: fewer pages unless target-company search needs depth.
-        const maxPages = targetCompany
-          ? ((isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
-          : 2
+        const maxPages = dynamicMaxPagesPerCombo
         let currentPage = 1
         let hasMoreResults = true
         
@@ -1748,7 +1780,7 @@ Deno.serve(async (req) => {
               }
               
               // Check max per company limit (relax for target company searches)
-              const effectiveMaxPerCompany = targetCompany ? 50 : maxPerCompany // Allow more for target company
+              const effectiveMaxPerCompany = dynamicMaxPerCompany
               const existingCompanyCount = companyContactCount[companyName] || 0
               const pendingCompanyCount = pendingByCompany[companyName] || 0
               if (existingCompanyCount + pendingCompanyCount >= effectiveMaxPerCompany) {
@@ -1934,7 +1966,7 @@ Deno.serve(async (req) => {
                     if (!isLocationMatch) continue
                   }
 
-                  const effectiveMaxPerCompany = targetCompany ? 50 : maxPerCompany
+                  const effectiveMaxPerCompany = dynamicMaxPerCompany
                   if ((companyContactCount[companyName] || 0) >= effectiveMaxPerCompany) continue
 
                   if (!(email && fullName && fullName !== 'Unknown')) continue

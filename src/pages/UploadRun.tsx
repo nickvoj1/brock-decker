@@ -827,7 +827,7 @@ export default function UploadRun() {
                   className="max-w-[200px]"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Number of contacts to retrieve (10-500). Max 3 per company.
+                  Number of contacts to retrieve (10-500). Company caps auto-scale for larger runs.
                 </p>
               </div>
               
