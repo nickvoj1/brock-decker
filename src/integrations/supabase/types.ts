@@ -178,6 +178,39 @@ export type Database = {
           },
         ]
       }
+      bullhorn_company_local_notes: {
+        Row: {
+          company_id: number
+          created_at: string
+          created_by: string
+          id: string
+          metadata: Json
+          note_label: string
+          note_text: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: number
+          created_at?: string
+          created_by: string
+          id?: string
+          metadata?: Json
+          note_label?: string
+          note_text: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: number
+          created_at?: string
+          created_by?: string
+          id?: string
+          metadata?: Json
+          note_label?: string
+          note_text?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bullhorn_contact_comms_status: {
         Row: {
           bullhorn_contact_id: number
@@ -679,6 +712,44 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "distribution_list_contacts_list_id_fkey"
+            columns: ["list_id"]
+            isOneToOne: false
+            referencedRelation: "distribution_lists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      distribution_list_events: {
+        Row: {
+          created_at: string
+          created_by: string
+          event_type: string
+          id: number
+          list_id: string
+          note_text: string | null
+          payload: Json
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          event_type: string
+          id?: number
+          list_id: string
+          note_text?: string | null
+          payload?: Json
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          event_type?: string
+          id?: number
+          list_id?: string
+          note_text?: string | null
+          payload?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "distribution_list_events_list_id_fkey"
             columns: ["list_id"]
             isOneToOne: false
             referencedRelation: "distribution_lists"
@@ -1360,6 +1431,33 @@ export type Database = {
       }
     }
     Functions: {
+      crm_contact_field_text: {
+        Args: {
+          contact: Database["public"]["Tables"]["bullhorn_client_contacts_mirror"]["Row"]
+          field_name: string
+        }
+        Returns: string
+      }
+      crm_contact_matches_filters: {
+        Args: {
+          contact: Database["public"]["Tables"]["bullhorn_client_contacts_mirror"]["Row"]
+          filters: Json
+        }
+        Returns: boolean
+      }
+      crm_search_contacts: {
+        Args: {
+          p_exclude_archived?: boolean
+          p_filters?: Json
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+        }
+        Returns: {
+          contact: Json
+          total_count: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
