@@ -310,9 +310,14 @@ function SignalRow({ signal, onDismiss, onTAContacts, onCVMatches, taSearchLoadi
               
               {/* Action Row - only CV Match (TA is in hover row) */}
               <div className="flex items-center gap-2 pt-1">
-                <Button size="sm" variant="outline" onClick={() => onCVMatches(signal)} className="text-xs">
+                <Button
+                  size="sm"
+                  variant={signal.cv_matches > 0 ? "default" : "outline"}
+                  onClick={() => onCVMatches(signal)}
+                  className={`text-xs ${signal.cv_matches > 0 ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-500" : ""}`}
+                >
                   <FileText className="h-3 w-3 mr-1" />
-                  CV Match {signal.cv_matches > 0 && `(${signal.cv_matches})`}
+                  {signal.cv_matches > 0 ? `CVs Matched (${signal.cv_matches})` : "CV Match"}
                 </Button>
                 {signal.url && (
                   <a href={signal.url} target="_blank" rel="noopener noreferrer">

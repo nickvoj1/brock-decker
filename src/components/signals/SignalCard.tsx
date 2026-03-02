@@ -543,12 +543,12 @@ export const SignalCard = memo(function SignalCard({
               
               <Button
                 size="sm"
-                variant="ghost"
+                variant={signal.cv_matches > 0 ? "default" : "ghost"}
                 onClick={() => onCVMatches(signal)}
-                className="h-7 text-xs"
+                className={`h-7 text-xs ${signal.cv_matches > 0 ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-500" : ""}`}
               >
                 <FileText className="h-3 w-3 mr-1" />
-                CV {signal.cv_matches > 0 && `(${signal.cv_matches})` }
+                {signal.cv_matches > 0 ? `CVs Matched (${signal.cv_matches})` : "CV"}
               </Button>
             </div>
           </div>
