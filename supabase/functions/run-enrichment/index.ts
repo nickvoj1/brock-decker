@@ -418,6 +418,46 @@ function prioritizeDecisionMakerRoles(roles: string[]): string[] {
   return [...decision, ...nonHr, ...hr]
 }
 
+function extractCompanyFromCurrentTitle(currentTitle: string): string | null {
+  const title = String(currentTitle || '').trim()
+  if (!title) return null
+
+  const atMatch = title.match(/\b(?:at|@)\s+(.+)$/i)
+  if (atMatch && atMatch[1]) {
+    const company = atMatch[1].trim().replace(/\s+/g, ' ')
+    return company.length >= 2 ? company : null
+  }
+  return null
+}
+
+function buildExcludedEmployerSet(candidateData: CandidateData): Set<string> {
+  const out = new Set<string>()
+
+  if (candidateData.work_history && Array.isArray(candidateData.work_history)) {
+    for (const job of candidateData.work_history) {
+      const company = String(job?.company || '').trim()
+      if (!company) continue
+      out.add(company)
+    }
+  }
+
+  const fromTitle = extractCompanyFromCurrentTitle(candidateData.current_title)
+  if (fromTitle) out.add(fromTitle)
+
+  return out
+}
+
+function isExcludedEmployerCompany(companyName: string, excludedCompanies: Set<string>): boolean {
+  const candidateCompany = String(companyName || '').trim()
+  if (!candidateCompany) return false
+  for (const excluded of excludedCompanies) {
+    const target = String(excluded || '').trim()
+    if (!target) continue
+    if (companiesMatch(target, candidateCompany)) return true
+  }
+  return false
+}
+
 // ============ Law Firm Detection ============
 // Law firms often get mixed into PE/Buy Side results because they advise on deals
 // They're typically named after founding partners (multiple surnames)
@@ -1114,17 +1154,9 @@ Deno.serve(async (req) => {
       throw new Error('No candidate data found')
     }
 
-    // Extract companies from candidate's work history to exclude
-    const excludedCompanies = new Set<string>()
-    if (candidateData.work_history && Array.isArray(candidateData.work_history)) {
-      candidateData.work_history.forEach(job => {
-        if (job.company) {
-          // Add normalized company name (lowercase, trimmed)
-          excludedCompanies.add(job.company.toLowerCase().trim())
-        }
-      })
-    }
-    console.log('Excluding contacts from candidate\'s previous employers:', Array.from(excludedCompanies))
+    // Extract candidate employers to exclude (including current employer if present in title).
+    const excludedCompanies = buildExcludedEmployerSet(candidateData)
+    console.log('Excluding contacts from candidate employers:', Array.from(excludedCompanies))
 
     // Fetch recently used contacts (within last 14 days) to exclude them
     // This prevents the same contacts from appearing in different searches
@@ -1770,11 +1802,8 @@ Deno.serve(async (req) => {
                 continue
               }
               
-              // Skip contacts from candidate's previous employers
-              const normalizedCompany = companyName.toLowerCase().trim()
-              const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
-                normalizedCompany.includes(excluded) || excluded.includes(normalizedCompany)
-              )
+              // Skip contacts from candidate employers (including current employer).
+              const isExcludedCompany = isExcludedEmployerCompany(companyName, excludedCompanies)
               if (isExcludedCompany) {
                 continue
               }
@@ -2194,11 +2223,8 @@ Deno.serve(async (req) => {
                   continue
                 }
                 
-                // Skip excluded and duplicates
-                const normalizedCompany = personCompanyName.toLowerCase().trim()
-                const isExcludedCompany = Array.from(excludedCompanies).some(excluded => 
-                  normalizedCompany.includes(excluded) || excluded.includes(normalizedCompany)
-                )
+                // Skip candidate employers (including current employer) and duplicates.
+                const isExcludedCompany = isExcludedEmployerCompany(personCompanyName, excludedCompanies)
                 if (isExcludedCompany) continue
                 
                 const dedupeKey = `${(person.name || '').toLowerCase().trim()}|${personCompanyName.toLowerCase().trim()}`
