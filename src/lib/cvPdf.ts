@@ -1137,6 +1137,213 @@ async function detectPersonalInfoZones(pdfBytes: Uint8Array): Promise<RedactionZ
   }
 }
 
+type PdfTextBox = {
+  text: string;
+  x: number;
+  yTop: number;
+  width: number;
+  height: number;
+  pageWidth: number;
+  pageHeight: number;
+};
+
+async function extractFirstPageTextBoxes(pdfBytes: Uint8Array): Promise<PdfTextBox[]> {
+  try {
+    const analysisBytes = new Uint8Array(pdfBytes);
+    const loadingTask = getDocument({ data: analysisBytes, disableWorker: true } as any);
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const textContent = await page.getTextContent();
+    const items = (textContent.items || []) as any[];
+
+    const boxes = items
+      .map((item) => {
+        const text = String(item?.str || "").replace(/\s+/g, " ").trim();
+        if (!text) return null;
+        const tx = item?.transform || [1, 0, 0, 1, 0, 0];
+        const x = Number(tx[4] || 0);
+        const yBottom = Number(tx[5] || 0);
+        const h = Math.max(Number(item?.height || 0), 8);
+        const w = Math.max(Number(item?.width || 0), 8);
+        const yTop = viewport.height - yBottom - h;
+        return {
+          text,
+          x,
+          yTop,
+          width: w,
+          height: h,
+          pageWidth: viewport.width,
+          pageHeight: viewport.height,
+        } satisfies PdfTextBox;
+      })
+      .filter(Boolean) as PdfTextBox[];
+
+    await pdf.destroy();
+    return boxes;
+  } catch {
+    return [];
+  }
+}
+
+function normalizeHintToken(value?: string | null): string {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function buildSensitiveHintTokens(hints?: CVPersonalHints): string[] {
+  const out = new Set<string>();
+  const add = (value?: string | null) => {
+    const token = normalizeHintToken(value);
+    if (token.length >= 4) out.add(token);
+  };
+
+  const email = safeText(hints?.email);
+  if (email) {
+    add(email);
+    const [local, domain] = email.split("@");
+    if (local) add(local);
+    if (domain) add(domain);
+  }
+
+  const phoneDigits = String(hints?.phone || "").replace(/\D/g, "");
+  if (phoneDigits.length >= 8) {
+    out.add(phoneDigits);
+    if (phoneDigits.length > 10) out.add(phoneDigits.slice(-10));
+    if (phoneDigits.length > 8) out.add(phoneDigits.slice(-8));
+  }
+
+  const name = safeText(hints?.name);
+  if (name) {
+    add(name);
+    for (const token of name.split(/\s+/)) {
+      add(token);
+    }
+  }
+
+  return Array.from(out);
+}
+
+function boxHasSensitiveToken(text: string, sensitiveTokens: string[]): boolean {
+  if (sensitiveTokens.length === 0) return false;
+  const normalizedText = normalizeHintToken(text);
+  if (!normalizedText) return false;
+  return sensitiveTokens.some((token) => token.length >= 4 && normalizedText.includes(token));
+}
+
+function shouldRedactResidualBox(
+  text: string,
+  hints: CVPersonalHints | undefined,
+  sensitiveTokens: string[],
+  nameOnlyTokens: string[],
+): boolean {
+  if (looksLikePersonalInfo(text)) return true;
+  if (boxHasSensitiveToken(text, sensitiveTokens)) return true;
+
+  if (hints?.anonymizeName) {
+    const replacement = safeText(hints.replacementName || "CANDIDATE").toLowerCase();
+    const normalizedText = safeText(text).toLowerCase();
+    if (normalizedText !== replacement && boxHasSensitiveToken(text, nameOnlyTokens)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function detectResidualPersonalZones(pdfBytes: Uint8Array, hints?: CVPersonalHints): Promise<RedactionZone[]> {
+  const boxes = await extractFirstPageTextBoxes(pdfBytes);
+  if (!boxes.length) return [];
+  const sensitiveTokens = buildSensitiveHintTokens(hints);
+  const nameOnlyTokens = buildSensitiveHintTokens({ name: hints?.name });
+  const pageHeight = boxes[0].pageHeight;
+  const topLimit = pageHeight * (hints?.anonymizeName ? 0.5 : 0.44);
+  const rects: Rect[] = [];
+
+  for (const box of boxes) {
+    if (box.yTop > topLimit) continue;
+    if (!shouldRedactResidualBox(box.text, hints, sensitiveTokens, nameOnlyTokens)) continue;
+    rects.push({
+      x0: box.x - 10,
+      y0: box.yTop - 5,
+      x1: box.x + box.width + 10,
+      y1: box.yTop + box.height + 5,
+    });
+  }
+
+  const deduped = dedupeRects(rects, 3).slice(0, 28);
+  return deduped.map((r) => ({
+    pageIndex: 0,
+    x: Math.max(0, r.x0),
+    yTop: Math.max(0, r.y0),
+    width: Math.max(2, r.x1 - r.x0),
+    height: Math.max(2, r.y1 - r.y0),
+  }));
+}
+
+async function applyRedactionZones(sourcePdfBytes: Uint8Array, zones: RedactionZone[]): Promise<Uint8Array> {
+  if (!zones.length) return sourcePdfBytes;
+  const mupdfMod = await loadMupdfModule();
+  if (!mupdfMod?.Document?.openDocument) return sourcePdfBytes;
+
+  const doc = mupdfMod.Document.openDocument(new Uint8Array(sourcePdfBytes), "application/pdf");
+  const pdf = doc?.asPDF?.();
+  if (!pdf) return sourcePdfBytes;
+
+  const pageCount = Number(pdf.countPages() || 0);
+  if (!pageCount) return sourcePdfBytes;
+
+  const zonesByPage = new Map<number, RedactionZone[]>();
+  for (const zone of zones) {
+    const pageIndex = Number(zone.pageIndex || 0);
+    if (pageIndex < 0 || pageIndex >= pageCount) continue;
+    const current = zonesByPage.get(pageIndex) || [];
+    current.push(zone);
+    zonesByPage.set(pageIndex, current);
+  }
+
+  for (const [pageIndex, pageZones] of zonesByPage.entries()) {
+    const page = pdf.loadPage(pageIndex);
+    const bounds = page.getBounds();
+    const pageWidth = Number(bounds?.[2] || 0);
+    const pageHeight = Number(bounds?.[3] || 0);
+    if (!pageWidth || !pageHeight) continue;
+
+    for (const zone of pageZones) {
+      const rect = clampRect(
+        {
+          x0: zone.x,
+          y0: zone.yTop,
+          x1: zone.x + zone.width,
+          y1: zone.yTop + zone.height,
+        },
+        pageWidth,
+        pageHeight,
+      );
+      if (!rect) continue;
+      const annot = page.createAnnotation("Redact");
+      annot.setRect([rect.x0, rect.y0, rect.x1, rect.y1]);
+      annot.update();
+    }
+
+    page.applyRedactions(false);
+  }
+
+  const out = pdf.saveToBuffer("compress").asUint8Array();
+  const stable = new Uint8Array(out.length);
+  stable.set(out);
+  return stable;
+}
+
+async function runResidualCleanupPasses(pdfBytes: Uint8Array, hints?: CVPersonalHints): Promise<Uint8Array> {
+  let current = new Uint8Array(pdfBytes);
+  for (let pass = 0; pass < 2; pass++) {
+    const zones = await detectResidualPersonalZones(current, hints);
+    if (zones.length === 0) break;
+    current = await applyRedactionZones(current, zones);
+  }
+  return current;
+}
+
 async function redactPdfTextLocally(
   sourcePdfBytes: Uint8Array,
   detectedZones: RedactionZone[],
@@ -1561,6 +1768,7 @@ export async function downloadBrandedSourcePdf(
   if (hints?.anonymizeName) {
     hardDeletedBytes = await stripResidualNameFromPdf(hardDeletedBytes, hints?.name);
   }
+  hardDeletedBytes = await runResidualCleanupPasses(hardDeletedBytes, hints);
 
   const pdfDoc = await PDFDocument.load(hardDeletedBytes);
   const watermarkData = await trimTransparentDataUrl(await toDataUrl(branding?.watermarkImageUrl));
