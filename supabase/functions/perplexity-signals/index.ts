@@ -64,7 +64,8 @@ async function queryPerplexity(
 
 /* ─── Action: discover ─────────────────────────────────────────────── */
 
-async function discoverSignals(region: string, supabase: ReturnType<typeof createClient>) {
+// deno-lint-ignore no-explicit-any
+async function discoverSignals(region: string, supabase: any) {
   const regionQueries: Record<string, string[]> = {
     london: [
       "UK private equity fund close this week",
