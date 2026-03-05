@@ -264,10 +264,8 @@ Return ONLY valid JSON. No markdown.`;
 
 /* ─── Action: enrich ───────────────────────────────────────────────── */
 
-async function enrichWithPerplexity(
-  signalIds: string[],
-  supabase: ReturnType<typeof createClient>,
-) {
+// deno-lint-ignore no-explicit-any
+async function enrichWithPerplexity(signalIds: string[], supabase: any) {
   const { data: signals, error } = await supabase
     .from("signals")
     .select("id, title, company, region, signal_type, description")
