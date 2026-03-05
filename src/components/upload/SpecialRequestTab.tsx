@@ -103,7 +103,10 @@ export function SpecialRequestTab() {
       const targetRoles = Array.from(
         new Set(selectedDepartments.flatMap((dept) => DEPARTMENT_TITLES[dept] || []))
       );
-      const searchName = requestName.trim() || `${company.trim()} - ${country.trim()}`;
+      const companyString = parsedCompanies.join(', ');
+      const searchName = requestName.trim() || (isMultiCompany
+        ? `${parsedCompanies.length} companies - ${country.trim()}`
+        : `${parsedCompanies[0]} - ${country.trim()}`);
       const signalRegion = inferRegionFromLocation(country.trim());
 
       let bullhornEmails: string[] = [];
