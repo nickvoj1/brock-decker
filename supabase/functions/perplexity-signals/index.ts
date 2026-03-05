@@ -64,7 +64,8 @@ async function queryPerplexity(
 
 /* ─── Action: discover ─────────────────────────────────────────────── */
 
-async function discoverSignals(region: string, supabase: ReturnType<typeof createClient>) {
+// deno-lint-ignore no-explicit-any
+async function discoverSignals(region: string, supabase: any) {
   const regionQueries: Record<string, string[]> = {
     london: [
       "UK private equity fund close this week",
@@ -195,7 +196,8 @@ Return ONLY a JSON array. No markdown, no explanation.`;
 
 /* ─── Action: deep-dive ────────────────────────────────────────────── */
 
-async function companyDeepDive(signalId: string, supabase: ReturnType<typeof createClient>) {
+// deno-lint-ignore no-explicit-any
+async function companyDeepDive(signalId: string, supabase: any) {
   const { data: signal, error } = await supabase
     .from("signals")
     .select("id, title, company, region, signal_type, amount, currency, description, ai_insight")
@@ -262,10 +264,8 @@ Return ONLY valid JSON. No markdown.`;
 
 /* ─── Action: enrich ───────────────────────────────────────────────── */
 
-async function enrichWithPerplexity(
-  signalIds: string[],
-  supabase: ReturnType<typeof createClient>,
-) {
+// deno-lint-ignore no-explicit-any
+async function enrichWithPerplexity(signalIds: string[], supabase: any) {
   const { data: signals, error } = await supabase
     .from("signals")
     .select("id, title, company, region, signal_type, description")
