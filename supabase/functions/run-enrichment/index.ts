@@ -1293,7 +1293,13 @@ Deno.serve(async (req) => {
     const hasTimeBudgetExceeded = () => (Date.now() - searchStartedAt) >= SEARCH_BUDGET_MS
     
     if (targetCompany) {
-      console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
+      if (isMultiCompanySearch) {
+        console.log(`Multi-company search: ${targetCompanyList.length} companies (type=${searchType || 'general'})`)
+        console.log(`Companies: ${targetCompanyList.slice(0, 5).join(', ')}${targetCompanyList.length > 5 ? ` ...+${targetCompanyList.length - 5} more` : ''}`)
+      } else {
+        console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
+      }
+      console.log(`Target-company location mode: ${strictCountryLocations.length > 0 ? 'country-preferred (' + strictCountryLocations.join(', ') + ')' : 'broad'}`)
       console.log(`Location fallback goal: ${targetCompanyGoalContacts} contacts`)
       console.log(`Search time budget: ${Math.round(SEARCH_BUDGET_MS / 1000)}s`)
       if (skipUsedContactsExclusion) {
