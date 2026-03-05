@@ -1963,9 +1963,17 @@ Deno.serve(async (req) => {
                   })
                 )
 
+                let enrichDropNoEmail = 0
+                let enrichDropLocation = 0
+                let enrichDropMaxCompany = 0
+                let enrichDropUsed = 0
+                let enrichDropBullhorn = 0
+                let enrichDropFailed = 0
+                let enrichAdded = 0
+
                 for (const result of enrichResults) {
                   if (allContacts.length >= searchTargetContacts) break
-                  if (result.status !== 'fulfilled' || !result.value) continue
+                  if (result.status !== 'fulfilled' || !result.value) { enrichDropFailed++; continue }
 
                   const { personData, person } = result.value
                   const email = person.email || ''
@@ -1992,24 +2000,24 @@ Deno.serve(async (req) => {
                       allowedCityTokens,
                       allowedCountryTokens
                     )
-                    if (!isLocationMatch) continue
+                    if (!isLocationMatch) { enrichDropLocation++; continue }
                   }
 
                   const effectiveMaxPerCompany = dynamicMaxPerCompany
-                  if ((companyContactCount[companyName] || 0) >= effectiveMaxPerCompany) continue
+                  if ((companyContactCount[companyName] || 0) >= effectiveMaxPerCompany) { enrichDropMaxCompany++; continue }
 
-                  if (!(email && fullName && fullName !== 'Unknown')) continue
+                  if (!(email && fullName && fullName !== 'Unknown')) { enrichDropNoEmail++; continue }
                   const emailLower = email.toLowerCase()
-                  if ((!skipUsedContactsExclusion && usedEmails.has(emailLower)) || seenEmails.has(emailLower)) continue
+                  if ((!skipUsedContactsExclusion && usedEmails.has(emailLower)) || seenEmails.has(emailLower)) { enrichDropUsed++; continue }
 
                   const dedupeKey = `${fullName.toLowerCase().trim()}|${companyName.toLowerCase().trim()}`
-                  if (seenNameCompany.has(dedupeKey)) continue
+                  if (seenNameCompany.has(dedupeKey)) { enrichDropUsed++; continue }
 
                   const isFromBullhorn = bullhornEmailSet.has(emailLower)
                   if (isFromBullhorn) {
                     const currentTotal = allContacts.length
                     const maxBullhornAllowed = Math.floor((currentTotal + 1) * MAX_BULLHORN_PERCENTAGE)
-                    if (bullhornContactCount >= maxBullhornAllowed) continue
+                    if (bullhornContactCount >= maxBullhornAllowed) { enrichDropBullhorn++; continue }
                   }
 
                   const newContact: ApolloContact = {
@@ -2032,6 +2040,11 @@ Deno.serve(async (req) => {
                   companyContactCount[companyName] = (companyContactCount[companyName] || 0) + 1
                   if (isFromBullhorn) bullhornContactCount++
                   allContacts.push(newContact)
+                  enrichAdded++
+                }
+
+                if (enrichDropNoEmail + enrichDropLocation + enrichDropMaxCompany + enrichDropUsed + enrichDropBullhorn + enrichDropFailed > 0) {
+                  console.log(`[Enrich drop reasons] no-email:${enrichDropNoEmail} location:${enrichDropLocation} max-company:${enrichDropMaxCompany} used/dupe:${enrichDropUsed} bullhorn-cap:${enrichDropBullhorn} failed:${enrichDropFailed} added:${enrichAdded}`)
                 }
               }
             }
