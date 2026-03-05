@@ -1579,9 +1579,33 @@ Deno.serve(async (req) => {
       console.log('Legal industry intent detected - law firms will be INCLUDED in results')
     }
 
+    // For multi-company searches, iterate each company individually
+    // For single/no company, use the original flow with one iteration
+    const companiesToSearch = isMultiCompanySearch ? targetCompanyList : [targetCompany || '__NONE__']
+    const perCompanyGoal = isMultiCompanySearch
+      ? Math.max(2, Math.ceil(searchTargetContacts / companiesToSearch.length))
+      : searchTargetContacts
+
+    if (isMultiCompanySearch) {
+      console.log(`Multi-company search: ${companiesToSearch.length} companies, ${perCompanyGoal} contacts each`)
+    }
+
+    for (const currentSearchCompany of companiesToSearch) {
+      if (allContacts.length >= searchTargetContacts) break
+      if (hasTimeBudgetExceeded()) {
+        console.log(`Time budget reached, stopping company loop`)
+        break
+      }
+
+      const activeCompany = currentSearchCompany === '__NONE__' ? null : currentSearchCompany
+      if (isMultiCompanySearch) {
+        console.log(`\n--- Searching company: "${activeCompany}" ---`)
+      }
+
     // Search across each combination
     for (const combo of searchCombinations) {
       if (allContacts.length >= searchTargetContacts) break
+      if (isMultiCompanySearch && allContacts.length >= (companiesToSearch.indexOf(currentSearchCompany) + 1) * perCompanyGoal) break
       if (hasTimeBudgetExceeded()) {
         console.log(`Time budget reached (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping primary search loops`)
         break
@@ -1611,9 +1635,9 @@ Deno.serve(async (req) => {
             primarySearchLocations.forEach(loc => params.append('person_locations[]', loc))
           }
 
-          // Add target company filter if specified (signal-based search)
-          if (targetCompany) {
-            params.append('q_organization_name', targetCompany)
+          // Add target company filter - one company at a time for accurate results
+          if (activeCompany) {
+            params.append('q_organization_name', activeCompany)
           }
 
           // Target-company runs should not be narrowed by keyword constraints.
