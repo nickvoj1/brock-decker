@@ -398,7 +398,7 @@ export function SpecialRequestTab() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-lg">Results — {contacts.length} contacts found</CardTitle>
-                <CardDescription>At {company} in {country}</CardDescription>
+                <CardDescription>At {isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0]} in {country}</CardDescription>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={copyEmails}>
