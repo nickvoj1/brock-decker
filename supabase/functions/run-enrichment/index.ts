@@ -1661,8 +1661,8 @@ Deno.serve(async (req) => {
         }
 
         const queryParams = buildComboParams(true)
-        if (targetCompany) {
-          console.log(`Filtering by company: ${targetCompany}`)
+        if (activeCompany) {
+          console.log(`Filtering by company: ${activeCompany}`)
           console.log(`Search [${combo.label}] - role filter count: ${targetRoles.length}`)
           console.log(`Search [${combo.label}] - Keyword filter skipped for target-company mode`)
         } else {
