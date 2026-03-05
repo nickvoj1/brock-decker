@@ -79,13 +79,20 @@ export function SpecialRequestTab() {
   const [copiedEmails, setCopiedEmails] = useState(false);
   const [requestName, setRequestName] = useState("");
 
+  // Parse companies from input (comma or newline separated)
+  const parsedCompanies = company
+    .split(/[,\n]/)
+    .map(c => c.trim())
+    .filter(c => c.length > 0);
+  const isMultiCompany = parsedCompanies.length > 1;
+
   const toggleDepartment = (dept: string) => {
     setSelectedDepartments(prev =>
       prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]
     );
   };
 
-  const canRun = profileName && company.trim() && country.trim() && selectedDepartments.length > 0 && !isRunning;
+  const canRun = profileName && parsedCompanies.length > 0 && country.trim() && selectedDepartments.length > 0 && !isRunning;
 
   const handleRun = async () => {
     if (!canRun) return;
