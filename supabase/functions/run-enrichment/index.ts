@@ -1238,7 +1238,14 @@ Deno.serve(async (req) => {
     const searchLocations = sanitizeSearchLocations(rawSearchLocations)
     
     // Get target company if specified (signal/job-board/special targeted searches)
-    const targetCompany = preferences[0]?.targetCompany || null
+    // If the user entered multiple comma-separated companies, split them and search individually
+    const rawTargetCompany = preferences[0]?.targetCompany || null
+    const targetCompanyList: string[] = rawTargetCompany
+      ? rawTargetCompany.split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0)
+      : []
+    // For single-company logic compatibility, use first company or null
+    const targetCompany = targetCompanyList.length > 0 ? targetCompanyList[0] : null
+    const isMultiCompanySearch = targetCompanyList.length > 1
     const signalTitle = (preferences[0] as any)?.signalTitle || ''
     const signalRegion = (preferences[0] as any)?.signalRegion || ''
     const targetCompanyGoalContacts = targetCompany
