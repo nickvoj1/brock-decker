@@ -1238,20 +1238,29 @@ Deno.serve(async (req) => {
     const searchLocations = sanitizeSearchLocations(rawSearchLocations)
     
     // Get target company if specified (signal/job-board/special targeted searches)
-    const targetCompany = preferences[0]?.targetCompany || null
+    // If the user entered multiple comma-separated companies, split them and search individually
+    const rawTargetCompany = preferences[0]?.targetCompany || null
+    const targetCompanyList: string[] = rawTargetCompany
+      ? rawTargetCompany.split(',').map((c: string) => c.trim()).filter((c: string) => c.length > 0)
+      : []
+    // For single-company logic compatibility, use first company or null
+    const targetCompany = targetCompanyList.length > 0 ? targetCompanyList[0] : null
+    const isMultiCompanySearch = targetCompanyList.length > 1
     const signalTitle = (preferences[0] as any)?.signalTitle || ''
     const signalRegion = (preferences[0] as any)?.signalRegion || ''
     const targetCompanyGoalContacts = targetCompany
       ? (
-          (isJobBoardSearch || isSpecialRequestSearch)
-            ? Math.min(maxContacts, 12)
-            : Math.min(maxContacts, 10)
+          isMultiCompanySearch
+            ? Math.min(maxContacts, targetCompanyList.length * 5) // ~5 contacts per company
+            : (isJobBoardSearch || isSpecialRequestSearch)
+              ? Math.min(maxContacts, 12)
+              : Math.min(maxContacts, 10)
         )
       : 0
     const searchTargetContacts = targetCompany ? targetCompanyGoalContacts : maxContacts
     const searchStartedAt = Date.now()
     const dynamicMaxPerCompany = targetCompany
-      ? 50
+      ? (isMultiCompanySearch ? 10 : 50)
       : (
           searchTargetContacts >= 300
             ? 10
@@ -1262,7 +1271,7 @@ Deno.serve(async (req) => {
                 : baseMaxPerCompany
         )
     const dynamicMaxPagesPerCombo = targetCompany
-      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
+      ? (isMultiCompanySearch ? 1 : (isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
       : (
           searchTargetContacts >= 300
             ? 8
@@ -1277,12 +1286,20 @@ Deno.serve(async (req) => {
       Math.max(60 * 1000, 45 * 1000 + (searchTargetContacts * 750))
     )
     const SEARCH_BUDGET_MS = targetCompany
-      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
+      ? (isMultiCompanySearch
+          ? Math.min(4 * 60 * 1000, targetCompanyList.length * 5000) // ~5s per company
+          : (isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
       : nonTargetBudgetMs
     const hasTimeBudgetExceeded = () => (Date.now() - searchStartedAt) >= SEARCH_BUDGET_MS
     
     if (targetCompany) {
-      console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
+      if (isMultiCompanySearch) {
+        console.log(`Multi-company search: ${targetCompanyList.length} companies (type=${searchType || 'general'})`)
+        console.log(`Companies: ${targetCompanyList.slice(0, 5).join(', ')}${targetCompanyList.length > 5 ? ` ...+${targetCompanyList.length - 5} more` : ''}`)
+      } else {
+        console.log(`Target-company search: targeting "${targetCompany}" (type=${searchType || 'general'})`)
+      }
+      console.log(`Target-company location mode: ${strictCountryLocations.length > 0 ? 'country-preferred (' + strictCountryLocations.join(', ') + ')' : 'broad'}`)
       console.log(`Location fallback goal: ${targetCompanyGoalContacts} contacts`)
       console.log(`Search time budget: ${Math.round(SEARCH_BUDGET_MS / 1000)}s`)
       if (skipUsedContactsExclusion) {
@@ -1572,9 +1589,33 @@ Deno.serve(async (req) => {
       console.log('Legal industry intent detected - law firms will be INCLUDED in results')
     }
 
+    // For multi-company searches, iterate each company individually
+    // For single/no company, use the original flow with one iteration
+    const companiesToSearch = isMultiCompanySearch ? targetCompanyList : [targetCompany || '__NONE__']
+    const perCompanyGoal = isMultiCompanySearch
+      ? Math.max(2, Math.ceil(searchTargetContacts / companiesToSearch.length))
+      : searchTargetContacts
+
+    if (isMultiCompanySearch) {
+      console.log(`Multi-company search: ${companiesToSearch.length} companies, ${perCompanyGoal} contacts each`)
+    }
+
+    for (const currentSearchCompany of companiesToSearch) {
+      if (allContacts.length >= searchTargetContacts) break
+      if (hasTimeBudgetExceeded()) {
+        console.log(`Time budget reached, stopping company loop`)
+        break
+      }
+
+      const activeCompany = currentSearchCompany === '__NONE__' ? null : currentSearchCompany
+      if (isMultiCompanySearch) {
+        console.log(`\n--- Searching company: "${activeCompany}" ---`)
+      }
+
     // Search across each combination
     for (const combo of searchCombinations) {
       if (allContacts.length >= searchTargetContacts) break
+      if (isMultiCompanySearch && allContacts.length >= (companiesToSearch.indexOf(currentSearchCompany) + 1) * perCompanyGoal) break
       if (hasTimeBudgetExceeded()) {
         console.log(`Time budget reached (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping primary search loops`)
         break
@@ -1604,9 +1645,9 @@ Deno.serve(async (req) => {
             primarySearchLocations.forEach(loc => params.append('person_locations[]', loc))
           }
 
-          // Add target company filter if specified (signal-based search)
-          if (targetCompany) {
-            params.append('q_organization_name', targetCompany)
+          // Add target company filter - one company at a time for accurate results
+          if (activeCompany) {
+            params.append('q_organization_name', activeCompany)
           }
 
           // Target-company runs should not be narrowed by keyword constraints.
@@ -2078,10 +2119,12 @@ Deno.serve(async (req) => {
         processedCount++
       }
     }
+    } // end companiesToSearch loop
 
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
-    if (targetCompany && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
+    // Skip retries for multi-company searches (each company is already searched individually)
+    if (targetCompany && !isMultiCompanySearch && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
       console.log(`\n=== TARGET-COMPANY RETRY LOOP ===`)
       console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${targetCompanyGoalContacts}`)
       
