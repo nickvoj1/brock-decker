@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Building2, MapPin, Users, Play, Loader2, Copy, Check } from "lucide-react";
+import { Building2, MapPin, Users, Play, Loader2, Copy, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useProfileName } from "@/hooks/useProfileName";
@@ -78,13 +79,20 @@ export function SpecialRequestTab() {
   const [copiedEmails, setCopiedEmails] = useState(false);
   const [requestName, setRequestName] = useState("");
 
+  // Parse companies from input (comma or newline separated)
+  const parsedCompanies = company
+    .split(/[,\n]/)
+    .map(c => c.trim())
+    .filter(c => c.length > 0);
+  const isMultiCompany = parsedCompanies.length > 1;
+
   const toggleDepartment = (dept: string) => {
     setSelectedDepartments(prev =>
       prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]
     );
   };
 
-  const canRun = profileName && company.trim() && country.trim() && selectedDepartments.length > 0 && !isRunning;
+  const canRun = profileName && parsedCompanies.length > 0 && country.trim() && selectedDepartments.length > 0 && !isRunning;
 
   const handleRun = async () => {
     if (!canRun) return;
@@ -95,7 +103,10 @@ export function SpecialRequestTab() {
       const targetRoles = Array.from(
         new Set(selectedDepartments.flatMap((dept) => DEPARTMENT_TITLES[dept] || []))
       );
-      const searchName = requestName.trim() || `${company.trim()} - ${country.trim()}`;
+      const companyString = parsedCompanies.join(', ');
+      const searchName = requestName.trim() || (isMultiCompany
+        ? `${parsedCompanies.length} companies - ${country.trim()}`
+        : `${parsedCompanies[0]} - ${country.trim()}`);
       const signalRegion = inferRegionFromLocation(country.trim());
 
       let bullhornEmails: string[] = [];
@@ -126,14 +137,14 @@ export function SpecialRequestTab() {
         preferences_data: [{
           type: 'special_request',
           industry: 'Private Equity',
-          companies: company.trim(),
+          companies: companyString,
           exclusions: '',
           excludedIndustries: [],
           locations: [country.trim()],
           targetRoles,
           sectors: selectedDepartments,
-          targetCompany: company.trim(),
-          signalTitle: `Special request: ${company.trim()}`,
+          targetCompany: companyString,
+          signalTitle: `Special request: ${isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0]}`,
           signalRegion,
           country: country.trim(),
           departments: selectedDepartments,
@@ -169,23 +180,24 @@ export function SpecialRequestTab() {
       const normalizedContacts: SpecialRequestContact[] = rawContacts.map((c: any) => ({
         name: String(c?.name || ''),
         title: String(c?.title || ''),
-        company: String(c?.company || company.trim()),
+        company: String(c?.company || parsedCompanies[0] || ''),
         email: String(c?.email || ''),
         location: String(c?.location || country.trim()),
       }));
       const completeContacts = normalizedContacts.filter(isCompleteContact);
 
       setContacts(completeContacts);
+      const companyLabel = isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0];
       if (completeContacts.length > 0) {
         toast({
           title: `Found ${completeContacts.length} contacts`,
-          description: `At ${company} in ${country}`,
+          description: `At ${companyLabel} in ${country}`,
         });
       } else {
         const finalStatus = String(finalRun.status || "").toLowerCase();
         toast({
           title: finalStatus === "failed" ? "Search failed" : "No contacts found",
-          description: finalRun.error_message || `No complete contacts found at ${company} in ${country}`,
+          description: finalRun.error_message || `No complete contacts found at ${companyLabel} in ${country}`,
           variant: "destructive",
         });
       }
@@ -239,21 +251,44 @@ export function SpecialRequestTab() {
               <Building2 className="h-4 w-4" />
             </div>
             <div>
-              <CardTitle className="text-lg">Target Company & Location</CardTitle>
-              <CardDescription>Find contacts from a specific company in a specific country</CardDescription>
+              <CardTitle className="text-lg">Target Companies & Location</CardTitle>
+              <CardDescription>Find contacts from one or more companies in a specific country</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="sr-company">Company Name *</Label>
-              <Input
+              <div className="flex items-center gap-2">
+                <Label htmlFor="sr-company">Company Names *</Label>
+                {isMultiCompany && (
+                  <Badge variant="secondary" className="text-xs">
+                    {parsedCompanies.length} companies
+                  </Badge>
+                )}
+              </div>
+              <Textarea
                 id="sr-company"
-                placeholder="e.g., Blackstone, KKR, Google"
+                placeholder={"Enter one or more companies:\n• One per line, or\n• Comma-separated\n\ne.g.:\nBlackstone\nKKR\nCarlyle Group"}
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
+                rows={4}
+                className="resize-y min-h-[100px]"
               />
+              {isMultiCompany && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {parsedCompanies.slice(0, 8).map((c, i) => (
+                    <Badge key={i} variant="outline" className="text-xs">
+                      {c}
+                    </Badge>
+                  ))}
+                  {parsedCompanies.length > 8 && (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                      +{parsedCompanies.length - 8} more
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="sr-country">Country / Location *</Label>
@@ -318,7 +353,7 @@ export function SpecialRequestTab() {
               <CardTitle className="text-lg">Run Special Request</CardTitle>
               <CardDescription>
                 {canRun
-                  ? `Search for up to ${maxContacts} contacts at ${company} in ${country}`
+                  ? `Search for up to ${maxContacts} contacts at ${isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0]} in ${country}`
                   : "Fill in company, country, and select at least one department"}
               </CardDescription>
             </div>
@@ -363,7 +398,7 @@ export function SpecialRequestTab() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-lg">Results — {contacts.length} contacts found</CardTitle>
-                <CardDescription>At {company} in {country}</CardDescription>
+                <CardDescription>At {isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0]} in {country}</CardDescription>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={copyEmails}>
