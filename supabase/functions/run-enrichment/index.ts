@@ -2109,6 +2109,7 @@ Deno.serve(async (req) => {
         processedCount++
       }
     }
+    } // end companiesToSearch loop
 
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
