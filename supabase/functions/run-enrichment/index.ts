@@ -2124,7 +2124,7 @@ Deno.serve(async (req) => {
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
     // Skip retries for multi-company searches (each company is already searched individually)
-    if (targetCompany && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
+    if (targetCompany && !isMultiCompanySearch && allContacts.length < targetCompanyGoalContacts && !hasTimeBudgetExceeded()) {
       console.log(`\n=== TARGET-COMPANY RETRY LOOP ===`)
       console.log(`Only found ${allContacts.length} contacts at "${targetCompany}", need ${targetCompanyGoalContacts}`)
       
