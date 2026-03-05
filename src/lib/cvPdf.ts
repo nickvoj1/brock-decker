@@ -1280,7 +1280,7 @@ async function detectResidualPersonalZones(pdfBytes: Uint8Array, hints?: CVPerso
   }));
 }
 
-async function applyRedactionZones(sourcePdfBytes: Uint8Array<ArrayBuffer>, zones: RedactionZone[]): Promise<Uint8Array<ArrayBuffer>> {
+async function applyRedactionZones(sourcePdfBytes: Uint8Array, zones: RedactionZone[]): Promise<Uint8Array> {
   if (!zones.length) return sourcePdfBytes;
   const mupdfMod = await loadMupdfModule();
   if (!mupdfMod?.Document?.openDocument) return sourcePdfBytes;
