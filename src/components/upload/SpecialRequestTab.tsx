@@ -251,21 +251,44 @@ export function SpecialRequestTab() {
               <Building2 className="h-4 w-4" />
             </div>
             <div>
-              <CardTitle className="text-lg">Target Company & Location</CardTitle>
-              <CardDescription>Find contacts from a specific company in a specific country</CardDescription>
+              <CardTitle className="text-lg">Target Companies & Location</CardTitle>
+              <CardDescription>Find contacts from one or more companies in a specific country</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="sr-company">Company Name *</Label>
-              <Input
+              <div className="flex items-center gap-2">
+                <Label htmlFor="sr-company">Company Names *</Label>
+                {isMultiCompany && (
+                  <Badge variant="secondary" className="text-xs">
+                    {parsedCompanies.length} companies
+                  </Badge>
+                )}
+              </div>
+              <Textarea
                 id="sr-company"
-                placeholder="e.g., Blackstone, KKR, Google"
+                placeholder={"Enter one or more companies:\n• One per line, or\n• Comma-separated\n\ne.g.:\nBlackstone\nKKR\nCarlyle Group"}
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
+                rows={4}
+                className="resize-y min-h-[100px]"
               />
+              {isMultiCompany && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {parsedCompanies.slice(0, 8).map((c, i) => (
+                    <Badge key={i} variant="outline" className="text-xs">
+                      {c}
+                    </Badge>
+                  ))}
+                  {parsedCompanies.length > 8 && (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                      +{parsedCompanies.length - 8} more
+                    </Badge>
+                  )}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="sr-country">Country / Location *</Label>
