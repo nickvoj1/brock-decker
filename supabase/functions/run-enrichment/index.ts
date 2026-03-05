@@ -1824,8 +1824,8 @@ Deno.serve(async (req) => {
               }
               
               // For signal-based searches: STRICT company matching
-              if (targetCompany) {
-                if (!companiesMatch(targetCompany, companyName)) {
+              if (activeCompany) {
+                if (!companiesMatch(activeCompany, companyName)) {
                   // Skip contacts not from target company
                   continue
                 }
