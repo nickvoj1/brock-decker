@@ -196,7 +196,8 @@ Return ONLY a JSON array. No markdown, no explanation.`;
 
 /* ─── Action: deep-dive ────────────────────────────────────────────── */
 
-async function companyDeepDive(signalId: string, supabase: ReturnType<typeof createClient>) {
+// deno-lint-ignore no-explicit-any
+async function companyDeepDive(signalId: string, supabase: any) {
   const { data: signal, error } = await supabase
     .from("signals")
     .select("id, title, company, region, signal_type, amount, currency, description, ai_insight")
