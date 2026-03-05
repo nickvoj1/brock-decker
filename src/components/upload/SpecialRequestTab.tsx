@@ -180,23 +180,24 @@ export function SpecialRequestTab() {
       const normalizedContacts: SpecialRequestContact[] = rawContacts.map((c: any) => ({
         name: String(c?.name || ''),
         title: String(c?.title || ''),
-        company: String(c?.company || company.trim()),
+        company: String(c?.company || parsedCompanies[0] || ''),
         email: String(c?.email || ''),
         location: String(c?.location || country.trim()),
       }));
       const completeContacts = normalizedContacts.filter(isCompleteContact);
 
       setContacts(completeContacts);
+      const companyLabel = isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0];
       if (completeContacts.length > 0) {
         toast({
           title: `Found ${completeContacts.length} contacts`,
-          description: `At ${company} in ${country}`,
+          description: `At ${companyLabel} in ${country}`,
         });
       } else {
         const finalStatus = String(finalRun.status || "").toLowerCase();
         toast({
           title: finalStatus === "failed" ? "Search failed" : "No contacts found",
-          description: finalRun.error_message || `No complete contacts found at ${company} in ${country}`,
+          description: finalRun.error_message || `No complete contacts found at ${companyLabel} in ${country}`,
           variant: "destructive",
         });
       }
