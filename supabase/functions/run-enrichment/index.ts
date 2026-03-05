@@ -1250,15 +1250,17 @@ Deno.serve(async (req) => {
     const signalRegion = (preferences[0] as any)?.signalRegion || ''
     const targetCompanyGoalContacts = targetCompany
       ? (
-          (isJobBoardSearch || isSpecialRequestSearch)
-            ? Math.min(maxContacts, 12)
-            : Math.min(maxContacts, 10)
+          isMultiCompanySearch
+            ? Math.min(maxContacts, targetCompanyList.length * 5) // ~5 contacts per company
+            : (isJobBoardSearch || isSpecialRequestSearch)
+              ? Math.min(maxContacts, 12)
+              : Math.min(maxContacts, 10)
         )
       : 0
     const searchTargetContacts = targetCompany ? targetCompanyGoalContacts : maxContacts
     const searchStartedAt = Date.now()
     const dynamicMaxPerCompany = targetCompany
-      ? 50
+      ? (isMultiCompanySearch ? 10 : 50)
       : (
           searchTargetContacts >= 300
             ? 10
@@ -1269,7 +1271,7 @@ Deno.serve(async (req) => {
                 : baseMaxPerCompany
         )
     const dynamicMaxPagesPerCombo = targetCompany
-      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
+      ? (isMultiCompanySearch ? 1 : (isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
       : (
           searchTargetContacts >= 300
             ? 8
@@ -1284,7 +1286,9 @@ Deno.serve(async (req) => {
       Math.max(60 * 1000, 45 * 1000 + (searchTargetContacts * 750))
     )
     const SEARCH_BUDGET_MS = targetCompany
-      ? ((isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
+      ? (isMultiCompanySearch
+          ? Math.min(4 * 60 * 1000, targetCompanyList.length * 5000) // ~5s per company
+          : (isJobBoardSearch || isSpecialRequestSearch) ? 35000 : 50000)
       : nonTargetBudgetMs
     const hasTimeBudgetExceeded = () => (Date.now() - searchStartedAt) >= SEARCH_BUDGET_MS
     
