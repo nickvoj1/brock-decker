@@ -426,12 +426,12 @@ export function SpecialRequestTab() {
               {isRunning ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Searching...
+                  {totalBatches > 1 ? `Batch ${currentBatch}/${totalBatches}…` : 'Searching…'}
                 </>
               ) : (
                 <>
                   <Play className="mr-2 h-4 w-4" />
-                  Find Contacts
+                  {totalBatches > 1 ? `Find Contacts (${totalBatches} batches)` : 'Find Contacts'}
                 </>
               )}
             </Button>
