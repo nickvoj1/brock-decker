@@ -92,21 +92,22 @@ export function SpecialRequestTab() {
     );
   };
 
+  const BATCH_SIZE = 10;
+  const totalBatches = Math.ceil(parsedCompanies.length / BATCH_SIZE);
+  const [currentBatch, setCurrentBatch] = useState(0);
+
   const canRun = profileName && parsedCompanies.length > 0 && country.trim() && selectedDepartments.length > 0 && !isRunning;
 
   const handleRun = async () => {
     if (!canRun) return;
     setIsRunning(true);
     setContacts([]);
+    setCurrentBatch(0);
     
     try {
       const targetRoles = Array.from(
         new Set(selectedDepartments.flatMap((dept) => DEPARTMENT_TITLES[dept] || []))
       );
-      const companyString = parsedCompanies.join(', ');
-      const searchName = requestName.trim() || (isMultiCompany
-        ? `${parsedCompanies.length} companies - ${country.trim()}`
-        : `${parsedCompanies[0]} - ${country.trim()}`);
       const signalRegion = inferRegionFromLocation(country.trim());
 
       let bullhornEmails: string[] = [];
@@ -119,85 +120,131 @@ export function SpecialRequestTab() {
         // Non-fatal: continue without Bullhorn exclusion.
       }
 
-      const runResult = await createEnrichmentRun(profileName, {
-        search_counter: maxContacts,
-        candidates_count: 1,
-        preferences_count: 1,
-        status: 'pending',
-        bullhorn_enabled: false,
-        candidates_data: [{
-          candidate_id: `SR-${Date.now()}`,
-          name: searchName,
-          current_title: 'Special Request',
-          location: country.trim(),
-          skills: [],
-          work_history: [],
-          education: [],
-        }],
-        preferences_data: [{
-          type: 'special_request',
-          industry: 'Private Equity',
-          companies: companyString,
-          exclusions: '',
-          excludedIndustries: [],
-          locations: [country.trim()],
-          targetRoles,
-          sectors: selectedDepartments,
-          targetCompany: companyString,
-          signalTitle: `Special request: ${isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0]}`,
-          signalRegion,
-          country: country.trim(),
-          departments: selectedDepartments,
-        }],
-      });
-
-      if (!runResult.success || !runResult.data?.id) {
-        throw new Error(runResult.error || 'Failed to create enrichment run');
+      // Split companies into batches of BATCH_SIZE
+      const batches: string[][] = [];
+      for (let i = 0; i < parsedCompanies.length; i += BATCH_SIZE) {
+        batches.push(parsedCompanies.slice(i, i + BATCH_SIZE));
       }
 
-      const kickOffResult = await startEnrichmentRun(profileName, runResult.data.id, bullhornEmails);
-      if (!kickOffResult.success) {
-        throw new Error(kickOffResult.error || "Failed to start enrichment run");
+      const allContacts: SpecialRequestContact[] = [];
+      let batchErrors = 0;
+
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        setCurrentBatch(batchIdx + 1);
+        const batch = batches[batchIdx];
+        const batchString = batch.join(', ');
+        const batchLabel = batches.length > 1
+          ? `Batch ${batchIdx + 1}/${batches.length}: ${batch.length} companies`
+          : batch.length > 1 ? `${batch.length} companies` : batch[0];
+        const searchName = requestName.trim()
+          ? (batches.length > 1 ? `${requestName.trim()} (${batchIdx + 1}/${batches.length})` : requestName.trim())
+          : (batches.length > 1 ? `${batchLabel} - ${country.trim()}` : (batch.length > 1 ? `${batch.length} companies - ${country.trim()}` : `${batch[0]} - ${country.trim()}`));
+
+        // Scale max contacts proportionally per batch
+        const batchMaxContacts = batches.length > 1
+          ? Math.max(5, Math.ceil(maxContacts * (batch.length / parsedCompanies.length)))
+          : maxContacts;
+
+        if (batches.length > 1) {
+          toast({
+            title: `Starting batch ${batchIdx + 1} of ${batches.length}`,
+            description: `Searching ${batch.slice(0, 3).join(', ')}${batch.length > 3 ? ` +${batch.length - 3} more` : ''}`,
+          });
+        }
+
+        try {
+          const runResult = await createEnrichmentRun(profileName, {
+            search_counter: batchMaxContacts,
+            candidates_count: 1,
+            preferences_count: 1,
+            status: 'pending',
+            bullhorn_enabled: false,
+            candidates_data: [{
+              candidate_id: `SR-${Date.now()}-B${batchIdx}`,
+              name: searchName,
+              current_title: 'Special Request',
+              location: country.trim(),
+              skills: [],
+              work_history: [],
+              education: [],
+            }],
+            preferences_data: [{
+              type: 'special_request',
+              industry: 'Private Equity',
+              companies: batchString,
+              exclusions: '',
+              excludedIndustries: [],
+              locations: [country.trim()],
+              targetRoles,
+              sectors: selectedDepartments,
+              targetCompany: batchString,
+              signalTitle: `Special request: ${batchLabel}`,
+              signalRegion,
+              country: country.trim(),
+              departments: selectedDepartments,
+            }],
+          });
+
+          if (!runResult.success || !runResult.data?.id) {
+            throw new Error(runResult.error || 'Failed to create enrichment run');
+          }
+
+          const kickOffResult = await startEnrichmentRun(profileName, runResult.data.id, bullhornEmails);
+          if (!kickOffResult.success) {
+            throw new Error(kickOffResult.error || "Failed to start enrichment run");
+          }
+
+          const completion = await waitForEnrichmentRunCompletion(profileName, runResult.data.id, {
+            timeoutMs: 180000,
+            intervalMs: 2000,
+          });
+
+          if (completion.timedOut) {
+            toast({
+              title: `Batch ${batchIdx + 1} timed out`,
+              description: "Results may appear in Runs History later.",
+            });
+            continue;
+          }
+
+          if (!completion.success) {
+            batchErrors++;
+            continue;
+          }
+
+          const finalRun = completion.data || {};
+          const rawContacts = Array.isArray(finalRun?.enriched_data) ? finalRun.enriched_data : [];
+          const normalizedContacts: SpecialRequestContact[] = rawContacts.map((c: any) => ({
+            name: String(c?.name || ''),
+            title: String(c?.title || ''),
+            company: String(c?.company || batch[0] || ''),
+            email: String(c?.email || ''),
+            location: String(c?.location || country.trim()),
+          }));
+          allContacts.push(...normalizedContacts.filter(isCompleteContact));
+        } catch (batchErr: any) {
+          batchErrors++;
+          toast({
+            title: `Batch ${batchIdx + 1} failed`,
+            description: batchErr.message || "Continuing with next batch...",
+            variant: "destructive",
+          });
+        }
       }
 
-      const completion = await waitForEnrichmentRunCompletion(profileName, runResult.data.id, {
-        timeoutMs: 180000,
-        intervalMs: 2000,
-      });
-      if (!completion.success) {
-        throw new Error(completion.error || "Failed while waiting for enrichment run");
-      }
-      if (completion.timedOut) {
+      setContacts(allContacts);
+      const companyLabel = parsedCompanies.length > 1 ? `${parsedCompanies.length} companies` : parsedCompanies[0];
+      if (allContacts.length > 0) {
         toast({
-          title: "Search continues in background",
-          description: "You can leave this page. Open Runs History to view final contacts.",
-        });
-        return;
-      }
-
-      const finalRun = completion.data || {};
-      const rawContacts = Array.isArray(finalRun?.enriched_data) ? finalRun.enriched_data : [];
-      const normalizedContacts: SpecialRequestContact[] = rawContacts.map((c: any) => ({
-        name: String(c?.name || ''),
-        title: String(c?.title || ''),
-        company: String(c?.company || parsedCompanies[0] || ''),
-        email: String(c?.email || ''),
-        location: String(c?.location || country.trim()),
-      }));
-      const completeContacts = normalizedContacts.filter(isCompleteContact);
-
-      setContacts(completeContacts);
-      const companyLabel = isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0];
-      if (completeContacts.length > 0) {
-        toast({
-          title: `Found ${completeContacts.length} contacts`,
-          description: `At ${companyLabel} in ${country}`,
+          title: `Found ${allContacts.length} contacts total`,
+          description: batches.length > 1
+            ? `Across ${batches.length} batches at ${companyLabel} in ${country}${batchErrors > 0 ? ` (${batchErrors} batch${batchErrors > 1 ? 'es' : ''} failed)` : ''}`
+            : `At ${companyLabel} in ${country}`,
         });
       } else {
-        const finalStatus = String(finalRun.status || "").toLowerCase();
         toast({
-          title: finalStatus === "failed" ? "Search failed" : "No contacts found",
-          description: finalRun.error_message || `No complete contacts found at ${companyLabel} in ${country}`,
+          title: batchErrors > 0 ? "Search failed" : "No contacts found",
+          description: `No complete contacts found at ${companyLabel} in ${country}`,
           variant: "destructive",
         });
       }
@@ -209,6 +256,7 @@ export function SpecialRequestTab() {
       });
     } finally {
       setIsRunning(false);
+      setCurrentBatch(0);
     }
   };
 
@@ -378,12 +426,12 @@ export function SpecialRequestTab() {
               {isRunning ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Searching...
+                  {totalBatches > 1 ? `Batch ${currentBatch}/${totalBatches}…` : 'Searching…'}
                 </>
               ) : (
                 <>
                   <Play className="mr-2 h-4 w-4" />
-                  Find Contacts
+                  {totalBatches > 1 ? `Find Contacts (${totalBatches} batches)` : 'Find Contacts'}
                 </>
               )}
             </Button>
