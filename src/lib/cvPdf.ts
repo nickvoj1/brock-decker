@@ -1339,7 +1339,7 @@ async function runResidualCleanupPasses(pdfBytes: Uint8Array, hints?: CVPersonal
   for (let pass = 0; pass < 2; pass++) {
     const zones = await detectResidualPersonalZones(current, hints);
     if (zones.length === 0) break;
-    current = await applyRedactionZones(current, zones);
+    current = await applyRedactionZones(current, zones) as Uint8Array<ArrayBuffer>;
   }
   return current;
 }
