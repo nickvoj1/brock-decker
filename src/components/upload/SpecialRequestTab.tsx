@@ -353,7 +353,7 @@ export function SpecialRequestTab() {
               <CardTitle className="text-lg">Run Special Request</CardTitle>
               <CardDescription>
                 {canRun
-                  ? `Search for up to ${maxContacts} contacts at ${company} in ${country}`
+                  ? `Search for up to ${maxContacts} contacts at ${isMultiCompany ? `${parsedCompanies.length} companies` : parsedCompanies[0]} in ${country}`
                   : "Fill in company, country, and select at least one department"}
               </CardDescription>
             </div>
