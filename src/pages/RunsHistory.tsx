@@ -831,6 +831,7 @@ export default function RunsHistory() {
                         <TableHead>Country</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Contacts</TableHead>
+                        <TableHead>Bullhorn</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -839,10 +840,11 @@ export default function RunsHistory() {
                       {specialRuns.map((run) => {
                         const prefs = (run.preferences_data as any[])?.[0] || {};
                         const isUnread = isRunUnreadForTab(run, "special");
+                        const overlap = bullhornOverlap[run.id];
                         return (
                           <TableRow key={run.id} className={`animate-fade-in ${isUnread ? "bg-destructive/5" : ""}`}>
                             <TableCell className="font-medium">{getCandidateName(run)}</TableCell>
-                            <TableCell>{prefs.company || '-'}</TableCell>
+                            <TableCell>{prefs.company || prefs.companies || '-'}</TableCell>
                             <TableCell>{prefs.country || '-'}</TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
@@ -861,6 +863,37 @@ export default function RunsHistory() {
                                 {getTotalContactCount(run)}
                               </div>
                             </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {overlap ? (
+                                  <>
+                                    <Database className="h-4 w-4 text-muted-foreground" />
+                                    <span className="text-sm">
+                                      {overlap.existing}/{overlap.total}
+                                      {overlap.recentNotes > 0 && (
+                                        <span className="text-orange-500 ml-1">({overlap.recentNotes} recent)</span>
+                                      )}
+                                    </span>
+                                  </>
+                                ) : getTotalContactCount(run) > 0 ? (
+                                  <span className="text-xs text-muted-foreground">checking…</span>
+                                ) : '-'}
+                                {getTotalContactCount(run) > 0 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => checkBullhornOverlap(run.id)}
+                                    disabled={checkingRunId === run.id || getTotalContactCount(run) === 0}
+                                  >
+                                    {checkingRunId === run.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
                             <TableCell><StatusBadge status={run.status} /></TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
@@ -872,6 +905,43 @@ export default function RunsHistory() {
                                 </Button>
                                 <Button variant="ghost" size="icon" onClick={() => downloadCSV(run)} disabled={getTotalContactCount(run) === 0} title="Download CSV">
                                   <Download className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    const overlap = bullhornOverlap[run.id];
+                                    const excludedEmails = overlap ? [...(overlap.recentNoteEmails || [])] : [];
+                                    openSkillsReview(run, excludedEmails);
+                                  }}
+                                  disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
+                                  title="AI Skills Review → Bullhorn"
+                                >
+                                  {exportingRunId === run.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    const overlap = bullhornOverlap[run.id];
+                                    const excludedEmails = overlap ? [...(overlap.recentNoteEmails || [])] : [];
+                                    exportTooBullhornMutation.mutate({ runId: run.id, excludedEmails: excludedEmails.length > 0 ? excludedEmails : undefined });
+                                  }}
+                                  disabled={getTotalContactCount(run) === 0 || exportingRunId === run.id}
+                                  title={run.bullhorn_exported_at ? "Re-export to Bullhorn (quick)" : "Export to Bullhorn (quick)"}
+                                  className={run.bullhorn_exported_at ? "text-green-600 hover:text-green-700" : ""}
+                                >
+                                  {exportingRunId === run.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : run.bullhorn_exported_at ? (
+                                    <CheckCircle2 className="h-4 w-4" />
+                                  ) : (
+                                    <Upload className="h-4 w-4" />
+                                  )}
                                 </Button>
                               </div>
                             </TableCell>
