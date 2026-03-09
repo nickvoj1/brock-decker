@@ -2161,15 +2161,56 @@ Deno.serve(async (req) => {
       }
     }
 
+    const exportedAt = new Date().toISOString()
+
     await supabase
       .from('enrichment_runs')
       .update({
         bullhorn_list_name: listName,
         bullhorn_list_id: listId,
-        bullhorn_exported_at: new Date().toISOString(),
+        bullhorn_exported_at: exportedAt,
         bullhorn_errors: errors.length > 0 ? errors : null,
       })
       .eq('id', runId)
+
+    // Save to local distribution_lists + distribution_list_contacts so the
+    // Distribution Lists page shows them.
+    try {
+      const createdBy = run.uploaded_by || 'system'
+      const { data: localList } = await supabase
+        .from('distribution_lists')
+        .insert({ name: listName, created_by: createdBy })
+        .select('id')
+        .single()
+
+      if (localList?.id) {
+        // Build rows for distribution_list_contacts
+        const contactRows = contactIds.map((bhId, idx) => {
+          // Find the matching contact from contactsToExport by index position
+          const apolloContact = contactsToExport[idx] || {} as any
+          return {
+            list_id: localList.id,
+            bullhorn_id: bhId,
+            added_by: createdBy,
+            name: apolloContact.name || null,
+            email: apolloContact.email || null,
+            company_name: apolloContact.company || null,
+            occupation: apolloContact.title || null,
+            contact_snapshot: apolloContact as Record<string, unknown>,
+          }
+        })
+
+        // Insert in batches of 50
+        for (let b = 0; b < contactRows.length; b += 50) {
+          await supabase
+            .from('distribution_list_contacts')
+            .insert(contactRows.slice(b, b + 50))
+        }
+        console.log(`Saved local distribution list ${localList.id} with ${contactRows.length} contacts`)
+      }
+    } catch (localErr: any) {
+      console.error('Failed to save local distribution list (non-fatal):', localErr.message)
+    }
 
     return new Response(
       JSON.stringify({
