@@ -1739,46 +1739,46 @@ async function createDistributionList(
     }
   }
 
-  // Strategy: Use POST to the entity with members.add array.
-  // PUT /entity/DistributionList/{id}/members/{csv} replaces members each call.
-  // POST /entity/DistributionList/{id} with { members: { add: [...] } } appends.
-  const BATCH_SIZE = 50
+  // Strategy: Use PUT /entity/DistributionList/{id}/members/{singleId} for each contact.
+  // POST { members: { add: [...] } } returns changeType:UPDATE which only updates search index
+  // but doesn't create proper associations visible in the Bullhorn UI.
+  // PUT to /members/{id} returns changeType:ASSOCIATE and properly links contacts to the list.
+  console.log(`Adding ${contactIds.length} contacts to distribution list via individual PUT ASSOCIATE calls...`)
 
-  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
-    const batch = contactIds.slice(i, i + BATCH_SIZE)
-    const batchNum = Math.floor(i / BATCH_SIZE) + 1
-    const totalBatches = Math.ceil(contactIds.length / BATCH_SIZE)
+  let addedCount = 0
+  for (let i = 0; i < contactIds.length; i++) {
+    const cid = contactIds[i]
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}?BhRestToken=${bhRestToken}`
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${cid}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
-        method: 'POST',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ members: { add: batch } }),
       })
 
       if (!assocResponse.ok) {
         const errorText = await assocResponse.text()
-        const msg = `Failed to add members batch ${batchNum}/${totalBatches} to list ${listId}: ${errorText}`
-        console.error(msg)
-        memberErrors.push(msg)
+        memberErrors.push(`Failed to associate contact ${cid}: ${errorText}`)
       } else {
-        const resJson = await assocResponse.json().catch(() => null)
-        console.log(`Members batch ${batchNum}/${totalBatches}: POST OK (${batch.length} ids)`, resJson ? JSON.stringify(resJson).slice(0, 200) : '')
+        await assocResponse.text()
+        addedCount++
       }
     } catch (err: any) {
-      const msg = `Error adding members batch ${batchNum} to list ${listId}: ${err?.message || 'Unknown error'}`
-      console.error(msg)
-      memberErrors.push(msg)
+      memberErrors.push(`Error associating contact ${cid}: ${err?.message || 'Unknown error'}`)
     }
 
-    // Delay between batches
-    if (i + BATCH_SIZE < contactIds.length) {
-      await sleep(300)
+    // Log progress every 20 contacts
+    if ((i + 1) % 20 === 0 || i === contactIds.length - 1) {
+      console.log(`Distribution list progress: ${addedCount}/${i + 1} associated (${contactIds.length} total)`)
+    }
+
+    // Small delay to avoid rate limiting (50ms per contact)
+    if (i < contactIds.length - 1) {
+      await sleep(50)
     }
   }
 
   // Final verification
-  await sleep(1000)
+  await sleep(500)
 
   const membersAdded = await fetchMemberCount()
   const membersFailed = Math.max(0, contactIds.length - membersAdded)
