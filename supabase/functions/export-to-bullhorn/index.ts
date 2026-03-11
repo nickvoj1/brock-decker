@@ -1739,42 +1739,46 @@ async function createDistributionList(
     }
   }
 
-  // Add members in small batches using PUT /entity/DistributionList/{id}/members/{csv}
-  // Each PUT call ADDS to existing members (does not replace).
-  const BATCH_SIZE = 15
+  // Strategy: Use POST to the entity with members.add array.
+  // PUT /entity/DistributionList/{id}/members/{csv} replaces members each call.
+  // POST /entity/DistributionList/{id} with { members: { add: [...] } } appends.
+  const BATCH_SIZE = 50
 
   for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
     const batch = contactIds.slice(i, i + BATCH_SIZE)
-    const idsCsv = batch.join(',')
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1
+    const totalBatches = Math.ceil(contactIds.length / BATCH_SIZE)
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${idsCsv}?BhRestToken=${bhRestToken}`
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members: { add: batch } }),
       })
 
       if (!assocResponse.ok) {
         const errorText = await assocResponse.text()
-        const msg = `Failed to add members batch ${Math.floor(i / BATCH_SIZE) + 1} to list ${listId}: ${errorText}`
+        const msg = `Failed to add members batch ${batchNum}/${totalBatches} to list ${listId}: ${errorText}`
         console.error(msg)
         memberErrors.push(msg)
       } else {
-        await assocResponse.text()
+        const resJson = await assocResponse.json().catch(() => null)
+        console.log(`Members batch ${batchNum}/${totalBatches}: POST OK (${batch.length} ids)`, resJson ? JSON.stringify(resJson).slice(0, 200) : '')
       }
     } catch (err: any) {
-      const msg = `Error adding members batch to list ${listId}: ${err?.message || 'Unknown error'}`
+      const msg = `Error adding members batch ${batchNum} to list ${listId}: ${err?.message || 'Unknown error'}`
       console.error(msg)
       memberErrors.push(msg)
     }
 
-    // Small delay between batches
+    // Delay between batches
     if (i + BATCH_SIZE < contactIds.length) {
-      await sleep(150)
+      await sleep(300)
     }
   }
 
   // Final verification
-  await sleep(500)
+  await sleep(1000)
 
   const membersAdded = await fetchMemberCount()
   const membersFailed = Math.max(0, contactIds.length - membersAdded)
