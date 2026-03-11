@@ -2128,19 +2128,39 @@ Deno.serve(async (req) => {
     // Distribution Lists page shows them.
     try {
       const createdBy = run.uploaded_by || 'system'
-      const { data: localList } = await supabase
-        .from('distribution_lists')
-        .insert({ name: listName, created_by: createdBy })
-        .select('id')
-        .single()
 
-      if (localList?.id) {
+      // Try to find existing list with same name first, then create if not found
+      let localListId: string | null = null
+      const { data: existingList } = await supabase
+        .from('distribution_lists')
+        .select('id')
+        .eq('name', listName)
+        .maybeSingle()
+
+      if (existingList?.id) {
+        localListId = existingList.id
+        // Clear old contacts before re-populating
+        await supabase
+          .from('distribution_list_contacts')
+          .delete()
+          .eq('list_id', localListId)
+        console.log(`Reusing existing local distribution list ${localListId}`)
+      } else {
+        const { data: newList } = await supabase
+          .from('distribution_lists')
+          .insert({ name: listName, created_by: createdBy })
+          .select('id')
+          .maybeSingle()
+        localListId = newList?.id || null
+      }
+
+      if (localListId) {
         // Build rows for distribution_list_contacts
         const contactRows = contactIds.map((bhId, idx) => {
           // Find the matching contact from contactsToExport by index position
           const apolloContact = contactsToExport[idx] || {} as any
           return {
-            list_id: localList.id,
+            list_id: localListId!,
             bullhorn_id: bhId,
             added_by: createdBy,
             name: apolloContact.name || null,
@@ -2157,7 +2177,7 @@ Deno.serve(async (req) => {
             .from('distribution_list_contacts')
             .insert(contactRows.slice(b, b + 50))
         }
-        console.log(`Saved local distribution list ${localList.id} with ${contactRows.length} contacts`)
+        console.log(`Saved local distribution list ${localListId} with ${contactRows.length} contacts`)
       }
     } catch (localErr: any) {
       console.error('Failed to save local distribution list (non-fatal):', localErr.message)

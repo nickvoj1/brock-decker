@@ -1,0 +1,1 @@
+ALTER TABLE public.distribution_lists ADD CONSTRAINT distribution_lists_name_unique UNIQUE (name);
