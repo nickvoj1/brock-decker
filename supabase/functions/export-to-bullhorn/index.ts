@@ -1914,8 +1914,9 @@ Deno.serve(async (req) => {
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
     // Accept optional excludedEmails array for contacts user wants to skip
-    const { runId, classifiedContacts, excludedEmails } = await req.json() as { 
+    const { runId, listName: requestedListName, classifiedContacts, excludedEmails } = await req.json() as { 
       runId: string; 
+      listName?: string;
       classifiedContacts?: ClassifiedContact[];
       excludedEmails?: string[];
     }
