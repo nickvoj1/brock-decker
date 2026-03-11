@@ -2481,6 +2481,8 @@ Deno.serve(async (req) => {
     console.log(`Total contacts: ${finalContacts.length}`)
     console.log(`New contacts: ${newContactCount} (${finalContacts.length > 0 ? Math.round(newContactCount / finalContacts.length * 100) : 0}%)`)
     console.log(`Bullhorn contacts: ${bullhornContactCount} (${finalContacts.length > 0 ? Math.round(bullhornContactCount / finalContacts.length * 100) : 0}%)`)
+    console.log(`Apollo people/match credits used: ${creditsUsed}`)
+    console.log(`Credit efficiency: ${finalContacts.length > 0 ? (creditsUsed / finalContacts.length).toFixed(2) : 'N/A'} credits per contact`)
     console.log(`======================\n`)
 
     if (finalContacts.length > 0) {
