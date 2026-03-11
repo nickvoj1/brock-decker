@@ -1727,25 +1727,49 @@ async function createDistributionList(
 
   const memberErrors: string[] = []
 
+  const fetchMemberCount = async (): Promise<number> => {
+    try {
+      const countUrl = `${restUrl}entity/DistributionList/${listId}/members?fields=id&count=1&BhRestToken=${bhRestToken}`
+      const countRes = await bullhornFetch(countUrl)
+      if (!countRes.ok) return 0
+      const countJson = await countRes.json()
+      return Number(countJson?.count || 0)
+    } catch {
+      return 0
+    }
+  }
+
   const addMembersWithAdaptiveBatching = async (ids: number[]): Promise<number> => {
     if (!ids.length) return 0
 
-    const batchIds = ids.join(',')
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
-      const assocResponse = await bullhornFetch(assocUrl, {
-        method: 'PUT',
+      const updateUrl = `${restUrl}entity/DistributionList/${listId}?BhRestToken=${bhRestToken}`
+      const assocResponse = await bullhornFetch(updateUrl, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          members: { add: ids },
+        }),
       })
 
       if (assocResponse.ok) {
-        await assocResponse.text() // consume response
-        return ids.length
+        const raw = await assocResponse.text()
+        let added = ids.length
+        try {
+          const json = JSON.parse(raw)
+          const responseAdd = json?.data?.members?.add
+          if (Array.isArray(responseAdd) && responseAdd.length > 0) {
+            added = responseAdd.length
+          }
+        } catch {
+          // keep fallback
+        }
+        return added
       }
 
       const errorText = await assocResponse.text()
 
-      // If batch > 1, split and retry smaller chunks to work around API constraints/throttling.
+      // Some Bullhorn portals reject larger add payloads; split and retry.
       if (ids.length > 1) {
         const mid = Math.ceil(ids.length / 2)
         const left = ids.slice(0, mid)
@@ -1755,7 +1779,19 @@ async function createDistributionList(
         return leftAdded + rightAdded
       }
 
-      const msg = `Failed to add member ${ids[0]} to list ${listId}: ${errorText}`
+      // Last-resort fallback for single ID via direct association endpoint.
+      const singleAssocUrl = `${restUrl}entity/DistributionList/${listId}/members/${ids[0]}?BhRestToken=${bhRestToken}`
+      const singleRes = await bullhornFetch(singleAssocUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (singleRes.ok) {
+        await singleRes.text()
+        return 1
+      }
+
+      const singleErr = await singleRes.text()
+      const msg = `Failed to add member ${ids[0]} to list ${listId}: ${errorText || singleErr}`
       console.error(msg)
       memberErrors.push(msg)
       return 0
@@ -1776,19 +1812,23 @@ async function createDistributionList(
     }
   }
 
-  const INITIAL_BATCH_SIZE = 50
+  const INITIAL_BATCH_SIZE = 25
   let membersAdded = 0
   for (let i = 0; i < contactIds.length; i += INITIAL_BATCH_SIZE) {
     const batch = contactIds.slice(i, i + INITIAL_BATCH_SIZE)
     const added = await addMembersWithAdaptiveBatching(batch)
     membersAdded += added
-    console.log(`Distribution list progress: ${membersAdded}/${contactIds.length} members added`)
-    await sleep(100)
+    const currentCount = await fetchMemberCount()
+    console.log(`Distribution list progress: ${currentCount}/${contactIds.length} members visible in Bullhorn`)
+    await sleep(120)
   }
+
+  const finalMemberCount = await fetchMemberCount()
+  membersAdded = finalMemberCount
 
   const membersFailed = Math.max(0, contactIds.length - membersAdded)
   if (membersFailed > 0) {
-    console.warn(`Distribution list partial add: ${membersAdded}/${contactIds.length} members added`)
+    console.warn(`Distribution list partial add: ${membersAdded}/${contactIds.length} members visible in Bullhorn`)
   } else {
     console.log(`Successfully added ${membersAdded}/${contactIds.length} members to distribution list ${listId}`)
   }
