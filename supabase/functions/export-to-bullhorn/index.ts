@@ -1997,7 +1997,7 @@ Deno.serve(async (req) => {
 
     const candidateName = (run.candidates_data as any[])?.[0]?.name || 'Unknown'
     const runDate = new Date(run.created_at)
-    const listName = `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
+    const listName = requestedListName || `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
 
     // Recency filtering is now user-controlled via the "Remove Recently Contacted" button in the UI.
     // If the user pressed it, those emails arrive in excludedEmails (already filtered above).
