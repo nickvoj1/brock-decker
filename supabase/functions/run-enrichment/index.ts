@@ -2111,6 +2111,9 @@ Deno.serve(async (req) => {
                   console.log(`[Enrich drop reasons] no-email:${enrichDropNoEmail} location:${enrichDropLocation} max-company:${enrichDropMaxCompany} used/dupe:${enrichDropUsed} bullhorn-cap:${enrichDropBullhorn} failed:${enrichDropFailed} added:${enrichAdded}`)
                 }
               }
+              if (creditsSavedPreFilter > 0) {
+                console.log(`[PRE-FILTER SAVINGS] ${creditsSavedPreFilter} enrichment calls skipped (company cap / dedup / quota)`)
+              }
             }
           } else {
             const errorText = await apolloResponse.text()
