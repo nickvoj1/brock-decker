@@ -1997,60 +1997,10 @@ Deno.serve(async (req) => {
     const runDate = new Date(run.created_at)
     const listName = `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
 
-    // Step 1: Pre-filter contacts that were recently contacted (note within 14 days)
-    console.log(`Checking ${contacts.length} contacts for recent activity in Bullhorn...`)
-    const skippedContacts: { email: string; reason: string }[] = []
-    const contactsToExport: ApolloContact[] = []
-    
-    // Check contacts in batches of 5 to avoid rate limiting
-    const PRECHECK_BATCH_SIZE = 5
-    for (let i = 0; i < contacts.length; i += PRECHECK_BATCH_SIZE) {
-      const batch = contacts.slice(i, i + PRECHECK_BATCH_SIZE)
-      
-      const checkResults = await Promise.allSettled(
-        batch.map(async (contact) => {
-          const { skip, reason } = await checkContactRecentlyContacted(
-            tokens.restUrl,
-            tokens.bhRestToken,
-            contact.email
-          )
-          return { contact, skip, reason }
-        })
-      )
-      
-      for (const result of checkResults) {
-        if (result.status === 'fulfilled') {
-          if (result.value.skip) {
-            skippedContacts.push({ 
-              email: result.value.contact.email, 
-              reason: result.value.reason || 'Recently contacted' 
-            })
-          } else {
-            contactsToExport.push(result.value.contact)
-          }
-        } else {
-          // On error, include the contact (don't block on check failures)
-          const contact = batch[checkResults.indexOf(result)]
-          if (contact) contactsToExport.push(contact)
-        }
-      }
-      
-      // Small delay between batches
-      if (i + PRECHECK_BATCH_SIZE < contacts.length) {
-        await sleep(50)
-      }
-    }
-    
-    console.log(`Pre-check complete: ${contactsToExport.length} contacts to export, ${skippedContacts.length} skipped (recently contacted)`)
-    
-    if (skippedContacts.length > 0) {
-      console.log(`Skipped contacts (note within 14 days):`)
-      skippedContacts.forEach(s => console.log(`  - ${s.email}: ${s.reason}`))
-    }
-    
-    if (contactsToExport.length === 0) {
-      throw new Error(`All ${contacts.length} contacts were skipped because they have notes within the last 14 days. No contacts to export.`)
-    }
+    // Recency filtering is now user-controlled via the "Remove Recently Contacted" button in the UI.
+    // If the user pressed it, those emails arrive in excludedEmails (already filtered above).
+    // We no longer auto-skip contacts here — the user decides.
+    const contactsToExport = contacts
 
     console.log(`Creating/updating ${contactsToExport.length} ClientContacts...`)
     const contactIds: number[] = []
