@@ -1739,9 +1739,13 @@ async function createDistributionList(
     }
   }
 
-  const setAllMembers = async (allIds: number[]): Promise<boolean> => {
-    if (!allIds.length) return true
-    const idsCsv = allIds.join(',')
+  // Add members in small batches using PUT /entity/DistributionList/{id}/members/{csv}
+  // Each PUT call ADDS to existing members (does not replace).
+  const BATCH_SIZE = 15
+
+  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
+    const batch = contactIds.slice(i, i + BATCH_SIZE)
+    const idsCsv = batch.join(',')
     try {
       const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${idsCsv}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
@@ -1751,38 +1755,26 @@ async function createDistributionList(
 
       if (!assocResponse.ok) {
         const errorText = await assocResponse.text()
-        const msg = `Failed to set members for list ${listId} (${allIds.length} ids): ${errorText}`
+        const msg = `Failed to add members batch ${Math.floor(i / BATCH_SIZE) + 1} to list ${listId}: ${errorText}`
         console.error(msg)
         memberErrors.push(msg)
-        return false
+      } else {
+        await assocResponse.text()
       }
-
-      await assocResponse.text()
-      return true
     } catch (err: any) {
-      const msg = `Error setting members for list ${listId}: ${err?.message || 'Unknown error'}`
+      const msg = `Error adding members batch to list ${listId}: ${err?.message || 'Unknown error'}`
       console.error(msg)
       memberErrors.push(msg)
-      return false
+    }
+
+    // Small delay between batches
+    if (i + BATCH_SIZE < contactIds.length) {
+      await sleep(150)
     }
   }
 
-  const BATCH_SIZE = 20
-  const accumulatedIds: number[] = []
-
-  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
-    const batch = contactIds.slice(i, i + BATCH_SIZE)
-    accumulatedIds.push(...batch)
-
-    // Bullhorn treats this endpoint as a full member-set operation.
-    // So we always send all ids accumulated so far to avoid overwriting previous chunks.
-    const ok = await setAllMembers(accumulatedIds)
-    if (!ok) break
-
-    const currentCount = await fetchMemberCount()
-    console.log(`Distribution list progress: ${currentCount}/${contactIds.length} members visible in Bullhorn`)
-    await sleep(120)
-  }
+  // Final verification
+  await sleep(500)
 
   const membersAdded = await fetchMemberCount()
   const membersFailed = Math.max(0, contactIds.length - membersAdded)
