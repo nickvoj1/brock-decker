@@ -13,7 +13,6 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   )
 
-  // Get Bullhorn tokens
   const { data: tokenRow } = await supabase
     .from('bullhorn_tokens')
     .select('*')
@@ -26,40 +25,35 @@ Deno.serve(async (req) => {
   const restUrl = tokenRow.rest_url
   const bhRestToken = tokenRow.bh_rest_token
 
-  // Get meta for DistributionList
-  const metaUrl = `${restUrl}meta/DistributionList?fields=*&BhRestToken=${encodeURIComponent(bhRestToken)}`
-  const metaRes = await fetch(metaUrl)
-  const metaData = await metaRes.json()
+  // Pick a known contact ID from earlier logs
+  const testContactId = 154852
+  const listId = 2894
 
-  // Extract association fields
-  const associations = (metaData.fields || [])
-    .filter((f: any) => f.type === 'TO_MANY' || f.associatedEntity)
-    .map((f: any) => ({
-      name: f.name,
-      type: f.type,
-      associatedEntity: f.associatedEntity?.entity || null,
-      label: f.label,
-    }))
+  // Try PUT with members (current approach)
+  const putUrl = `${restUrl}entity/DistributionList/${listId}/members/${testContactId}?BhRestToken=${bhRestToken}`
+  const putRes = await fetch(putUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' } })
+  const putStatus = putRes.status
+  const putBody = await putRes.text()
 
-  // Also try to get members of list 2894
-  const listUrl = `${restUrl}entity/DistributionList/2894?fields=id,name,description&BhRestToken=${encodeURIComponent(bhRestToken)}`
-  const listRes = await fetch(listUrl)
-  const listData = await listRes.json()
+  // Check members count after PUT
+  const checkUrl1 = `${restUrl}entity/DistributionList/${listId}/members?fields=id&count=5&BhRestToken=${bhRestToken}`
+  const check1 = await fetch(checkUrl1)
+  const check1Data = await check1.json()
 
-  // Try to get members
-  const membersUrl = `${restUrl}entity/DistributionList/2894/members?fields=id,firstName,lastName&count=5&BhRestToken=${encodeURIComponent(bhRestToken)}`
-  const membersRes = await fetch(membersUrl)
-  const membersData = await membersRes.json()
+  // Try POST with members  
+  const postUrl = `${restUrl}entity/DistributionList/${listId}/members/${testContactId}?BhRestToken=${bhRestToken}`
+  const postRes = await fetch(postUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+  const postStatus = postRes.status
+  const postBody = await postRes.text()
 
-  // Also try clientContacts
-  const ccUrl = `${restUrl}entity/DistributionList/2894/clientContacts?fields=id,firstName,lastName&count=5&BhRestToken=${encodeURIComponent(bhRestToken)}`
-  const ccRes = await fetch(ccUrl)
-  const ccData = await ccRes.json()
+  // Check members count after POST
+  const check2 = await fetch(checkUrl1)
+  const check2Data = await check2.json()
 
   return new Response(JSON.stringify({
-    associations,
-    listData,
-    membersData,
-    clientContactsData: ccData,
+    putResult: { status: putStatus, body: putBody },
+    afterPut: check1Data,
+    postResult: { status: postStatus, body: postBody },
+    afterPost: check2Data,
   }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 })
