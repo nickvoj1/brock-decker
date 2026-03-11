@@ -2365,10 +2365,21 @@ Deno.serve(async (req) => {
                   console.log(`CREDIT SAVER: Only enriching ${limitedPeopleToEnrich.length}/${peopleToEnrich.length} for retry`)
                 }
                 
-                for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
+                for (let i = 0; i < limitedPeopleToEnrich.length; i += 5) {
                   if (allContacts.length >= targetCompanyGoalContacts) break
                   
-                  const batch = limitedPeopleToEnrich.slice(i, i + 10)
+                  // PRE-ENRICHMENT FILTER: Remove candidates whose company already hit the cap
+                  const rawBatch = limitedPeopleToEnrich.slice(i, i + 5)
+                  const batch = rawBatch.filter(personData => {
+                    const currentCompanyCount = companyContactCount[personData.company] || 0
+                    if (currentCompanyCount >= dynamicMaxPerCompany) return false
+                    const dedupeKey = `${personData.name.toLowerCase().trim()}|${personData.company.toLowerCase().trim()}`
+                    if (seenNameCompany.has(dedupeKey)) return false
+                    return true
+                  })
+                  
+                  if (batch.length === 0) continue
+                  
                   const retryEnrichResults = await Promise.allSettled(
                     batch.map(async (personData) => {
                       creditsUsed++
