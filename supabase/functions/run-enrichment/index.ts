@@ -1960,13 +1960,17 @@ Deno.serve(async (req) => {
                 console.log(`Enriching ${limitedPeopleToEnrich.length} contacts to get emails...`)
               }
               
-              for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
+              let creditsSavedPreFilter = 0
+              
+              for (let i = 0; i < limitedPeopleToEnrich.length; i += 5) {
                 // Double-check we still need contacts before each batch
                 if (allContacts.length >= searchTargetContacts) {
+                  creditsSavedPreFilter += (limitedPeopleToEnrich.length - i)
                   console.log('CREDIT SAVER: Stopping enrichment - global quota reached')
                   break
                 }
                 if (hasTimeBudgetExceeded()) {
+                  creditsSavedPreFilter += (limitedPeopleToEnrich.length - i)
                   console.log(`Time budget reached during enrichment batches (${Math.round((Date.now() - searchStartedAt) / 1000)}s), stopping`)
                   break
                 }
@@ -1974,12 +1978,32 @@ Deno.serve(async (req) => {
                   const currentCount = industryContacts[comboIndustry]?.length || 0
                   const quota = industryQuotas[comboIndustry] || 0
                   if (currentCount >= quota) {
+                    creditsSavedPreFilter += (limitedPeopleToEnrich.length - i)
                     console.log(`CREDIT SAVER: Stopping enrichment - industry ${comboIndustry} quota reached`)
                     break
                   }
                 }
                 
-                const batch = limitedPeopleToEnrich.slice(i, i + 10)
+                // PRE-ENRICHMENT FILTER: Remove candidates whose company already hit the cap
+                const rawBatch = limitedPeopleToEnrich.slice(i, i + 5)
+                const batch = rawBatch.filter(personData => {
+                  // Check company cap using real-time counts (not stale pendingByCompany)
+                  const currentCompanyCount = companyContactCount[personData.company] || 0
+                  if (currentCompanyCount >= dynamicMaxPerCompany) {
+                    creditsSavedPreFilter++
+                    return false
+                  }
+                  // Check if name+company dedup key was added by a prior batch in this same page
+                  const dedupeKey = `${personData.name.toLowerCase().trim()}|${personData.company.toLowerCase().trim()}`
+                  if (seenNameCompany.has(dedupeKey)) {
+                    creditsSavedPreFilter++
+                    return false
+                  }
+                  return true
+                })
+                
+                if (batch.length === 0) continue
+                
                 const enrichResults = await Promise.allSettled(
                   batch.map(async (personData) => {
                     creditsUsed++
@@ -2086,6 +2110,9 @@ Deno.serve(async (req) => {
                 if (enrichDropNoEmail + enrichDropLocation + enrichDropMaxCompany + enrichDropUsed + enrichDropBullhorn + enrichDropFailed > 0) {
                   console.log(`[Enrich drop reasons] no-email:${enrichDropNoEmail} location:${enrichDropLocation} max-company:${enrichDropMaxCompany} used/dupe:${enrichDropUsed} bullhorn-cap:${enrichDropBullhorn} failed:${enrichDropFailed} added:${enrichAdded}`)
                 }
+              }
+              if (creditsSavedPreFilter > 0) {
+                console.log(`[PRE-FILTER SAVINGS] ${creditsSavedPreFilter} enrichment calls skipped (company cap / dedup / quota)`)
               }
             }
           } else {
@@ -2338,10 +2365,21 @@ Deno.serve(async (req) => {
                   console.log(`CREDIT SAVER: Only enriching ${limitedPeopleToEnrich.length}/${peopleToEnrich.length} for retry`)
                 }
                 
-                for (let i = 0; i < limitedPeopleToEnrich.length; i += 10) {
+                for (let i = 0; i < limitedPeopleToEnrich.length; i += 5) {
                   if (allContacts.length >= targetCompanyGoalContacts) break
                   
-                  const batch = limitedPeopleToEnrich.slice(i, i + 10)
+                  // PRE-ENRICHMENT FILTER: Remove candidates whose company already hit the cap
+                  const rawBatch = limitedPeopleToEnrich.slice(i, i + 5)
+                  const batch = rawBatch.filter(personData => {
+                    const currentCompanyCount = companyContactCount[personData.company] || 0
+                    if (currentCompanyCount >= dynamicMaxPerCompany) return false
+                    const dedupeKey = `${personData.name.toLowerCase().trim()}|${personData.company.toLowerCase().trim()}`
+                    if (seenNameCompany.has(dedupeKey)) return false
+                    return true
+                  })
+                  
+                  if (batch.length === 0) continue
+                  
                   const retryEnrichResults = await Promise.allSettled(
                     batch.map(async (personData) => {
                       creditsUsed++
@@ -2443,6 +2481,8 @@ Deno.serve(async (req) => {
     console.log(`Total contacts: ${finalContacts.length}`)
     console.log(`New contacts: ${newContactCount} (${finalContacts.length > 0 ? Math.round(newContactCount / finalContacts.length * 100) : 0}%)`)
     console.log(`Bullhorn contacts: ${bullhornContactCount} (${finalContacts.length > 0 ? Math.round(bullhornContactCount / finalContacts.length * 100) : 0}%)`)
+    console.log(`Apollo people/match credits used: ${creditsUsed}`)
+    console.log(`Credit efficiency: ${finalContacts.length > 0 ? (creditsUsed / finalContacts.length).toFixed(2) : 'N/A'} credits per contact`)
     console.log(`======================\n`)
 
     if (finalContacts.length > 0) {
