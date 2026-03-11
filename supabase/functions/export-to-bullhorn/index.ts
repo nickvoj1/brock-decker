@@ -1720,9 +1720,11 @@ async function createDistributionList(
   console.log(`DistributionList created with ID: ${listId}`)
 
   // Step 2: Add contacts using the to-many association endpoint.
-  // IMPORTANT: Bullhorn can reject larger member batches depending on portal settings/rate state.
+  // IMPORTANT: For ClientContact entities, the association field is 'clientContacts', NOT 'members'.
+  // Using 'members' silently succeeds but adds nothing visible in Bullhorn.
+  // Bullhorn can reject larger member batches depending on portal settings/rate state.
   // We recursively split failed batches to avoid partial silent exports.
-  console.log(`Adding ${contactIds.length} contacts to distribution list via 'members' field...`)
+  console.log(`Adding ${contactIds.length} contacts to distribution list via 'clientContacts' field...`)
 
   const memberErrors: string[] = []
 
@@ -1731,7 +1733,7 @@ async function createDistributionList(
 
     const batchIds = ids.join(',')
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}/clientContacts/${batchIds}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
