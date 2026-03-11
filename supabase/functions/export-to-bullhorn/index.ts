@@ -1727,68 +1727,67 @@ async function createDistributionList(
 
   const memberErrors: string[] = []
 
-  const addMembersWithAdaptiveBatching = async (ids: number[]): Promise<number> => {
-    if (!ids.length) return 0
-
-    const batchIds = ids.join(',')
+  const fetchMemberCount = async (): Promise<number> => {
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
+      const countUrl = `${restUrl}entity/DistributionList/${listId}/members?fields=id&count=1&BhRestToken=${bhRestToken}`
+      const countRes = await bullhornFetch(countUrl)
+      if (!countRes.ok) return 0
+      const countJson = await countRes.json()
+      return Number(countJson?.count || 0)
+    } catch {
+      return 0
+    }
+  }
+
+  const setAllMembers = async (allIds: number[]): Promise<boolean> => {
+    if (!allIds.length) return true
+    const idsCsv = allIds.join(',')
+    try {
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${idsCsv}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
       })
 
-      if (assocResponse.ok) {
-        await assocResponse.text() // consume response
-        return ids.length
+      if (!assocResponse.ok) {
+        const errorText = await assocResponse.text()
+        const msg = `Failed to set members for list ${listId} (${allIds.length} ids): ${errorText}`
+        console.error(msg)
+        memberErrors.push(msg)
+        return false
       }
 
-      const errorText = await assocResponse.text()
-
-      // If batch > 1, split and retry smaller chunks to work around API constraints/throttling.
-      if (ids.length > 1) {
-        const mid = Math.ceil(ids.length / 2)
-        const left = ids.slice(0, mid)
-        const right = ids.slice(mid)
-        const leftAdded = await addMembersWithAdaptiveBatching(left)
-        const rightAdded = await addMembersWithAdaptiveBatching(right)
-        return leftAdded + rightAdded
-      }
-
-      const msg = `Failed to add member ${ids[0]} to list ${listId}: ${errorText}`
-      console.error(msg)
-      memberErrors.push(msg)
-      return 0
+      await assocResponse.text()
+      return true
     } catch (err: any) {
-      if (ids.length > 1) {
-        const mid = Math.ceil(ids.length / 2)
-        const left = ids.slice(0, mid)
-        const right = ids.slice(mid)
-        const leftAdded = await addMembersWithAdaptiveBatching(left)
-        const rightAdded = await addMembersWithAdaptiveBatching(right)
-        return leftAdded + rightAdded
-      }
-
-      const msg = `Error adding member ${ids[0]} to list ${listId}: ${err?.message || 'Unknown error'}`
+      const msg = `Error setting members for list ${listId}: ${err?.message || 'Unknown error'}`
       console.error(msg)
       memberErrors.push(msg)
-      return 0
+      return false
     }
   }
 
-  const INITIAL_BATCH_SIZE = 50
-  let membersAdded = 0
-  for (let i = 0; i < contactIds.length; i += INITIAL_BATCH_SIZE) {
-    const batch = contactIds.slice(i, i + INITIAL_BATCH_SIZE)
-    const added = await addMembersWithAdaptiveBatching(batch)
-    membersAdded += added
-    console.log(`Distribution list progress: ${membersAdded}/${contactIds.length} members added`)
-    await sleep(100)
+  const BATCH_SIZE = 20
+  const accumulatedIds: number[] = []
+
+  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
+    const batch = contactIds.slice(i, i + BATCH_SIZE)
+    accumulatedIds.push(...batch)
+
+    // Bullhorn treats this endpoint as a full member-set operation.
+    // So we always send all ids accumulated so far to avoid overwriting previous chunks.
+    const ok = await setAllMembers(accumulatedIds)
+    if (!ok) break
+
+    const currentCount = await fetchMemberCount()
+    console.log(`Distribution list progress: ${currentCount}/${contactIds.length} members visible in Bullhorn`)
+    await sleep(120)
   }
 
+  const membersAdded = await fetchMemberCount()
   const membersFailed = Math.max(0, contactIds.length - membersAdded)
   if (membersFailed > 0) {
-    console.warn(`Distribution list partial add: ${membersAdded}/${contactIds.length} members added`)
+    console.warn(`Distribution list partial add: ${membersAdded}/${contactIds.length} members visible in Bullhorn`)
   } else {
     console.log(`Successfully added ${membersAdded}/${contactIds.length} members to distribution list ${listId}`)
   }
