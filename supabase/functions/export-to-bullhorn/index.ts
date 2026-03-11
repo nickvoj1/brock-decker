@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.91.1'
+// Export to Bullhorn - updated
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
