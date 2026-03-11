@@ -2083,7 +2083,7 @@ Deno.serve(async (req) => {
       }
     }
     
-    console.log(`Export complete: ${contactIds.length}/${contactsToExport.length} contacts processed (${newContactIds.length} new, ${existingContactIds.length} existing, ${skippedContacts.length} skipped due to recent notes)`)
+    console.log(`Export complete: ${contactIds.length}/${contactsToExport.length} contacts processed (${newContactIds.length} new, ${existingContactIds.length} existing)`)
 
     if (contactIds.length === 0) {
       throw new Error('Failed to create any contacts in Bullhorn')
@@ -2173,8 +2173,7 @@ Deno.serve(async (req) => {
         distributionListMembersFailed: distributionListResult.membersFailed,
         newContacts: newContactIds.length,
         existingContacts: existingContactIds.length,
-        contactsSkipped: skippedContacts.length,
-        skippedDetails: skippedContacts.length > 0 ? skippedContacts : undefined,
+        contactsSkipped: 0,
         errors: errors.length > 0 ? errors : undefined,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
