@@ -1739,50 +1739,46 @@ async function createDistributionList(
     }
   }
 
-  const setAllMembers = async (allIds: number[]): Promise<boolean> => {
-    if (!allIds.length) return true
-    const idsCsv = allIds.join(',')
+  // Strategy: Use POST to the entity with members.add array.
+  // PUT /entity/DistributionList/{id}/members/{csv} replaces members each call.
+  // POST /entity/DistributionList/{id} with { members: { add: [...] } } appends.
+  const BATCH_SIZE = 50
+
+  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
+    const batch = contactIds.slice(i, i + BATCH_SIZE)
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1
+    const totalBatches = Math.ceil(contactIds.length / BATCH_SIZE)
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${idsCsv}?BhRestToken=${bhRestToken}`
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
-        method: 'PUT',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members: { add: batch } }),
       })
 
       if (!assocResponse.ok) {
         const errorText = await assocResponse.text()
-        const msg = `Failed to set members for list ${listId} (${allIds.length} ids): ${errorText}`
+        const msg = `Failed to add members batch ${batchNum}/${totalBatches} to list ${listId}: ${errorText}`
         console.error(msg)
         memberErrors.push(msg)
-        return false
+      } else {
+        const resJson = await assocResponse.json().catch(() => null)
+        console.log(`Members batch ${batchNum}/${totalBatches}: POST OK (${batch.length} ids)`, resJson ? JSON.stringify(resJson).slice(0, 200) : '')
       }
-
-      await assocResponse.text()
-      return true
     } catch (err: any) {
-      const msg = `Error setting members for list ${listId}: ${err?.message || 'Unknown error'}`
+      const msg = `Error adding members batch ${batchNum} to list ${listId}: ${err?.message || 'Unknown error'}`
       console.error(msg)
       memberErrors.push(msg)
-      return false
+    }
+
+    // Delay between batches
+    if (i + BATCH_SIZE < contactIds.length) {
+      await sleep(300)
     }
   }
 
-  const BATCH_SIZE = 20
-  const accumulatedIds: number[] = []
-
-  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
-    const batch = contactIds.slice(i, i + BATCH_SIZE)
-    accumulatedIds.push(...batch)
-
-    // Bullhorn treats this endpoint as a full member-set operation.
-    // So we always send all ids accumulated so far to avoid overwriting previous chunks.
-    const ok = await setAllMembers(accumulatedIds)
-    if (!ok) break
-
-    const currentCount = await fetchMemberCount()
-    console.log(`Distribution list progress: ${currentCount}/${contactIds.length} members visible in Bullhorn`)
-    await sleep(120)
-  }
+  // Final verification
+  await sleep(1000)
 
   const membersAdded = await fetchMemberCount()
   const membersFailed = Math.max(0, contactIds.length - membersAdded)
@@ -1914,8 +1910,9 @@ Deno.serve(async (req) => {
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
     // Accept optional excludedEmails array for contacts user wants to skip
-    const { runId, classifiedContacts, excludedEmails } = await req.json() as { 
+    const { runId, listName: requestedListName, classifiedContacts, excludedEmails } = await req.json() as { 
       runId: string; 
+      listName?: string;
       classifiedContacts?: ClassifiedContact[];
       excludedEmails?: string[];
     }
@@ -1996,7 +1993,7 @@ Deno.serve(async (req) => {
 
     const candidateName = (run.candidates_data as any[])?.[0]?.name || 'Unknown'
     const runDate = new Date(run.created_at)
-    const listName = `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
+    const listName = requestedListName || `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
 
     // Recency filtering is now user-controlled via the "Remove Recently Contacted" button in the UI.
     // If the user pressed it, those emails arrive in excludedEmails (already filtered above).
