@@ -5502,19 +5502,18 @@ serve(async (req) => {
         .order("updated_at", { ascending: false });
       if (error) throw error;
 
-      const listIds = (lists || []).map((row: any) => String(row.id || "").trim()).filter(Boolean);
       const countByList = new Map<string, number>();
 
-      if (listIds.length) {
-        const { data: countRows, error: countError } = await supabase
+      // Count contacts per list using individual count queries to avoid the 1000-row limit
+      for (const row of lists || []) {
+        const listId = String(row.id || "").trim();
+        if (!listId) continue;
+        const { count, error: countError } = await supabase
           .from("distribution_list_contacts")
-          .select("list_id")
-          .in("list_id", listIds);
-        if (countError) throw countError;
-        for (const row of countRows || []) {
-          const listId = String((row as any)?.list_id || "").trim();
-          if (!listId) continue;
-          countByList.set(listId, (countByList.get(listId) || 0) + 1);
+          .select("*", { count: "exact", head: true })
+          .eq("list_id", listId);
+        if (!countError && count !== null) {
+          countByList.set(listId, count);
         }
       }
 
