@@ -16,8 +16,10 @@ Deno.serve(async (req) => {
     .limit(1)
     .single()
 
-  const { listId } = (await req.json().catch(() => ({ listId: 2895 }))) as { listId?: number }
+  const { listId, start, count } = (await req.json().catch(() => ({ listId: 2895, start: 0, count: 500 }))) as { listId?: number, start?: number, count?: number }
   const targetListId = listId || 2895
+  const targetStart = Number(start ?? 0)
+  const targetCount = Number(count ?? 500)
 
   const restUrl = tokenRow!.rest_url
   const bhRestToken = tokenRow!.bh_rest_token
@@ -25,11 +27,12 @@ Deno.serve(async (req) => {
   const listRes = await fetch(`${restUrl}entity/DistributionList/${targetListId}?fields=id,name,description&BhRestToken=${bhRestToken}`)
   const listData = await listRes.json()
 
-  const membersRes = await fetch(`${restUrl}entity/DistributionList/${targetListId}/members?fields=id,firstName,lastName&count=500&BhRestToken=${bhRestToken}`)
+  const membersRes = await fetch(`${restUrl}entity/DistributionList/${targetListId}/members?fields=id,firstName,lastName&count=${targetCount}&start=${targetStart}&BhRestToken=${bhRestToken}`)
   const membersData = await membersRes.json()
 
   return new Response(JSON.stringify({
     list: listData,
+    start: membersData?.start,
     returnedCountField: membersData?.count,
     dataLength: Array.isArray(membersData?.data) ? membersData.data.length : 0,
     sampleFirst10: Array.isArray(membersData?.data) ? membersData.data.slice(0, 10) : [],
