@@ -1809,9 +1809,9 @@ async function createDistributionList(
       console.log(`Distribution list progress: ${addedCount}/${i + 1} associated (${contactIds.length} total)`)
     }
 
-    // Small delay to avoid rate limiting (50ms per contact)
+    // Delay to avoid rate limiting (200ms per contact)
     if (i < contactIds.length - 1) {
-      await sleep(50)
+      await sleep(200)
     }
   }
 
