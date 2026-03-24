@@ -2047,7 +2047,7 @@ Deno.serve(async (req) => {
     const companyCache: Record<string, number> = {}
 
     // Process contacts in batches of 5 for better throughput
-    const BATCH_SIZE = 5
+    const BATCH_SIZE = 2
     for (let i = 0; i < contactsToExport.length; i += BATCH_SIZE) {
       const batch = contactsToExport.slice(i, i + BATCH_SIZE)
       console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(contactsToExport.length / BATCH_SIZE)} (contacts ${i + 1}-${Math.min(i + BATCH_SIZE, contactsToExport.length)})`)
