@@ -945,20 +945,56 @@ async function getStoredBullhornTokens(supabase: any): Promise<BullhornTokens | 
   }
 }
 
+// In-memory cache for company IDs within a single export run
+const companyIdCache: Record<string, number> = {}
+
 async function findOrCreateClientCorporation(
   restUrl: string,
   bhRestToken: string,
   companyName: string
 ): Promise<number> {
-  const searchUrl = `${restUrl}search/ClientCorporation?BhRestToken=${bhRestToken}&query=name:"${companyName}"&fields=id,name`
+  // Check in-memory cache first to prevent duplicates within the same run
+  const cacheKey = companyName.trim().toLowerCase()
+  if (companyIdCache[cacheKey]) {
+    console.log(`[Cache hit] ClientCorporation: ${companyName} (ID: ${companyIdCache[cacheKey]})`)
+    return companyIdCache[cacheKey]
+  }
+
+  // Try exact query first (more reliable than Lucene search for exact names)
+  const escapedName = companyName.replace(/'/g, "''")
+  const queryUrl = `${restUrl}query/ClientCorporation?BhRestToken=${bhRestToken}&where=name='${escapedName}'&fields=id,name&count=5`
+  const queryResponse = await bullhornFetch(queryUrl)
+  
+  if (queryResponse.ok) {
+    const queryData = await queryResponse.json()
+    if (queryData.data && queryData.data.length > 0) {
+      const id = queryData.data[0].id
+      console.log(`Found existing ClientCorporation (query): ${companyName} (ID: ${id})`)
+      companyIdCache[cacheKey] = id
+      return id
+    }
+  } else {
+    await queryResponse.text()
+  }
+
+  // Fallback: Lucene search (handles slight variations)
+  const searchUrl = `${restUrl}search/ClientCorporation?BhRestToken=${bhRestToken}&query=name:"${companyName}"&fields=id,name&count=5`
   const searchResponse = await bullhornFetch(searchUrl)
   
   if (searchResponse.ok) {
     const searchData = await searchResponse.json()
     if (searchData.data && searchData.data.length > 0) {
-      console.log(`Found existing ClientCorporation: ${companyName} (ID: ${searchData.data[0].id})`)
-      return searchData.data[0].id
+      // Find best match - prefer exact name match
+      const exactMatch = searchData.data.find((c: any) => 
+        c.name?.trim().toLowerCase() === cacheKey
+      )
+      const match = exactMatch || searchData.data[0]
+      console.log(`Found existing ClientCorporation (search): ${companyName} (ID: ${match.id}, matched: "${match.name}")`)
+      companyIdCache[cacheKey] = match.id
+      return match.id
     }
+  } else {
+    await searchResponse.text()
   }
 
   console.log(`Creating new ClientCorporation: ${companyName}`)
@@ -978,8 +1014,10 @@ async function findOrCreateClientCorporation(
   }
 
   const createData = await createResponse.json()
-  console.log(`Created ClientCorporation: ${companyName} (ID: ${createData.changedEntityId})`)
-  return createData.changedEntityId
+  const newId = createData.changedEntityId
+  console.log(`Created ClientCorporation: ${companyName} (ID: ${newId})`)
+  companyIdCache[cacheKey] = newId
+  return newId
 }
 
 async function parseLocation(location: string): Promise<{ city: string; state: string; countryName: string; countryCode: string }> {
