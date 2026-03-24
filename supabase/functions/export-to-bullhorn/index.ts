@@ -1809,9 +1809,9 @@ async function createDistributionList(
       console.log(`Distribution list progress: ${addedCount}/${i + 1} associated (${contactIds.length} total)`)
     }
 
-    // Small delay to avoid rate limiting (50ms per contact)
+    // Delay to avoid rate limiting (200ms per contact)
     if (i < contactIds.length - 1) {
-      await sleep(50)
+      await sleep(200)
     }
   }
 
@@ -1948,12 +1948,16 @@ Deno.serve(async (req) => {
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
     // Accept optional excludedEmails array for contacts user wants to skip
-    const { runId, listName: requestedListName, classifiedContacts, excludedEmails } = await req.json() as { 
+    const { runId, listName: requestedListName, classifiedContacts, excludedEmails, startIndex: reqStartIndex, chunkSize: reqChunkSize } = await req.json() as { 
       runId: string; 
       listName?: string;
       classifiedContacts?: ClassifiedContact[];
       excludedEmails?: string[];
+      startIndex?: number;
+      chunkSize?: number;
     }
+    const startIndex = reqStartIndex || 0
+    const CHUNK_SIZE = reqChunkSize || 150
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -2038,7 +2042,12 @@ Deno.serve(async (req) => {
     // We no longer auto-skip contacts here — the user decides.
     const contactsToExport = contacts
 
-    console.log(`Creating/updating ${contactsToExport.length} ClientContacts...`)
+    // Chunked processing: only process a subset per invocation
+    const endIndex = Math.min(startIndex + CHUNK_SIZE, contactsToExport.length)
+    const isFirstChunk = startIndex === 0
+    const isFinalChunk = endIndex >= contactsToExport.length
+
+    console.log(`Creating/updating contacts ${startIndex + 1}-${endIndex} of ${contactsToExport.length} (chunk ${Math.floor(startIndex / CHUNK_SIZE) + 1})...`)
     const contactIds: number[] = []
     const newContactIds: number[] = []
     const existingContactIds: number[] = []
@@ -2046,92 +2055,137 @@ Deno.serve(async (req) => {
     
     const companyCache: Record<string, number> = {}
 
-    // Process contacts in batches of 5 for better throughput
-    const BATCH_SIZE = 5
-    for (let i = 0; i < contactsToExport.length; i += BATCH_SIZE) {
-      const batch = contactsToExport.slice(i, i + BATCH_SIZE)
-      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(contactsToExport.length / BATCH_SIZE)} (contacts ${i + 1}-${Math.min(i + BATCH_SIZE, contactsToExport.length)})`)
-      
-      // Process batch in parallel
-      const batchResults = await Promise.allSettled(
-        batch.map(async (contact) => {
-          let clientCorporationId: number
-          const companyName = contact.company || 'Unknown Company'
-          
-          // Check cache first (synchronous)
-          if (companyCache[companyName]) {
-            clientCorporationId = companyCache[companyName]
-          } else {
-            clientCorporationId = await findOrCreateClientCorporation(
-              tokens.restUrl,
-              tokens.bhRestToken,
-              companyName
-            )
-            companyCache[companyName] = clientCorporationId
-          }
-          
-          // Use pre-classified skills if available (from AI review), otherwise generate
-          const skillsString = preClassifiedSkills.get(contact.email.toLowerCase()) 
-            || generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
-          
-          const { contactId, skillsString: generatedSkills, isExisting } = await findOrCreateClientContact(
-            tokens.restUrl,
-            tokens.bhRestToken,
-            contact,
-            clientCorporationId,
-            skillsString,
-            skillsFieldName
-          )
-          
-          // STEP 2: Associate skill entities with the contact for Skills tab + Count
-          const associatedCount = await associateSkillsWithContact(
-            tokens.restUrl,
-            tokens.bhRestToken,
-            contactId,
-            generatedSkills
-          )
-          
-          console.log(`${isExisting ? 'Reused existing' : 'Created new'} contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
-          return { contactId, isExisting }
-        })
-      )
-      
-      // Collect results
-      for (let j = 0; j < batchResults.length; j++) {
-        const result = batchResults[j]
-        if (result.status === 'fulfilled') {
-          contactIds.push(result.value.contactId)
-          if (result.value.isExisting) {
-            existingContactIds.push(result.value.contactId)
-          } else {
-            newContactIds.push(result.value.contactId)
-          }
-        } else {
-          const contact = batch[j]
-          console.error(`Error creating contact ${contact.email}:`, result.reason?.message || result.reason)
-          errors.push(`${contact.email}: ${result.reason?.message || 'Unknown error'}`)
-        }
+    // Process contacts sequentially to avoid Bullhorn rate limits (429)
+    for (let i = startIndex; i < endIndex; i++) {
+      const contact = contactsToExport[i]
+      if ((i - startIndex + 1) % 20 === 0 || i === startIndex) {
+        console.log(`Processing contact ${i + 1}/${contactsToExport.length}`)
       }
       
-      // Small delay between batches to avoid rate limiting
-      if (i + BATCH_SIZE < contacts.length) {
-        await sleep(100)
+      try {
+        let clientCorporationId: number
+        const companyName = contact.company || 'Unknown Company'
+        
+        // Check cache first (synchronous)
+        if (companyCache[companyName]) {
+          clientCorporationId = companyCache[companyName]
+        } else {
+          clientCorporationId = await findOrCreateClientCorporation(
+            tokens.restUrl,
+            tokens.bhRestToken,
+            companyName
+          )
+          companyCache[companyName] = clientCorporationId
+        }
+        
+        // Use pre-classified skills if available (from AI review), otherwise generate
+        const skillsString = preClassifiedSkills.get(contact.email.toLowerCase()) 
+          || generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
+        
+        const { contactId, skillsString: generatedSkills, isExisting } = await findOrCreateClientContact(
+          tokens.restUrl,
+          tokens.bhRestToken,
+          contact,
+          clientCorporationId,
+          skillsString,
+          skillsFieldName
+        )
+        
+        // STEP 2: Associate skill entities with the contact for Skills tab + Count
+        const associatedCount = await associateSkillsWithContact(
+          tokens.restUrl,
+          tokens.bhRestToken,
+          contactId,
+          generatedSkills
+        )
+        
+        console.log(`${isExisting ? 'Reused existing' : 'Created new'} contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
+        
+        contactIds.push(contactId)
+        if (isExisting) {
+          existingContactIds.push(contactId)
+        } else {
+          newContactIds.push(contactId)
+        }
+      } catch (err: any) {
+        console.error(`Error creating contact ${contact.email}:`, err?.message || err)
+        errors.push(`${contact.email}: ${err?.message || 'Unknown error'}`)
+      }
+      
+      // Delay between contacts to respect Bullhorn rate limits
+      if (i < endIndex - 1) {
+        await sleep(300)
       }
     }
     
-    console.log(`Export complete: ${contactIds.length}/${contactsToExport.length} contacts processed (${newContactIds.length} new, ${existingContactIds.length} existing)`)
+    console.log(`Chunk complete: ${contactIds.length} contacts processed (${newContactIds.length} new, ${existingContactIds.length} existing), errors: ${errors.length}`)
 
-    if (contactIds.length === 0) {
+    // If not the final chunk, return progress and next start index
+    if (!isFinalChunk) {
+      // Save partial progress: store processed contact IDs in bullhorn_errors as temporary storage
+      // We'll append to any existing partial data
+      const { data: currentRun } = await supabase
+        .from('enrichment_runs')
+        .select('bullhorn_errors')
+        .eq('id', runId)
+        .single()
+
+      const existingPartial = (currentRun?.bullhorn_errors as any) || {}
+      const allContactIds = [...(existingPartial.partialContactIds || []), ...contactIds]
+      const allErrors = [...(existingPartial.partialErrors || []), ...errors]
+
+      await supabase
+        .from('enrichment_runs')
+        .update({
+          bullhorn_list_name: listName,
+          bullhorn_errors: { 
+            partialContactIds: allContactIds, 
+            partialErrors: allErrors,
+            lastProcessedIndex: endIndex,
+            totalContacts: contactsToExport.length,
+          } as any,
+        })
+        .eq('id', runId)
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          complete: false,
+          nextStartIndex: endIndex,
+          totalContacts: contactsToExport.length,
+          processedThisChunk: contactIds.length,
+          processedSoFar: allContactIds.length,
+          errorsThisChunk: errors.length,
+          listName,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // FINAL CHUNK: Collect all contact IDs from previous chunks + this chunk
+    const { data: currentRun } = await supabase
+      .from('enrichment_runs')
+      .select('bullhorn_errors')
+      .eq('id', runId)
+      .single()
+
+    const existingPartial = (currentRun?.bullhorn_errors as any) || {}
+    const allContactIds = [...(existingPartial.partialContactIds || []), ...contactIds]
+    const allErrors = [...(existingPartial.partialErrors || []), ...errors]
+
+    console.log(`All chunks complete: ${allContactIds.length} total contacts processed`)
+
+    if (allContactIds.length === 0) {
       throw new Error('Failed to create any contacts in Bullhorn')
     }
 
-    // Create Distribution List with exported contacts
+    // Create Distribution List with ALL exported contacts
     console.log(`Creating distribution list: ${listName}`)
     const distributionListResult = await createDistributionList(
       tokens.restUrl,
       tokens.bhRestToken,
       listName,
-      contactIds
+      allContactIds
     )
     const listId = distributionListResult.listId
     console.log(
@@ -2139,11 +2193,11 @@ Deno.serve(async (req) => {
     )
 
     if (distributionListResult.membersFailed > 0) {
-      errors.push(
+      allErrors.push(
         `Distribution List partial add: ${distributionListResult.membersAdded}/${distributionListResult.membersRequested} members added`
       )
       for (const memberError of distributionListResult.memberErrors.slice(0, 20)) {
-        errors.push(memberError)
+        allErrors.push(memberError)
       }
     }
 
@@ -2155,16 +2209,14 @@ Deno.serve(async (req) => {
         bullhorn_list_name: listName,
         bullhorn_list_id: listId,
         bullhorn_exported_at: exportedAt,
-        bullhorn_errors: errors.length > 0 ? errors : null,
+        bullhorn_errors: allErrors.length > 0 ? allErrors : null,
       })
       .eq('id', runId)
 
-    // Save to local distribution_lists + distribution_list_contacts so the
-    // Distribution Lists page shows them.
+    // Save to local distribution_lists + distribution_list_contacts
     try {
       const createdBy = run.uploaded_by || 'system'
 
-      // Try to find existing list with same name first, then create if not found
       let localListId: string | null = null
       const { data: existingList } = await supabase
         .from('distribution_lists')
@@ -2174,7 +2226,6 @@ Deno.serve(async (req) => {
 
       if (existingList?.id) {
         localListId = existingList.id
-        // Clear old contacts before re-populating
         await supabase
           .from('distribution_list_contacts')
           .delete()
@@ -2190,9 +2241,7 @@ Deno.serve(async (req) => {
       }
 
       if (localListId) {
-        // Build rows for distribution_list_contacts
-        const contactRows = contactIds.map((bhId, idx) => {
-          // Find the matching contact from contactsToExport by index position
+        const contactRows = allContactIds.map((bhId, idx) => {
           const apolloContact = contactsToExport[idx] || {} as any
           return {
             list_id: localListId!,
@@ -2206,7 +2255,6 @@ Deno.serve(async (req) => {
           }
         })
 
-        // Insert in batches of 50
         for (let b = 0; b < contactRows.length; b += 50) {
           await supabase
             .from('distribution_list_contacts')
@@ -2221,16 +2269,17 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
+        complete: true,
         listName,
         listId,
-        contactsExported: contactIds.length,
+        contactsExported: allContactIds.length,
         contactsInDistributionList: distributionListResult.membersAdded,
         distributionListMembersRequested: distributionListResult.membersRequested,
         distributionListMembersFailed: distributionListResult.membersFailed,
         newContacts: newContactIds.length,
         existingContacts: existingContactIds.length,
         contactsSkipped: 0,
-        errors: errors.length > 0 ? errors : undefined,
+        errors: allErrors.length > 0 ? allErrors : undefined,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
