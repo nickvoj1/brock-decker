@@ -1948,12 +1948,16 @@ Deno.serve(async (req) => {
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
     // Accept optional excludedEmails array for contacts user wants to skip
-    const { runId, listName: requestedListName, classifiedContacts, excludedEmails } = await req.json() as { 
+    const { runId, listName: requestedListName, classifiedContacts, excludedEmails, startIndex: reqStartIndex, chunkSize: reqChunkSize } = await req.json() as { 
       runId: string; 
       listName?: string;
       classifiedContacts?: ClassifiedContact[];
       excludedEmails?: string[];
+      startIndex?: number;
+      chunkSize?: number;
     }
+    const startIndex = reqStartIndex || 0
+    const CHUNK_SIZE = reqChunkSize || 150
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
