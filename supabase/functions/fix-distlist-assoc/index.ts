@@ -12,7 +12,6 @@ Deno.serve(async (req) => {
   
   const { listId, contactIds } = await req.json()
   
-  // Get Bullhorn tokens
   const { data: tokenRow } = await supabase
     .from('bullhorn_tokens')
     .select('*')
@@ -27,48 +26,59 @@ Deno.serve(async (req) => {
   const restUrl = tokenRow.rest_url
   const bhRestToken = tokenRow.bh_rest_token
 
-  const results: any = { listId, totalContacts: contactIds.length, batches: [] }
-  
-  // Batch in groups of 50
-  const BATCH_SIZE = 50
   let addedCount = 0
-  
-  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
-    const batch = contactIds.slice(i, i + BATCH_SIZE)
-    const batchIds = batch.join(',')
-    
-    const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
-    const res = await fetch(assocUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    
-    const body = await res.text()
-    const batchResult = { batchIndex: i / BATCH_SIZE, count: batch.length, status: res.status, ok: res.ok }
-    results.batches.push(batchResult)
-    
-    if (res.ok) {
-      addedCount += batch.length
+  let failedCount = 0
+  const errors: string[] = []
+
+  // Individual PUT calls with minimal delay (50ms)
+  for (let i = 0; i < contactIds.length; i++) {
+    const cid = contactIds[i]
+    try {
+      const url = `${restUrl}entity/DistributionList/${listId}/members/${cid}?BhRestToken=${bhRestToken}`
+      const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' } })
+      if (res.ok) {
+        await res.text()
+        addedCount++
+      } else {
+        const errText = await res.text()
+        failedCount++
+        if (errors.length < 5) errors.push(`${cid}: ${res.status} ${errText.slice(0, 100)}`)
+      }
+    } catch (err: any) {
+      failedCount++
+      if (errors.length < 5) errors.push(`${cid}: ${err?.message}`)
     }
-    
-    console.log(`Batch ${i / BATCH_SIZE}: ${batch.length} contacts, status ${res.status}, ok: ${res.ok}`)
-    
-    // Small delay between batches
-    if (i + BATCH_SIZE < contactIds.length) {
-      await new Promise(r => setTimeout(r, 300))
+
+    if ((i + 1) % 50 === 0) {
+      console.log(`Progress: ${addedCount}/${i + 1} added, ${failedCount} failed`)
+    }
+
+    // Minimal delay to avoid rate limiting
+    if (i < contactIds.length - 1) {
+      await new Promise(r => setTimeout(r, 50))
     }
   }
 
-  results.addedCount = addedCount
+  console.log(`Done: ${addedCount}/${contactIds.length} added, ${failedCount} failed`)
 
-  // Verify final count
-  await new Promise(r => setTimeout(r, 1000))
-  const countUrl = `${restUrl}entity/DistributionList/${listId}/members?fields=id&count=1&BhRestToken=${bhRestToken}`
-  const countRes = await fetch(countUrl)
-  if (countRes.ok) {
-    const countData = await countRes.json()
-    results.verifiedMemberCount = countData?.count || 'unknown'
-  }
+  // Verify
+  await new Promise(r => setTimeout(r, 2000))
+  let verifiedCount = 0
+  try {
+    const countUrl = `${restUrl}search/ClientContact?query=distributionLists.id:${listId}&fields=id&count=1&BhRestToken=${bhRestToken}`
+    const countRes = await fetch(countUrl)
+    if (countRes.ok) {
+      const data = await countRes.json()
+      verifiedCount = data?.total || data?.count || 0
+    }
+  } catch {}
 
-  return new Response(JSON.stringify(results, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify({
+    listId,
+    totalContacts: contactIds.length,
+    addedCount,
+    failedCount,
+    verifiedCount,
+    sampleErrors: errors
+  }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 })
