@@ -2046,76 +2046,66 @@ Deno.serve(async (req) => {
     
     const companyCache: Record<string, number> = {}
 
-    // Process contacts in batches of 5 for better throughput
-    const BATCH_SIZE = 2
-    for (let i = 0; i < contactsToExport.length; i += BATCH_SIZE) {
-      const batch = contactsToExport.slice(i, i + BATCH_SIZE)
-      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(contactsToExport.length / BATCH_SIZE)} (contacts ${i + 1}-${Math.min(i + BATCH_SIZE, contactsToExport.length)})`)
-      
-      // Process batch in parallel
-      const batchResults = await Promise.allSettled(
-        batch.map(async (contact) => {
-          let clientCorporationId: number
-          const companyName = contact.company || 'Unknown Company'
-          
-          // Check cache first (synchronous)
-          if (companyCache[companyName]) {
-            clientCorporationId = companyCache[companyName]
-          } else {
-            clientCorporationId = await findOrCreateClientCorporation(
-              tokens.restUrl,
-              tokens.bhRestToken,
-              companyName
-            )
-            companyCache[companyName] = clientCorporationId
-          }
-          
-          // Use pre-classified skills if available (from AI review), otherwise generate
-          const skillsString = preClassifiedSkills.get(contact.email.toLowerCase()) 
-            || generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
-          
-          const { contactId, skillsString: generatedSkills, isExisting } = await findOrCreateClientContact(
-            tokens.restUrl,
-            tokens.bhRestToken,
-            contact,
-            clientCorporationId,
-            skillsString,
-            skillsFieldName
-          )
-          
-          // STEP 2: Associate skill entities with the contact for Skills tab + Count
-          const associatedCount = await associateSkillsWithContact(
-            tokens.restUrl,
-            tokens.bhRestToken,
-            contactId,
-            generatedSkills
-          )
-          
-          console.log(`${isExisting ? 'Reused existing' : 'Created new'} contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
-          return { contactId, isExisting }
-        })
-      )
-      
-      // Collect results
-      for (let j = 0; j < batchResults.length; j++) {
-        const result = batchResults[j]
-        if (result.status === 'fulfilled') {
-          contactIds.push(result.value.contactId)
-          if (result.value.isExisting) {
-            existingContactIds.push(result.value.contactId)
-          } else {
-            newContactIds.push(result.value.contactId)
-          }
-        } else {
-          const contact = batch[j]
-          console.error(`Error creating contact ${contact.email}:`, result.reason?.message || result.reason)
-          errors.push(`${contact.email}: ${result.reason?.message || 'Unknown error'}`)
-        }
+    // Process contacts sequentially to avoid Bullhorn rate limits (429)
+    for (let i = 0; i < contactsToExport.length; i++) {
+      const contact = contactsToExport[i]
+      if ((i + 1) % 20 === 0 || i === 0) {
+        console.log(`Processing contact ${i + 1}/${contactsToExport.length}`)
       }
       
-      // Small delay between batches to avoid rate limiting
-      if (i + BATCH_SIZE < contacts.length) {
-        await sleep(500)
+      try {
+        let clientCorporationId: number
+        const companyName = contact.company || 'Unknown Company'
+        
+        // Check cache first (synchronous)
+        if (companyCache[companyName]) {
+          clientCorporationId = companyCache[companyName]
+        } else {
+          clientCorporationId = await findOrCreateClientCorporation(
+            tokens.restUrl,
+            tokens.bhRestToken,
+            companyName
+          )
+          companyCache[companyName] = clientCorporationId
+        }
+        
+        // Use pre-classified skills if available (from AI review), otherwise generate
+        const skillsString = preClassifiedSkills.get(contact.email.toLowerCase()) 
+          || generateSkillsString(contact, searchPreferences, learnedPatternsCache || undefined)
+        
+        const { contactId, skillsString: generatedSkills, isExisting } = await findOrCreateClientContact(
+          tokens.restUrl,
+          tokens.bhRestToken,
+          contact,
+          clientCorporationId,
+          skillsString,
+          skillsFieldName
+        )
+        
+        // STEP 2: Associate skill entities with the contact for Skills tab + Count
+        const associatedCount = await associateSkillsWithContact(
+          tokens.restUrl,
+          tokens.bhRestToken,
+          contactId,
+          generatedSkills
+        )
+        
+        console.log(`${isExisting ? 'Reused existing' : 'Created new'} contact ${contact.name} (ID: ${contactId}, associated ${associatedCount} skills)`)
+        
+        contactIds.push(contactId)
+        if (isExisting) {
+          existingContactIds.push(contactId)
+        } else {
+          newContactIds.push(contactId)
+        }
+      } catch (err: any) {
+        console.error(`Error creating contact ${contact.email}:`, err?.message || err)
+        errors.push(`${contact.email}: ${err?.message || 'Unknown error'}`)
+      }
+      
+      // Delay between contacts to respect Bullhorn rate limits
+      if (i < contactsToExport.length - 1) {
+        await sleep(300)
       }
     }
     
