@@ -10,7 +10,7 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   
-  const { listId, contactIds } = await req.json()
+  const { listId, contactIds, startAt = 0 } = await req.json()
   
   const { data: tokenRow } = await supabase
     .from('bullhorn_tokens')
@@ -29,39 +29,33 @@ Deno.serve(async (req) => {
   let addedCount = 0
   let failedCount = 0
   const errors: string[] = []
-
-  // Individual PUT calls with minimal delay (50ms)
-  for (let i = 0; i < contactIds.length; i++) {
-    const cid = contactIds[i]
-    try {
+  const idsToProcess = contactIds.slice(startAt)
+  
+  // Process 5 concurrent requests at a time
+  const CONCURRENCY = 5
+  for (let i = 0; i < idsToProcess.length; i += CONCURRENCY) {
+    const chunk = idsToProcess.slice(i, i + CONCURRENCY)
+    
+    const results = await Promise.allSettled(chunk.map(async (cid: number) => {
       const url = `${restUrl}entity/DistributionList/${listId}/members/${cid}?BhRestToken=${bhRestToken}`
       const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' } })
-      if (res.ok) {
-        await res.text()
-        addedCount++
-      } else {
-        const errText = await res.text()
-        failedCount++
-        if (errors.length < 5) errors.push(`${cid}: ${res.status} ${errText.slice(0, 100)}`)
-      }
-    } catch (err: any) {
-      failedCount++
-      if (errors.length < 5) errors.push(`${cid}: ${err?.message}`)
+      const body = await res.text()
+      return { cid, ok: res.ok, status: res.status, body: body.slice(0, 100) }
+    }))
+
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value.ok) addedCount++
+      else failedCount++
     }
 
-    if ((i + 1) % 50 === 0) {
-      console.log(`Progress: ${addedCount}/${i + 1} added, ${failedCount} failed`)
-    }
-
-    // Minimal delay to avoid rate limiting
-    if (i < contactIds.length - 1) {
-      await new Promise(r => setTimeout(r, 50))
+    if ((i + CONCURRENCY) % 50 < CONCURRENCY) {
+      console.log(`Progress: ${startAt + i + chunk.length}/${contactIds.length} processed, ${addedCount} added, ${failedCount} failed`)
     }
   }
 
-  console.log(`Done: ${addedCount}/${contactIds.length} added, ${failedCount} failed`)
+  console.log(`Done: ${addedCount}/${idsToProcess.length} added, ${failedCount} failed (started at ${startAt})`)
 
-  // Verify
+  // Verify via search
   await new Promise(r => setTimeout(r, 2000))
   let verifiedCount = 0
   try {
@@ -76,9 +70,11 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({
     listId,
     totalContacts: contactIds.length,
+    processedFrom: startAt,
+    processedCount: idsToProcess.length,
     addedCount,
     failedCount,
     verifiedCount,
-    sampleErrors: errors
+    sampleErrors: errors.slice(0, 5)
   }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 })
