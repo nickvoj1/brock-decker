@@ -1777,17 +1777,18 @@ async function createDistributionList(
     }
   }
 
-  // Strategy: Use PUT /entity/DistributionList/{id}/members/{singleId} for each contact.
-  // POST { members: { add: [...] } } returns changeType:UPDATE which only updates search index
-  // but doesn't create proper associations visible in the Bullhorn UI.
-  // PUT to /members/{id} returns changeType:ASSOCIATE and properly links contacts to the list.
-  console.log(`Adding ${contactIds.length} contacts to distribution list via individual PUT ASSOCIATE calls...`)
+  // Strategy: Batch PUT /entity/DistributionList/{id}/members/{id1,id2,...} with multiple IDs per call.
+  // Bullhorn supports comma-separated IDs in the members association endpoint.
+  // Using batches of 50 to balance speed vs. URL length limits.
+  console.log(`Adding ${contactIds.length} contacts to distribution list via batched PUT ASSOCIATE calls...`)
 
   let addedCount = 0
-  for (let i = 0; i < contactIds.length; i++) {
-    const cid = contactIds[i]
+  const BATCH_SIZE = 50
+  for (let i = 0; i < contactIds.length; i += BATCH_SIZE) {
+    const batch = contactIds.slice(i, i + BATCH_SIZE)
+    const batchIds = batch.join(',')
     try {
-      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${cid}?BhRestToken=${bhRestToken}`
+      const assocUrl = `${restUrl}entity/DistributionList/${listId}/members/${batchIds}?BhRestToken=${bhRestToken}`
       const assocResponse = await bullhornFetch(assocUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1795,23 +1796,31 @@ async function createDistributionList(
 
       if (!assocResponse.ok) {
         const errorText = await assocResponse.text()
-        memberErrors.push(`Failed to associate contact ${cid}: ${errorText}`)
+        memberErrors.push(`Failed to associate batch starting at ${i}: ${errorText}`)
+        // Fallback: try individual adds for this batch
+        for (const cid of batch) {
+          try {
+            const singleUrl = `${restUrl}entity/DistributionList/${listId}/members/${cid}?BhRestToken=${bhRestToken}`
+            const singleRes = await bullhornFetch(singleUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' } })
+            if (singleRes.ok) { await singleRes.text(); addedCount++ }
+            else { await singleRes.text() }
+          } catch {}
+          await sleep(100)
+        }
       } else {
         await assocResponse.text()
-        addedCount++
+        addedCount += batch.length
       }
     } catch (err: any) {
-      memberErrors.push(`Error associating contact ${cid}: ${err?.message || 'Unknown error'}`)
+      memberErrors.push(`Error associating batch at ${i}: ${err?.message || 'Unknown error'}`)
     }
 
-    // Log progress every 20 contacts
-    if ((i + 1) % 20 === 0 || i === contactIds.length - 1) {
-      console.log(`Distribution list progress: ${addedCount}/${i + 1} associated (${contactIds.length} total)`)
-    }
+    // Log progress every batch
+    console.log(`Distribution list progress: ${addedCount}/${Math.min(i + BATCH_SIZE, contactIds.length)} associated (${contactIds.length} total)`)
 
-    // Delay to avoid rate limiting (200ms per contact)
-    if (i < contactIds.length - 1) {
-      await sleep(200)
+    // Small delay between batches to avoid rate limiting
+    if (i + BATCH_SIZE < contactIds.length) {
+      await sleep(300)
     }
   }
 
