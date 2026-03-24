@@ -2115,7 +2115,7 @@ Deno.serve(async (req) => {
       
       // Small delay between batches to avoid rate limiting
       if (i + BATCH_SIZE < contacts.length) {
-        await sleep(100)
+        await sleep(500)
       }
     }
     
