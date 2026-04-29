@@ -224,6 +224,7 @@ export function CVUploadZone({
           phone: redactionHints?.phone || sourceBase.phone || "",
           anonymizeName: nameMode === "anonymous",
           replacementName: "CANDIDATE",
+          displayName: source.name || sourceBase.name || "",
         });
         return;
       }

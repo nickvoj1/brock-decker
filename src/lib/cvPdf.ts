@@ -51,6 +51,8 @@ export type CVPersonalHints = {
   phone?: string | null;
   anonymizeName?: boolean;
   replacementName?: string | null;
+  /** Name to draw on the PDF after redaction (the candidate's real/edited name). */
+  displayName?: string | null;
 };
 
 GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
@@ -1768,13 +1770,17 @@ export async function downloadBrandedSourcePdf(
 ): Promise<void> {
   const originalBytes = new Uint8Array(await sourceFile.arrayBuffer());
   const anonymizedReplacement = safeText(hints?.replacementName);
+  const realDisplayName = safeText(hints?.displayName);
   const shouldDrawReplacementName = Boolean(hints?.anonymizeName && anonymizedReplacement);
-  const namePlacement = shouldDrawReplacementName
-    ? await detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
-    : null;
+  // Always try to detect the original name's location so we can re-draw the
+  // (possibly edited) candidate name after redaction wipes the original.
+  const namePlacement =
+    shouldDrawReplacementName || realDisplayName
+      ? await detectNamePlacementFromPdf(new Uint8Array(originalBytes), hints)
+      : null;
   const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
   let hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
-  if (hints?.anonymizeName) {
+  if (hints?.anonymizeName || (realDisplayName && hints?.name && realDisplayName.toLowerCase() !== safeText(hints.name).toLowerCase())) {
     hardDeletedBytes = await stripResidualNameFromPdf(hardDeletedBytes, hints?.name);
   }
   hardDeletedBytes = await runResidualCleanupPasses(hardDeletedBytes, hints);
@@ -1859,8 +1865,13 @@ export async function downloadBrandedSourcePdf(
       }
     }
 
-    if (shouldDrawReplacementName && pageIndex === 0) {
-      const replacement = anonymizedReplacement;
+    const nameToDraw = shouldDrawReplacementName
+      ? anonymizedReplacement
+      : pageIndex === 0
+        ? realDisplayName
+        : "";
+    if (nameToDraw && pageIndex === 0) {
+      const replacement = nameToDraw;
       const hasPlacement =
         Boolean(namePlacement) &&
         Number.isFinite(namePlacement?.yTop) &&
