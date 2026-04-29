@@ -1561,6 +1561,56 @@ Deno.serve(async (req) => {
       })
     }
 
+    // ============ YIELD-WEIGHTED COMBO ORDERING (Tier 1 - B) ============
+    // Sort combinations by historical yield so productive combos run first.
+    // This way, if the time/credit budget cuts the run short, we've already
+    // captured the highest-value combos. Falls back gracefully on first run.
+    const yieldRegionKey = (preferences[0]?.locations?.[0] || '').toString().trim().toLowerCase()
+    if (!targetCompany && searchCombinations.length > 1) {
+      try {
+        const industriesForYield = Array.from(
+          new Set(searchCombinations.map(c => (c.industry || '').toLowerCase()).filter(Boolean))
+        )
+        if (industriesForYield.length > 0) {
+          const { data: yieldRows } = await supabase
+            .from('apollo_combo_yield')
+            // deno-lint-ignore no-explicit-any
+            .select('industry, sector, region, contacts_added, combos_run' as any)
+            .in('industry', industriesForYield)
+          // deno-lint-ignore no-explicit-any
+          const yieldMap = new Map<string, number>()
+          // deno-lint-ignore no-explicit-any
+          ;(yieldRows || []).forEach((r: any) => {
+            const key = `${(r.industry || '').toLowerCase()}|${(r.sector || '').toLowerCase()}|${(r.region || '').toLowerCase()}`
+            const runs = Math.max(1, Number(r.combos_run) || 1)
+            const avg = (Number(r.contacts_added) || 0) / runs
+            yieldMap.set(key, avg)
+          })
+          const scoreFor = (c: SearchCombo) => {
+            const i = (c.industry || '').toLowerCase()
+            const s = (c.sector || '').toLowerCase()
+            // Try exact region match, then any region for same industry+sector
+            const exact = yieldMap.get(`${i}|${s}|${yieldRegionKey}`)
+            if (exact !== undefined) return exact
+            const noRegion = yieldMap.get(`${i}|${s}|`)
+            if (noRegion !== undefined) return noRegion
+            // Fall back to industry-only average
+            const industryOnly = yieldMap.get(`${i}||`)
+            return industryOnly ?? 0
+          }
+          searchCombinations.sort((a, b) => scoreFor(b) - scoreFor(a))
+          console.log('Combos reordered by historical yield (top 5):',
+            searchCombinations.slice(0, 5).map(c => `${c.label}(~${scoreFor(c).toFixed(1)})`).join(', '))
+        }
+      } catch (yieldErr) {
+        console.warn('Yield-weighted ordering skipped:', (yieldErr as Error).message)
+      }
+    }
+
+    // Track per-combo yield to persist after the loop
+    // deno-lint-ignore no-explicit-any
+    const comboYieldStats: Array<{ industry: string; sector: string | null; pages: number; added: number }> = []
+
     console.log(`Running ${searchCombinations.length} search combinations for maximum coverage:`, 
       searchCombinations.map(c => c.label))
 
@@ -1631,7 +1681,11 @@ Deno.serve(async (req) => {
           console.log(`Skipping ${combo.label} - industry quota reached (${currentCount}/${quota})`)
           continue
         }
-      }
+
+      // Track per-combo yield (Tier 1 - B & C)
+      const comboStartCount = allContacts.length
+      let pagesScannedInCombo = 0
+      let comboBroadenedAdaptively = false
 
       try {
         const buildComboParams = (includeRoleFilters: boolean): URLSearchParams => {
@@ -2156,10 +2210,43 @@ Deno.serve(async (req) => {
           }
           
           currentPage++
-          
+          pagesScannedInCombo++
+
+          // ============ ADAPTIVE EXPANSION (Tier 1 - C) ============
+          // After 2 pages, if this combo is severely under-yielding, broaden the keyword
+          // query for remaining pages so we don't waste pagination budget on a dead niche.
+          if (
+            !targetCompany &&
+            !comboBroadenedAdaptively &&
+            currentPage === 3 &&
+            combo.sector &&
+            combo.industry &&
+            (allContacts.length - comboStartCount) < 5 &&
+            currentPage <= maxPages
+          ) {
+            const industryOnlyKeyword = buildApolloKeywordQuery(combo.industry, null)
+            queryParams.delete('q_keywords')
+            if (industryOnlyKeyword) {
+              queryParams.append('q_keywords', industryOnlyKeyword)
+            }
+            comboBroadenedAdaptively = true
+            console.log(`[Adaptive expansion] ${combo.label}: low yield (${allContacts.length - comboStartCount}) after 2 pages — dropping sector keyword for remaining pages`)
+          }
+
           // Keep a short pause between pages to reduce burst rate.
           await new Promise(resolve => setTimeout(resolve, 50))
         } // end while loop
+
+        // Record per-combo yield for learning (Tier 1 - B)
+        const addedThisCombo = allContacts.length - comboStartCount
+        if (combo.industry) {
+          comboYieldStats.push({
+            industry: combo.industry,
+            sector: combo.sector,
+            pages: pagesScannedInCombo,
+            added: addedThisCombo,
+          })
+        }
 
         processedCount++
         
@@ -2177,6 +2264,71 @@ Deno.serve(async (req) => {
       }
     }
     } // end companiesToSearch loop
+
+    // ============ PERSIST COMBO YIELD (Tier 1 - B) ============
+    // Aggregate per-combo stats and upsert into apollo_combo_yield so future runs
+    // can prioritize the highest-yielding industry/sector/region combinations first.
+    if (!targetCompany && comboYieldStats.length > 0) {
+      try {
+        // Aggregate by (industry|sector|region) — sum across duplicates within this run
+        const aggregated = new Map<string, { industry: string; sector: string | null; region: string; added: number; pages: number }>()
+        for (const s of comboYieldStats) {
+          const key = `${s.industry.toLowerCase()}|${(s.sector || '').toLowerCase()}|${yieldRegionKey}`
+          const existing = aggregated.get(key)
+          if (existing) {
+            existing.added += s.added
+            existing.pages += s.pages
+          } else {
+            aggregated.set(key, {
+              industry: s.industry,
+              sector: s.sector,
+              region: yieldRegionKey,
+              added: s.added,
+              pages: s.pages,
+            })
+          }
+        }
+        for (const [, agg] of aggregated) {
+          const { data: existing } = await supabase
+            .from('apollo_combo_yield')
+            // deno-lint-ignore no-explicit-any
+            .select('id, contacts_added, combos_run, pages_scanned' as any)
+            .ilike('industry', agg.industry)
+            .ilike('sector', agg.sector || '')
+            .ilike('region', agg.region || '')
+            .maybeSingle()
+          // deno-lint-ignore no-explicit-any
+          const ex = existing as any
+          if (ex?.id) {
+            await supabase
+              .from('apollo_combo_yield')
+              // deno-lint-ignore no-explicit-any
+              .update({
+                contacts_added: (Number(ex.contacts_added) || 0) + agg.added,
+                combos_run: (Number(ex.combos_run) || 0) + 1,
+                pages_scanned: (Number(ex.pages_scanned) || 0) + agg.pages,
+                last_run_at: new Date().toISOString(),
+              } as any)
+              .eq('id', ex.id)
+          } else {
+            await supabase
+              .from('apollo_combo_yield')
+              // deno-lint-ignore no-explicit-any
+              .insert({
+                industry: agg.industry,
+                sector: agg.sector,
+                region: agg.region,
+                contacts_added: agg.added,
+                combos_run: 1,
+                pages_scanned: agg.pages,
+              } as any)
+          }
+        }
+        console.log(`[Yield-learning] Persisted ${aggregated.size} combo yield records for future ranking`)
+      } catch (persistErr) {
+        console.warn('Failed to persist combo yield stats:', (persistErr as Error).message)
+      }
+    }
 
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
