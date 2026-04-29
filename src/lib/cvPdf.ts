@@ -1865,10 +1865,13 @@ export async function downloadBrandedSourcePdf(
       }
     }
 
+    const isPlaceholderName = (n: string) =>
+      /^(could not parse|unknown|not specified|candidate)$/i.test(n.trim());
+    const safeRealName = realDisplayName && !isPlaceholderName(realDisplayName) ? realDisplayName : "";
     const nameToDraw = shouldDrawReplacementName
       ? anonymizedReplacement
       : pageIndex === 0
-        ? realDisplayName
+        ? safeRealName
         : "";
     if (nameToDraw && pageIndex === 0) {
       const replacement = nameToDraw;
