@@ -1265,7 +1265,7 @@ async function detectResidualPersonalZones(pdfBytes: Uint8Array, hints?: CVPerso
   const sensitiveTokens = buildSensitiveHintTokens(hints);
   const nameOnlyTokens = buildSensitiveHintTokens({ name: hints?.name });
   const pageHeight = boxes[0].pageHeight;
-  const topLimit = pageHeight * (hints?.anonymizeName ? 0.5 : 0.44);
+  const topLimit = pageHeight * (hints?.anonymizeName ? 0.5 : 0.5);
   const rects: Rect[] = [];
 
   for (const box of boxes) {
