@@ -1687,7 +1687,7 @@ Deno.serve(async (req) => {
       let pagesScannedInCombo = 0
       let comboBroadenedAdaptively = false
 
-
+      try {
         const buildComboParams = (includeRoleFilters: boolean): URLSearchParams => {
           const params = new URLSearchParams()
 
