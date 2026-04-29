@@ -47,6 +47,9 @@ interface CVUploadZoneProps {
   headerImageUrl?: string | null;
   watermarkImageUrl?: string | null;
   headerText?: string | null;
+  /** Original PII captured from the parsed CV BEFORE any client-side sanitization.
+   *  Used by the PDF redactor to precisely mask name/email/phone in the source PDF. */
+  redactionHints?: { name?: string; email?: string; phone?: string };
 }
 
 const ACCEPTED_TYPES = [
@@ -69,6 +72,7 @@ export function CVUploadZone({
   headerImageUrl,
   watermarkImageUrl,
   headerText,
+  redactionHints,
 }: CVUploadZoneProps) {
   const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
