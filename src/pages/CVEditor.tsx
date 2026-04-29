@@ -161,6 +161,7 @@ export default function CVEditor() {
               headerImageUrl={branding.headerImageUrl}
               watermarkImageUrl={branding.watermarkImageUrl}
               headerText={branding.headerText}
+              redactionHints={originalPII}
             />
           </CardContent>
         </Card>
