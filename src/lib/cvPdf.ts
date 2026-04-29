@@ -192,9 +192,15 @@ function looksLikePersonalInfo(text: string): boolean {
   const t = text.toLowerCase();
   const compact = text.replace(/\s+/g, " ").trim();
   const hasEmail = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(compact);
-  const hasWeb = /\b(linkedin|github|website|www\.|gmail|outlook|yahoo)\b|\. ?com\b|\. ?co\. ?uk\b/.test(t);
-  const hasAddress = /\b(street|strasse|straße|road|avenue|ave|square|blvd|boulevard|postal|postcode|zip)\b/.test(t);
+  const hasWeb = /\b(linkedin|github|website|www\.|gmail|outlook|yahoo|hotmail|icloud|protonmail)\b|\. ?com\b|\. ?co\. ?uk\b|\. ?io\b|\. ?net\b|\. ?org\b|\. ?dev\b/.test(t);
+  const hasAddress = /\b(street|strasse|straße|road|avenue|ave\.|square|blvd|boulevard|postal|postcode|zip|lane|drive|court|crescent|terrace|plaza|gasse|allee|weg|laan|straat)\b/.test(t);
   const hasPostalAddress = /\b\d{4,6}\b/.test(compact) && /,/.test(compact) && /[a-z]/i.test(compact);
+  // UK postcode (e.g., WC1B 4HP, SW1A 1AA)
+  const hasUkPostcode = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(compact);
+  // Bare domain line: "everetmarsh.com" or "name.co.uk"
+  const isBareDomain = /^[a-z0-9-]+\.[a-z]{2,}(\.[a-z]{2,})?$/i.test(compact);
+  // "Eligible to work in" / nationality / visa lines often appear in header block too
+  const hasVisaWord = /\b(eligible to work|work permit|visa|nationality|citizen of|right to work)\b/i.test(t);
 
   const phoneChunkRegex = /(\+?\d[\d\s().-]{6,}\d)/g;
   const phoneChunks = [...compact.matchAll(phoneChunkRegex)].map((m) => m[1]);
@@ -213,7 +219,10 @@ function looksLikePersonalInfo(text: string): boolean {
     hasPhone ||
     hasWeb ||
     hasAddress ||
-    hasPostalAddress
+    hasPostalAddress ||
+    hasUkPostcode ||
+    isBareDomain ||
+    hasVisaWord
   );
 }
 
