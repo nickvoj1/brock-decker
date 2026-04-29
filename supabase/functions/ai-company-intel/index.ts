@@ -89,7 +89,7 @@ Be specific and actionable. Focus on information useful for executive search/rec
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5.2", // Most advanced model for comprehensive analysis
+        model: "openai/gpt-5", // Most advanced model for comprehensive analysis
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },

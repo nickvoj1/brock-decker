@@ -123,7 +123,7 @@ Return a JSON array of objects. If no valid results found, return [].`
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'google/gemini-3-flash-preview',
+      model: 'google/gemini-3.1-pro-preview',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Region context: ${region.toUpperCase()}\n\nSearch results:\n${inputText}` },

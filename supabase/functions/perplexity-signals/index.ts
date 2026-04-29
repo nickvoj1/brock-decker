@@ -29,7 +29,7 @@ async function queryPerplexity(
 
   // deno-lint-ignore no-explicit-any
   const body: AnyRecord = {
-    model: "sonar-pro",
+    model: "sonar-reasoning-pro",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: query },

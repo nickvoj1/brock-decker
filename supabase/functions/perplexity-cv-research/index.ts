@@ -97,7 +97,7 @@ Research each company in the work history. Focus on the European and global fina
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "sonar-pro",
+        model: "sonar-reasoning-pro",
         messages: [
           {
             role: "system",

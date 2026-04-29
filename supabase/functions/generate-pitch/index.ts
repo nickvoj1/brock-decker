@@ -115,7 +115,7 @@ BODY:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5.2", // Most advanced model for compelling, nuanced pitches
+        model: "openai/gpt-5", // Most advanced model for compelling, nuanced pitches
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
