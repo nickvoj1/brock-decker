@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2, Eye, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle, X, Loader2, Eye, ChevronDown, ChevronUp, Download, Plus, Trash2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CVPreviewModal } from "./CVPreviewModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { downloadBrandedSourcePdf, downloadCandidatePdf } from "@/lib/cvPdf";
 import { useToast } from "@/hooks/use-toast";
 
