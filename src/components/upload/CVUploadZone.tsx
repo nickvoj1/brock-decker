@@ -216,10 +216,12 @@ export function CVUploadZone({
       const outName = `${(sourceBase.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
       const branding = { watermarkImageUrl, headerImageUrl, headerText };
       if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
+        // Use the original PII captured at parse-time (before client sanitization)
+        // so the redactor can target the real name/email/phone strings in the PDF.
         await downloadBrandedSourcePdf(originalFile, outName, branding, {
-          name: sourceBase.name || "",
-          email: sourceBase.email || "",
-          phone: sourceBase.phone || "",
+          name: redactionHints?.name || sourceBase.name || "",
+          email: redactionHints?.email || sourceBase.email || "",
+          phone: redactionHints?.phone || sourceBase.phone || "",
           anonymizeName: nameMode === "anonymous",
           replacementName: "CANDIDATE",
         });
