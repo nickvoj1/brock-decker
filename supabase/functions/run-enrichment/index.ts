@@ -1681,9 +1681,13 @@ Deno.serve(async (req) => {
           console.log(`Skipping ${combo.label} - industry quota reached (${currentCount}/${quota})`)
           continue
         }
-      }
 
-      try {
+      // Track per-combo yield (Tier 1 - B & C)
+      const comboStartCount = allContacts.length
+      let pagesScannedInCombo = 0
+      let comboBroadenedAdaptively = false
+
+
         const buildComboParams = (includeRoleFilters: boolean): URLSearchParams => {
           const params = new URLSearchParams()
 
