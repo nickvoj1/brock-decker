@@ -1259,31 +1259,33 @@ Deno.serve(async (req) => {
       : 0
     const searchTargetContacts = targetCompany ? targetCompanyGoalContacts : maxContacts
     const searchStartedAt = Date.now()
+    // Quality-preserving caps: per-company is bounded so we don't over-index on one org;
+    // pages-per-combo widened so default runs can actually surface 100 quality contacts.
     const dynamicMaxPerCompany = targetCompany
       ? (isMultiCompanySearch ? 10 : 50)
       : (
           searchTargetContacts >= 300
-            ? 10
+            ? 12
             : searchTargetContacts >= 200
-              ? 8
+              ? 10
               : searchTargetContacts >= 120
-                ? 6
-                : baseMaxPerCompany
+                ? 7
+                : 5 // was 4 — small bump improves yield while still capping per-company
         )
     const dynamicMaxPagesPerCombo = targetCompany
       ? (isMultiCompanySearch ? 1 : (isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
       : (
           searchTargetContacts >= 300
-            ? 8
+            ? 10
             : searchTargetContacts >= 200
-              ? 6
+              ? 7
               : searchTargetContacts >= 120
-                ? 4
-                : 2
+                ? 5
+                : 4 // was 2 — default 100-contact searches now scan up to 4 pages per combo
         )
     const nonTargetBudgetMs = Math.min(
-      6 * 60 * 1000,
-      Math.max(60 * 1000, 45 * 1000 + (searchTargetContacts * 750))
+      8 * 60 * 1000,
+      Math.max(75 * 1000, 60 * 1000 + (searchTargetContacts * 900))
     )
     const SEARCH_BUDGET_MS = targetCompany
       ? (isMultiCompanySearch
@@ -1774,6 +1776,35 @@ Deno.serve(async (req) => {
                 }
               } catch (retryError) {
                 console.error('Apollo retry exception:', retryError)
+              }
+            }
+
+            // Broadening fallback: still 0 results on page 1 → drop ALL keywords and rely on
+            // person_titles + locations only. Quality is still preserved by downstream filters
+            // (law-firm/recruiter/employer exclusion, dedupe, used-contacts window).
+            if (!targetCompany && people.length === 0 && currentPage === 1) {
+              try {
+                console.log('Still 0 results — broadening: dropping all keyword filters...')
+                const broadParams = new URLSearchParams(pageParams)
+                broadParams.delete('q_keywords')
+                const broadUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${broadParams.toString()}`
+                const broadResponse = await fetch(broadUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-api-key': apolloApiKey },
+                })
+                if (broadResponse.ok) {
+                  const broadData = await broadResponse.json()
+                  people = broadData.people || []
+                  console.log('Apollo people returned (broad fallback):', people.length)
+                } else {
+                  const errorText = await broadResponse.text()
+                  if (!apolloApiErrorMessage) {
+                    apolloApiErrorMessage = formatApolloApiError(broadResponse.status, errorText)
+                  }
+                  console.error('Apollo broad fallback error:', broadResponse.status, errorText.substring(0, 200))
+                }
+              } catch (broadError) {
+                console.error('Apollo broad fallback exception:', broadError)
               }
             }
             
