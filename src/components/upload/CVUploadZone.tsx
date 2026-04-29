@@ -77,16 +77,87 @@ export function CVUploadZone({
   const [expandedWorkHistory, setExpandedWorkHistory] = useState(false);
   const [editorDraft, setEditorDraft] = useState<ParsedCandidate | null>(null);
   const [nameMode, setNameMode] = useState<"real" | "anonymous">("real");
+  const [skillInput, setSkillInput] = useState("");
 
   useEffect(() => {
     setEditorDraft(parsedData);
     setNameMode("real");
+    setSkillInput("");
   }, [parsedData]);
 
   const withSelectedName = (candidate: ParsedCandidate | null): ParsedCandidate | null => {
     if (!candidate) return null;
     if (nameMode === "anonymous") return { ...candidate, name: "CANDIDATE" };
     return candidate;
+  };
+
+  const updateDraft = (patch: Partial<ParsedCandidate>) => {
+    setEditorDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
+  const updateWork = (idx: number, patch: Partial<WorkExperience>) => {
+    setEditorDraft((prev) => {
+      if (!prev) return prev;
+      const next = [...prev.work_history];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, work_history: next };
+    });
+  };
+  const addWork = () =>
+    setEditorDraft((prev) =>
+      prev
+        ? { ...prev, work_history: [...prev.work_history, { company: "", title: "", duration: "" }] }
+        : prev,
+    );
+  const removeWork = (idx: number) =>
+    setEditorDraft((prev) =>
+      prev ? { ...prev, work_history: prev.work_history.filter((_, i) => i !== idx) } : prev,
+    );
+
+  const updateEdu = (idx: number, patch: Partial<Education>) => {
+    setEditorDraft((prev) => {
+      if (!prev) return prev;
+      const next = [...prev.education];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, education: next };
+    });
+  };
+  const addEdu = () =>
+    setEditorDraft((prev) =>
+      prev
+        ? { ...prev, education: [...prev.education, { institution: "", degree: "", year: "" }] }
+        : prev,
+    );
+  const removeEdu = (idx: number) =>
+    setEditorDraft((prev) =>
+      prev ? { ...prev, education: prev.education.filter((_, i) => i !== idx) } : prev,
+    );
+
+  const addSkill = () => {
+    const value = skillInput.trim();
+    if (!value) return;
+    setEditorDraft((prev) => {
+      if (!prev) return prev;
+      if (prev.skills.includes(value)) return prev;
+      return { ...prev, skills: [...prev.skills, value] };
+    });
+    setSkillInput("");
+  };
+  const removeSkill = (skill: string) =>
+    setEditorDraft((prev) =>
+      prev ? { ...prev, skills: prev.skills.filter((s) => s !== skill) } : prev,
+    );
+
+  const resetDraft = () => {
+    setEditorDraft(parsedData);
+    setNameMode("real");
+    setSkillInput("");
+  };
+
+  const saveDraft = () => {
+    if (editorDraft && onParsed) onParsed(editorDraft);
+    toast({ title: "CV updated", description: "Edits saved for this session." });
+    setShowEditor(false);
   };
 
   const isValidFile = (file: File): boolean => {
