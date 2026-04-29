@@ -462,7 +462,7 @@ Return JSON only:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-3.1-pro-preview",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: content.substring(0, 2000) }, // Limit content length
@@ -538,7 +538,7 @@ Return JSON only:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-3.1-pro-preview",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Company: ${company}\n\nContent:\n${content.substring(0, 1500)}` },

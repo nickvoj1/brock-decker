@@ -149,31 +149,36 @@ async function parseWithAI(base64Data: string, mimeType: string, apiKey: string,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'google/gemini-2.5-flash',
+      model: 'google/gemini-3.1-pro-preview',
       messages: [
         {
           role: 'user',
           content: [
             {
               type: 'text',
-              text: `You are a CV/resume parser. Analyze this CV document and extract the candidate's information.
+              text: `You are a precise CV/resume parser. Read the ENTIRE document carefully and extract every detail.
 
-IMPORTANT: You MUST use the extract_candidate_info function to return the data.
-IMPORTANT: Extract the candidate name only from CV document text, never from filename or metadata.
-IMPORTANT: If the CV name is all uppercase, return it in natural title case.
+CRITICAL RULES:
+1. You MUST call the extract_candidate_info function. Do not respond with prose.
+2. Extract the candidate name ONLY from the CV body text — never from filename or metadata.
+3. If the name is ALL CAPS, return it in natural Title Case.
+4. Read EVERY page. Do not stop at the first job — capture the COMPLETE work history including the earliest roles.
+5. Do NOT invent, infer, or hallucinate facts. If a field is not present, use "Not specified" (never guess).
+6. Preserve original company names exactly (including abbreviations, & symbols, accents).
+7. Skills must be discrete tokens (e.g. "Financial Modeling", "M&A", "Python") — not full sentences.
+8. Duration format: prefer "MMM YYYY – MMM YYYY" or "YYYY – Present". Keep concise.
+9. Verify each work history entry has both company AND title before including it.
 
-Extract:
-- Full name
-- Current/most recent job title
-- Location (city, country)
-- Email address
-- Phone number
-- Professional summary (brief)
-- Skills (list up to 15)
-- Complete work history (all jobs with company name, title, and duration)
-- Education (institution, degree, year)
-
-If any information is not clearly visible in the document, use "Not specified" for that field.`
+Extract these fields with maximum fidelity:
+- Full name (from CV text only)
+- Current / most recent job title (the topmost role in the chronological history)
+- Location (city, country — from header or contact block)
+- Email address (exact)
+- Phone number (with country code if shown)
+- Professional summary (verbatim from CV summary/profile section, max 200 words; do NOT rewrite)
+- Skills (up to 25 distinct skills, prioritize hard/technical skills first)
+- COMPLETE work history (every role, oldest to newest or newest to oldest — do not omit any)
+- Education (every institution, degree, year)`
             },
             {
               type: 'image_url',
@@ -220,7 +225,7 @@ If any information is not clearly visible in the document, use "Not specified" f
                 skills: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Key skills mentioned in the CV (max 15)'
+                  description: 'Distinct skills from the CV (up to 25, hard skills first)'
                 },
                 work_history: {
                   type: 'array',
@@ -255,7 +260,9 @@ If any information is not clearly visible in the document, use "Not specified" f
           }
         }
       ],
-      tool_choice: { type: 'function', function: { name: 'extract_candidate_info' } }
+      tool_choice: { type: 'function', function: { name: 'extract_candidate_info' } },
+      temperature: 0.1,
+      max_completion_tokens: 8192
     })
   })
 
@@ -339,8 +346,44 @@ If any information is not clearly visible in the document, use "Not specified" f
     }
   }
 
-  const parsed = JSON.parse(toolCall.function.arguments)
-  
+  // Sanitize tool args: strip control chars, detect truncation, fall back to repair
+  const rawArgs: string = toolCall.function.arguments || ''
+  let parsed: any
+  try {
+    parsed = JSON.parse(rawArgs)
+  } catch (e) {
+    console.warn('Tool args JSON parse failed, attempting repair. Length:', rawArgs.length)
+    // Truncation guard: balance braces/brackets so we recover at least the head fields
+    const cleaned = rawArgs.replace(/[\u0000-\u001F]+/g, ' ')
+    let opened = 0, closedNeeded = 0, openSq = 0, closeSqNeeded = 0
+    for (const ch of cleaned) {
+      if (ch === '{') opened++
+      else if (ch === '}') opened--
+      else if (ch === '[') openSq++
+      else if (ch === ']') openSq--
+    }
+    closedNeeded = Math.max(0, opened)
+    closeSqNeeded = Math.max(0, openSq)
+    const repaired = cleaned + ']'.repeat(closeSqNeeded) + '}'.repeat(closedNeeded)
+    try {
+      parsed = JSON.parse(repaired)
+      console.log('Recovered partial CV via brace-balancing repair')
+    } catch (e2) {
+      console.error('Could not repair tool args, returning minimal result')
+      parsed = {}
+    }
+  }
+
+  // Cross-validation: drop work_history entries missing required fields
+  if (Array.isArray(parsed.work_history)) {
+    parsed.work_history = parsed.work_history.filter((w: any) =>
+      w && typeof w === 'object' && (w.company || '').toString().trim() && (w.title || '').toString().trim()
+    )
+  }
+  if (Array.isArray(parsed.skills)) {
+    parsed.skills = Array.from(new Set(parsed.skills.map((s: any) => String(s || '').trim()).filter(Boolean))).slice(0, 25)
+  }
+
   const candidateId = `CV-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 
   return {

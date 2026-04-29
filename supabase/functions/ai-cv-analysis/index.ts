@@ -156,7 +156,7 @@ Provide comprehensive analysis with specific, actionable recommendations.`;
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-pro", // Top-tier for complex reasoning
+      model: "google/gemini-3.1-pro-preview", // Top-tier for complex reasoning
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

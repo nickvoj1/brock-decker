@@ -103,7 +103,7 @@ Based on this business signal, research what type of candidate this company woul
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "sonar-pro",
+          model: "sonar-reasoning-pro",
           messages: [
             { role: "system", content: "You are a recruitment intelligence analyst. Return only valid JSON." },
             { role: "user", content: prompt },
@@ -214,7 +214,7 @@ Return JSON array of scored candidates (only those scoring 4+/10):
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "sonar-pro",
+          model: "sonar-reasoning-pro",
           messages: [
             { role: "system", content: "You are a recruitment matching AI. Return only valid JSON." },
             { role: "user", content: prompt },

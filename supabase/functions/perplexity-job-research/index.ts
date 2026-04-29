@@ -85,7 +85,7 @@ Research this job posting and the hiring company thoroughly. Return JSON only (n
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "sonar-pro",
+          model: "sonar-reasoning-pro",
           messages: [
             { role: "system", content: "You are a recruitment intelligence analyst. Return only valid JSON." },
             { role: "user", content: prompt },
@@ -194,7 +194,7 @@ Return JSON with scored candidates (only those scoring 4+/10):
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "sonar-pro",
+          model: "sonar-reasoning-pro",
           messages: [
             { role: "system", content: "You are a recruitment matching AI. Return only valid JSON." },
             { role: "user", content: prompt },
