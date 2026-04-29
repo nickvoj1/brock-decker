@@ -1876,9 +1876,13 @@ export async function downloadBrandedSourcePdf(
         Boolean(namePlacement) &&
         Number.isFinite(namePlacement?.yTop) &&
         Number.isFinite(namePlacement?.boxHeight);
+      // Reserve the top-left corner for the agency watermark/logo so we never
+      // draw the candidate name on top of it.
+      const watermarkReservedRight = embeddedWatermark ? 26 + 160 : 26;
+      const watermarkReservedBottom = embeddedWatermark ? height - 64 : height - 26;
       let size = namePlacement
         ? Math.min(24, Math.max(11, namePlacement.boxHeight * 0.78))
-        : 16;
+        : 18;
       let textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
       if (hasPlacement) {
         const maxAllowedWidth = Math.max(44, namePlacement!.boxWidth - 4);
@@ -1887,8 +1891,18 @@ export async function downloadBrandedSourcePdf(
           textWidth = helveticaBold.widthOfTextAtSize(replacement, size);
         }
       }
-      const desiredX = hasPlacement ? namePlacement!.xCenter - textWidth / 2 : (width - textWidth) / 2;
-      const desiredY = resolveAnonymizedNameBaselineY(hasPlacement ? namePlacement! : null, height, size);
+      let desiredX = hasPlacement ? namePlacement!.xCenter - textWidth / 2 : 26;
+      let desiredY = resolveAnonymizedNameBaselineY(hasPlacement ? namePlacement! : null, height, size);
+      // If the natural placement collides with the watermark zone (top-left),
+      // shift the name down so it sits cleanly below the logo.
+      const collidesWithWatermark =
+        embeddedWatermark &&
+        desiredY > watermarkReservedBottom - size &&
+        desiredX < watermarkReservedRight;
+      if (collidesWithWatermark) {
+        desiredY = watermarkReservedBottom - size - 4;
+        desiredX = Math.max(26, desiredX);
+      }
       page.drawText(replacement, {
         x: Math.max(26, Math.min(width - 26 - textWidth, desiredX)),
         y: Math.max(26, Math.min(height - 42, desiredY)),
