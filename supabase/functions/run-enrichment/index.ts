@@ -1276,12 +1276,12 @@ Deno.serve(async (req) => {
       ? (isMultiCompanySearch ? 1 : (isJobBoardSearch || isSpecialRequestSearch) ? 3 : 4)
       : (
           searchTargetContacts >= 300
-            ? 10
+            ? 12
             : searchTargetContacts >= 200
-              ? 7
+              ? 9
               : searchTargetContacts >= 120
-                ? 5
-                : 4 // was 2 — default 100-contact searches now scan up to 4 pages per combo
+                ? 7
+                : 6 // default 100-contact searches now scan up to 6 pages per combo
         )
     const nonTargetBudgetMs = Math.min(
       8 * 60 * 1000,
