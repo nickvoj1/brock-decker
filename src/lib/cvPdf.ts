@@ -1780,7 +1780,7 @@ export async function downloadBrandedSourcePdf(
       : null;
   const detectedZones = await detectPersonalInfoZones(new Uint8Array(originalBytes));
   let hardDeletedBytes = await redactPdfTextLocally(originalBytes, detectedZones, hints);
-  if (hints?.anonymizeName) {
+  if (hints?.anonymizeName || (realDisplayName && hints?.name && realDisplayName.toLowerCase() !== safeText(hints.name).toLowerCase())) {
     hardDeletedBytes = await stripResidualNameFromPdf(hardDeletedBytes, hints?.name);
   }
   hardDeletedBytes = await runResidualCleanupPasses(hardDeletedBytes, hints);
