@@ -45,6 +45,11 @@ export default function CVEditor() {
   const { toast } = useToast();
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [cvData, setCvData] = useState<ParsedCandidate | null>(null);
+  const [originalPII, setOriginalPII] = useState<{ name: string; email: string; phone: string }>({
+    name: "",
+    email: "",
+    phone: "",
+  });
   const [cvError, setCvError] = useState<string | null>(null);
   const [isParsingCV, setIsParsingCV] = useState(false);
 
@@ -72,6 +77,7 @@ export default function CVEditor() {
     setCvFile(file);
     setCvError(null);
     setCvData(null);
+    setOriginalPII({ name: "", email: "", phone: "" });
     setIsParsingCV(true);
 
     try {
@@ -91,6 +97,12 @@ export default function CVEditor() {
         throw new Error(result.error || "Failed to parse CV");
       }
 
+      // Capture original PII BEFORE sanitizing so the redactor can target them precisely.
+      setOriginalPII({
+        name: result.data?.name || "",
+        email: result.data?.email || "",
+        phone: result.data?.phone || "",
+      });
       setCvData(sanitizeCandidateForClient(result.data));
       toast({
         title: "CV parsed",
@@ -113,6 +125,7 @@ export default function CVEditor() {
     setCvFile(null);
     setCvData(null);
     setCvError(null);
+    setOriginalPII({ name: "", email: "", phone: "" });
   };
 
   return (
@@ -148,6 +161,7 @@ export default function CVEditor() {
               headerImageUrl={branding.headerImageUrl}
               watermarkImageUrl={branding.watermarkImageUrl}
               headerText={branding.headerText}
+              redactionHints={originalPII}
             />
           </CardContent>
         </Card>
