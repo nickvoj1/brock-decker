@@ -1561,6 +1561,56 @@ Deno.serve(async (req) => {
       })
     }
 
+    // ============ YIELD-WEIGHTED COMBO ORDERING (Tier 1 - B) ============
+    // Sort combinations by historical yield so productive combos run first.
+    // This way, if the time/credit budget cuts the run short, we've already
+    // captured the highest-value combos. Falls back gracefully on first run.
+    const yieldRegionKey = (preferences[0]?.locations?.[0] || '').toString().trim().toLowerCase()
+    if (!targetCompany && searchCombinations.length > 1) {
+      try {
+        const industriesForYield = Array.from(
+          new Set(searchCombinations.map(c => (c.industry || '').toLowerCase()).filter(Boolean))
+        )
+        if (industriesForYield.length > 0) {
+          const { data: yieldRows } = await supabase
+            .from('apollo_combo_yield')
+            // deno-lint-ignore no-explicit-any
+            .select('industry, sector, region, contacts_added, combos_run' as any)
+            .in('industry', industriesForYield)
+          // deno-lint-ignore no-explicit-any
+          const yieldMap = new Map<string, number>()
+          // deno-lint-ignore no-explicit-any
+          ;(yieldRows || []).forEach((r: any) => {
+            const key = `${(r.industry || '').toLowerCase()}|${(r.sector || '').toLowerCase()}|${(r.region || '').toLowerCase()}`
+            const runs = Math.max(1, Number(r.combos_run) || 1)
+            const avg = (Number(r.contacts_added) || 0) / runs
+            yieldMap.set(key, avg)
+          })
+          const scoreFor = (c: SearchCombo) => {
+            const i = (c.industry || '').toLowerCase()
+            const s = (c.sector || '').toLowerCase()
+            // Try exact region match, then any region for same industry+sector
+            const exact = yieldMap.get(`${i}|${s}|${yieldRegionKey}`)
+            if (exact !== undefined) return exact
+            const noRegion = yieldMap.get(`${i}|${s}|`)
+            if (noRegion !== undefined) return noRegion
+            // Fall back to industry-only average
+            const industryOnly = yieldMap.get(`${i}||`)
+            return industryOnly ?? 0
+          }
+          searchCombinations.sort((a, b) => scoreFor(b) - scoreFor(a))
+          console.log('Combos reordered by historical yield (top 5):',
+            searchCombinations.slice(0, 5).map(c => `${c.label}(~${scoreFor(c).toFixed(1)})`).join(', '))
+        }
+      } catch (yieldErr) {
+        console.warn('Yield-weighted ordering skipped:', (yieldErr as Error).message)
+      }
+    }
+
+    // Track per-combo yield to persist after the loop
+    // deno-lint-ignore no-explicit-any
+    const comboYieldStats: Array<{ industry: string; sector: string | null; pages: number; added: number }> = []
+
     console.log(`Running ${searchCombinations.length} search combinations for maximum coverage:`, 
       searchCombinations.map(c => c.label))
 
