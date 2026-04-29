@@ -51,6 +51,8 @@ export type CVPersonalHints = {
   phone?: string | null;
   anonymizeName?: boolean;
   replacementName?: string | null;
+  /** Name to draw on the PDF after redaction (the candidate's real/edited name). */
+  displayName?: string | null;
 };
 
 GlobalWorkerOptions.workerSrc = pdfJsWorkerUrl;
