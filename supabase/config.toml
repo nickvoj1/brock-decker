@@ -9,12 +9,6 @@ verify_jwt = false
 [functions.run-enrichment]
 verify_jwt = false
 
-[functions.test-apollo]
-verify_jwt = false
-
-[functions.test-bullhorn]
-verify_jwt = false
-
 [functions.bullhorn-oauth-callback]
 verify_jwt = false
 
@@ -31,9 +25,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.check-bullhorn-overlap]
-verify_jwt = false
-
-[functions.test-bullhorn-distlist]
 verify_jwt = false
 
 [functions.analyze-bullhorn-skills]

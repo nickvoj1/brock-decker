@@ -28,7 +28,8 @@ const RoutePersistence = () => {
 
   useEffect(() => {
     const fullPath = `${location.pathname}${location.search}${location.hash}`;
-    if (location.pathname !== "/") {
+    // Save any non-root path, OR root with query/hash (but skip bare "/")
+    if (location.pathname !== "/" || location.search || location.hash) {
       sessionStorage.setItem(LAST_ROUTE_STORAGE_KEY, fullPath);
     }
   }, [location.pathname, location.search, location.hash]);
