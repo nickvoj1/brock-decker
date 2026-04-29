@@ -2210,10 +2210,43 @@ Deno.serve(async (req) => {
           }
           
           currentPage++
-          
+          pagesScannedInCombo++
+
+          // ============ ADAPTIVE EXPANSION (Tier 1 - C) ============
+          // After 2 pages, if this combo is severely under-yielding, broaden the keyword
+          // query for remaining pages so we don't waste pagination budget on a dead niche.
+          if (
+            !targetCompany &&
+            !comboBroadenedAdaptively &&
+            currentPage === 3 &&
+            combo.sector &&
+            combo.industry &&
+            (allContacts.length - comboStartCount) < 5 &&
+            currentPage <= maxPages
+          ) {
+            const industryOnlyKeyword = buildApolloKeywordQuery(combo.industry, null)
+            queryParams.delete('q_keywords')
+            if (industryOnlyKeyword) {
+              queryParams.append('q_keywords', industryOnlyKeyword)
+            }
+            comboBroadenedAdaptively = true
+            console.log(`[Adaptive expansion] ${combo.label}: low yield (${allContacts.length - comboStartCount}) after 2 pages — dropping sector keyword for remaining pages`)
+          }
+
           // Keep a short pause between pages to reduce burst rate.
           await new Promise(resolve => setTimeout(resolve, 50))
         } // end while loop
+
+        // Record per-combo yield for learning (Tier 1 - B)
+        const addedThisCombo = allContacts.length - comboStartCount
+        if (combo.industry) {
+          comboYieldStats.push({
+            industry: combo.industry,
+            sector: combo.sector,
+            pages: pagesScannedInCombo,
+            added: addedThisCombo,
+          })
+        }
 
         processedCount++
         
