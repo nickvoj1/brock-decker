@@ -2265,6 +2265,71 @@ Deno.serve(async (req) => {
     }
     } // end companiesToSearch loop
 
+    // ============ PERSIST COMBO YIELD (Tier 1 - B) ============
+    // Aggregate per-combo stats and upsert into apollo_combo_yield so future runs
+    // can prioritize the highest-yielding industry/sector/region combinations first.
+    if (!targetCompany && comboYieldStats.length > 0) {
+      try {
+        // Aggregate by (industry|sector|region) — sum across duplicates within this run
+        const aggregated = new Map<string, { industry: string; sector: string | null; region: string; added: number; pages: number }>()
+        for (const s of comboYieldStats) {
+          const key = `${s.industry.toLowerCase()}|${(s.sector || '').toLowerCase()}|${yieldRegionKey}`
+          const existing = aggregated.get(key)
+          if (existing) {
+            existing.added += s.added
+            existing.pages += s.pages
+          } else {
+            aggregated.set(key, {
+              industry: s.industry,
+              sector: s.sector,
+              region: yieldRegionKey,
+              added: s.added,
+              pages: s.pages,
+            })
+          }
+        }
+        for (const [, agg] of aggregated) {
+          const { data: existing } = await supabase
+            .from('apollo_combo_yield')
+            // deno-lint-ignore no-explicit-any
+            .select('id, contacts_added, combos_run, pages_scanned' as any)
+            .ilike('industry', agg.industry)
+            .ilike('sector', agg.sector || '')
+            .ilike('region', agg.region || '')
+            .maybeSingle()
+          // deno-lint-ignore no-explicit-any
+          const ex = existing as any
+          if (ex?.id) {
+            await supabase
+              .from('apollo_combo_yield')
+              // deno-lint-ignore no-explicit-any
+              .update({
+                contacts_added: (Number(ex.contacts_added) || 0) + agg.added,
+                combos_run: (Number(ex.combos_run) || 0) + 1,
+                pages_scanned: (Number(ex.pages_scanned) || 0) + agg.pages,
+                last_run_at: new Date().toISOString(),
+              } as any)
+              .eq('id', ex.id)
+          } else {
+            await supabase
+              .from('apollo_combo_yield')
+              // deno-lint-ignore no-explicit-any
+              .insert({
+                industry: agg.industry,
+                sector: agg.sector,
+                region: agg.region,
+                contacts_added: agg.added,
+                combos_run: 1,
+                pages_scanned: agg.pages,
+              } as any)
+          }
+        }
+        console.log(`[Yield-learning] Persisted ${aggregated.size} combo yield records for future ranking`)
+      } catch (persistErr) {
+        console.warn('Failed to persist combo yield stats:', (persistErr as Error).message)
+      }
+    }
+
     // ============ TARGET-COMPANY RETRY LOOP ============
     // If this is a target-company search and we haven't found enough contacts, try retry strategies
     // Skip retries for multi-company searches (each company is already searched individually)
