@@ -175,6 +175,7 @@ export default function CVEditor() {
               watermarkImageUrl={branding.watermarkImageUrl}
               headerText={branding.headerText}
               redactionHints={originalPII}
+              sourcePdfExportMode="generated"
             />
           </CardContent>
         </Card>
