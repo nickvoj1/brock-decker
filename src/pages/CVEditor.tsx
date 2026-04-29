@@ -125,6 +125,7 @@ export default function CVEditor() {
     setCvFile(null);
     setCvData(null);
     setCvError(null);
+    setOriginalPII({ name: "", email: "", phone: "" });
   };
 
   return (
