@@ -40,12 +40,22 @@ Deno.serve(async (req) => {
       const url = `${restUrl}entity/DistributionList/${listId}/members/${cid}?BhRestToken=${bhRestToken}`
       const res = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' } })
       const body = await res.text()
-      return { cid, ok: res.ok, status: res.status, body: body.slice(0, 100) }
+      return { cid, ok: res.ok, status: res.status, body: body.slice(0, 200) }
     }))
 
     for (const r of results) {
-      if (r.status === 'fulfilled' && r.value.ok) addedCount++
-      else failedCount++
+      if (r.status === 'fulfilled' && r.value.ok) {
+        addedCount++
+      } else {
+        failedCount++
+        if (errors.length < 20) {
+          if (r.status === 'fulfilled') {
+            errors.push(`cid=${r.value.cid} status=${r.value.status}: ${r.value.body}`)
+          } else {
+            errors.push(`rejected: ${String(r.reason).slice(0, 200)}`)
+          }
+        }
+      }
     }
 
     if ((i + CONCURRENCY) % 50 < CONCURRENCY) {
