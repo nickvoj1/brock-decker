@@ -1778,6 +1778,35 @@ Deno.serve(async (req) => {
                 console.error('Apollo retry exception:', retryError)
               }
             }
+
+            // Broadening fallback: still 0 results on page 1 → drop ALL keywords and rely on
+            // person_titles + locations only. Quality is still preserved by downstream filters
+            // (law-firm/recruiter/employer exclusion, dedupe, used-contacts window).
+            if (!targetCompany && people.length === 0 && currentPage === 1) {
+              try {
+                console.log('Still 0 results — broadening: dropping all keyword filters...')
+                const broadParams = new URLSearchParams(pageParams)
+                broadParams.delete('q_keywords')
+                const broadUrl = `https://api.apollo.io/api/v1/mixed_people/api_search?${broadParams.toString()}`
+                const broadResponse = await fetch(broadUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-api-key': apolloApiKey },
+                })
+                if (broadResponse.ok) {
+                  const broadData = await broadResponse.json()
+                  people = broadData.people || []
+                  console.log('Apollo people returned (broad fallback):', people.length)
+                } else {
+                  const errorText = await broadResponse.text()
+                  if (!apolloApiErrorMessage) {
+                    apolloApiErrorMessage = formatApolloApiError(broadResponse.status, errorText)
+                  }
+                  console.error('Apollo broad fallback error:', broadResponse.status, errorText.substring(0, 200))
+                }
+              } catch (broadError) {
+                console.error('Apollo broad fallback exception:', broadError)
+              }
+            }
             
             // Stop pagination if no more results
             if (people.length === 0) {
