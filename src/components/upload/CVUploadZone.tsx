@@ -50,6 +50,7 @@ interface CVUploadZoneProps {
   /** Original PII captured from the parsed CV BEFORE any client-side sanitization.
    *  Used by the PDF redactor to precisely mask name/email/phone in the source PDF. */
   redactionHints?: { name?: string; email?: string; phone?: string };
+  sourcePdfExportMode?: "preserve" | "generated";
 }
 
 const ACCEPTED_TYPES = [
@@ -73,6 +74,7 @@ export function CVUploadZone({
   watermarkImageUrl,
   headerText,
   redactionHints,
+  sourcePdfExportMode = "preserve",
 }: CVUploadZoneProps) {
   const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
@@ -215,7 +217,7 @@ export function CVUploadZone({
       if (!source) return;
       const outName = `${(sourceBase.name || "candidate").replace(/\s+/g, "-")}-edited-cv`;
       const branding = { watermarkImageUrl, headerImageUrl, headerText };
-      if (originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
+      if (sourcePdfExportMode === "preserve" && originalFile && originalFile.name.toLowerCase().endsWith(".pdf")) {
         // Use the original PII captured at parse-time (before client sanitization)
         // so the redactor can target the real name/email/phone strings in the PDF.
         await downloadBrandedSourcePdf(originalFile, outName, branding, {
