@@ -41,6 +41,45 @@ export type Database = {
         }
         Relationships: []
       }
+      apollo_combo_yield: {
+        Row: {
+          combos_run: number
+          contacts_added: number
+          created_at: string
+          id: string
+          industry: string
+          last_run_at: string
+          pages_scanned: number
+          region: string | null
+          sector: string | null
+          updated_at: string
+        }
+        Insert: {
+          combos_run?: number
+          contacts_added?: number
+          created_at?: string
+          id?: string
+          industry: string
+          last_run_at?: string
+          pages_scanned?: number
+          region?: string | null
+          sector?: string | null
+          updated_at?: string
+        }
+        Update: {
+          combos_run?: number
+          contacts_added?: number
+          created_at?: string
+          id?: string
+          industry?: string
+          last_run_at?: string
+          pages_scanned?: number
+          region?: string | null
+          sector?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bullhorn_client_contacts_mirror: {
         Row: {
           address_city: string | null
