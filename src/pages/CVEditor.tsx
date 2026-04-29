@@ -97,9 +97,22 @@ export default function CVEditor() {
         throw new Error(result.error || "Failed to parse CV");
       }
 
+      const parsedName: string = result.data?.name || "";
+      const parsedTitle: string = result.data?.current_title || "";
+      const parseFailed =
+        /^could not parse$/i.test(parsedName) ||
+        (!parsedName && !parsedTitle && (!result.data?.work_history || result.data.work_history.length === 0));
+
+      if (parseFailed) {
+        throw new Error(
+          result.data?.summary ||
+            "CV parsing failed. Please try a different file or format (PDF works best).",
+        );
+      }
+
       // Capture original PII BEFORE sanitizing so the redactor can target them precisely.
       setOriginalPII({
-        name: result.data?.name || "",
+        name: parsedName,
         email: result.data?.email || "",
         phone: result.data?.phone || "",
       });
