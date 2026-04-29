@@ -1865,8 +1865,13 @@ export async function downloadBrandedSourcePdf(
       }
     }
 
-    if (shouldDrawReplacementName && pageIndex === 0) {
-      const replacement = anonymizedReplacement;
+    const nameToDraw = shouldDrawReplacementName
+      ? anonymizedReplacement
+      : pageIndex === 0
+        ? realDisplayName
+        : "";
+    if (nameToDraw && pageIndex === 0) {
+      const replacement = nameToDraw;
       const hasPlacement =
         Boolean(namePlacement) &&
         Number.isFinite(namePlacement?.yTop) &&
