@@ -404,19 +404,21 @@ export function CVUploadZone({
       />
 
       <Dialog open={showEditor} onOpenChange={setShowEditor}>
-        <DialogContent className="buttons-3d max-w-md">
+        <DialogContent className="buttons-3d max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Edit CV</DialogTitle>
           </DialogHeader>
           {!editorDraft ? (
             <p className="text-sm text-muted-foreground">No parsed CV data to edit yet.</p>
           ) : (
-            <div className="grid gap-4">
+            <div className="grid gap-5 overflow-y-auto pr-2 -mr-2 flex-1">
+              {/* Name Mode */}
               <div className="space-y-2">
                 <Label>Name Mode</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Button
                     type="button"
+                    size="sm"
                     variant={nameMode === "real" ? "default" : "outline"}
                     onClick={() => setNameMode("real")}
                   >
@@ -424,6 +426,7 @@ export function CVUploadZone({
                   </Button>
                   <Button
                     type="button"
+                    size="sm"
                     variant={nameMode === "anonymous" ? "default" : "outline"}
                     onClick={() => setNameMode("anonymous")}
                   >
@@ -431,12 +434,183 @@ export function CVUploadZone({
                   </Button>
                 </div>
               </div>
+
+              {/* Basic info */}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="cv-name">Full name</Label>
+                  <Input
+                    id="cv-name"
+                    value={editorDraft.name}
+                    onChange={(e) => updateDraft({ name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="cv-title">Current title</Label>
+                  <Input
+                    id="cv-title"
+                    value={editorDraft.current_title}
+                    onChange={(e) => updateDraft({ current_title: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="cv-location">Location</Label>
+                  <Input
+                    id="cv-location"
+                    value={editorDraft.location}
+                    onChange={(e) => updateDraft({ location: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="space-y-1.5">
+                <Label htmlFor="cv-summary">Summary</Label>
+                <Textarea
+                  id="cv-summary"
+                  rows={4}
+                  value={editorDraft.summary || ""}
+                  onChange={(e) => updateDraft({ summary: e.target.value })}
+                />
+              </div>
+
+              {/* Skills */}
+              <div className="space-y-2">
+                <Label>Skills ({editorDraft.skills.length})</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {editorDraft.skills.map((s) => (
+                    <span
+                      key={s}
+                      className="inline-flex items-center gap-1 rounded-full border-2 border-foreground bg-background px-2.5 py-0.5 text-xs"
+                    >
+                      {s}
+                      <button
+                        type="button"
+                        onClick={() => removeSkill(s)}
+                        className="hover:text-destructive"
+                        aria-label={`Remove ${s}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Add skill and press Enter"
+                    value={skillInput}
+                    onChange={(e) => setSkillInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addSkill();
+                      }
+                    }}
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={addSkill}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Work history */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Work history ({editorDraft.work_history.length})</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={addWork}>
+                    <Plus className="mr-1 h-4 w-4" /> Add role
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {editorDraft.work_history.map((w, i) => (
+                    <div
+                      key={i}
+                      className="grid gap-2 rounded-md border-2 border-foreground/80 p-3 sm:grid-cols-[1fr_1fr_140px_auto]"
+                    >
+                      <Input
+                        placeholder="Company"
+                        value={w.company}
+                        onChange={(e) => updateWork(i, { company: e.target.value })}
+                      />
+                      <Input
+                        placeholder="Title"
+                        value={w.title}
+                        onChange={(e) => updateWork(i, { title: e.target.value })}
+                      />
+                      <Input
+                        placeholder="Duration"
+                        value={w.duration || ""}
+                        onChange={(e) => updateWork(i, { duration: e.target.value })}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeWork(i)}
+                        aria-label="Remove role"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Education */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Education ({editorDraft.education.length})</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={addEdu}>
+                    <Plus className="mr-1 h-4 w-4" /> Add education
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {editorDraft.education.map((ed, i) => (
+                    <div
+                      key={i}
+                      className="grid gap-2 rounded-md border-2 border-foreground/80 p-3 sm:grid-cols-[1fr_1fr_140px_auto]"
+                    >
+                      <Input
+                        placeholder="Institution"
+                        value={ed.institution}
+                        onChange={(e) => updateEdu(i, { institution: e.target.value })}
+                      />
+                      <Input
+                        placeholder="Degree"
+                        value={ed.degree}
+                        onChange={(e) => updateEdu(i, { degree: e.target.value })}
+                      />
+                      <Input
+                        placeholder="Year"
+                        value={ed.year || ""}
+                        onChange={(e) => updateEdu(i, { year: e.target.value })}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeEdu(i)}
+                        aria-label="Remove education"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={downloadEditedCandidate}>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button type="button" variant="ghost" onClick={resetDraft} disabled={!editorDraft}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Reset
+            </Button>
+            <Button type="button" variant="outline" onClick={downloadEditedCandidate} disabled={!editorDraft}>
               <Download className="mr-2 h-4 w-4" />
-              Download CV
+              Download
+            </Button>
+            <Button type="button" onClick={saveDraft} disabled={!editorDraft}>
+              Save changes
             </Button>
           </DialogFooter>
         </DialogContent>
