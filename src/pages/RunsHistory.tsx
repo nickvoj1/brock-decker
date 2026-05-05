@@ -195,12 +195,30 @@ export default function RunsHistory() {
   const exportTooBullhornMutation = useMutation({
     mutationFn: async ({ runId, classifiedContacts, excludedEmails }: { runId: string; classifiedContacts?: any[]; excludedEmails?: string[] }) => {
       setExportingRunId(runId);
-      const { data, error } = await supabase.functions.invoke('export-to-bullhorn', {
-        body: { runId, classifiedContacts, excludedEmails }
-      });
-      if (error) throw error;
-      if (!data.success) throw new Error(data.error);
-      return data;
+
+      let startIndex = 0;
+      let finalData: any = null;
+      const maxChunks = 20;
+
+      for (let chunk = 0; chunk < maxChunks; chunk++) {
+        const { data, error } = await supabase.functions.invoke('export-to-bullhorn', {
+          body: { runId, classifiedContacts, excludedEmails, startIndex, chunkSize: 25 }
+        });
+
+        if (error) throw error;
+        if (!data?.success) throw new Error(data?.error || 'Bullhorn export failed');
+
+        finalData = data;
+        if (data.complete !== false) return data;
+
+        const nextStartIndex = Number(data.nextStartIndex);
+        if (!Number.isFinite(nextStartIndex) || nextStartIndex <= startIndex) {
+          throw new Error('Bullhorn export stalled before completing. Please retry.');
+        }
+        startIndex = nextStartIndex;
+      }
+
+      throw new Error(`Bullhorn export did not finish after ${maxChunks} chunks. Last progress: ${finalData?.processedSoFar || 0}/${finalData?.totalContacts || 'unknown'} contacts.`);
     },
     onSuccess: (data) => {
       const listCreated = data?.listId !== null && data?.listId !== undefined;

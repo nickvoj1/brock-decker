@@ -1966,7 +1966,7 @@ Deno.serve(async (req) => {
       chunkSize?: number;
     }
     const startIndex = reqStartIndex || 0
-    const CHUNK_SIZE = reqChunkSize || 50
+    const CHUNK_SIZE = reqChunkSize || 25
     // Wall-clock budget to exit before the 150s edge timeout (leave headroom for finalization)
     const CHUNK_START_TIME = Date.now()
     const TIME_BUDGET_MS = 110_000
@@ -2048,6 +2048,23 @@ Deno.serve(async (req) => {
     const candidateName = (run.candidates_data as any[])?.[0]?.name || 'Unknown'
     const runDate = new Date(run.created_at)
     const listName = requestedListName || `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
+
+    if (startIndex === 0) {
+      await supabase
+        .from('enrichment_runs')
+        .update({
+          bullhorn_list_name: listName,
+          bullhorn_list_id: null,
+          bullhorn_exported_at: null,
+          bullhorn_errors: {
+            partialContactIds: [],
+            partialErrors: [],
+            lastProcessedIndex: 0,
+            totalContacts: contacts.length,
+          } as any,
+        })
+        .eq('id', runId)
+    }
 
     // Recency filtering is now user-controlled via the "Remove Recently Contacted" button in the UI.
     // If the user pressed it, those emails arrive in excludedEmails (already filtered above).
