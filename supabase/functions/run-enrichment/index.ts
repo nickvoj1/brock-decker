@@ -1681,6 +1681,7 @@ Deno.serve(async (req) => {
           console.log(`Skipping ${combo.label} - industry quota reached (${currentCount}/${quota})`)
           continue
         }
+      }
 
       // Track per-combo yield (Tier 1 - B & C)
       const comboStartCount = allContacts.length
