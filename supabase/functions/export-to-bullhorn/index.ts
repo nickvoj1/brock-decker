@@ -1966,7 +1966,10 @@ Deno.serve(async (req) => {
       chunkSize?: number;
     }
     const startIndex = reqStartIndex || 0
-    const CHUNK_SIZE = reqChunkSize || 150
+    const CHUNK_SIZE = reqChunkSize || 50
+    // Wall-clock budget to exit before the 150s edge timeout (leave headroom for finalization)
+    const CHUNK_START_TIME = Date.now()
+    const TIME_BUDGET_MS = 110_000
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -2052,9 +2055,9 @@ Deno.serve(async (req) => {
     const contactsToExport = contacts
 
     // Chunked processing: only process a subset per invocation
-    const endIndex = Math.min(startIndex + CHUNK_SIZE, contactsToExport.length)
+    let endIndex = Math.min(startIndex + CHUNK_SIZE, contactsToExport.length)
     const isFirstChunk = startIndex === 0
-    const isFinalChunk = endIndex >= contactsToExport.length
+    let isFinalChunk = endIndex >= contactsToExport.length
 
     console.log(`Creating/updating contacts ${startIndex + 1}-${endIndex} of ${contactsToExport.length} (chunk ${Math.floor(startIndex / CHUNK_SIZE) + 1})...`)
     const contactIds: number[] = []
@@ -2066,6 +2069,13 @@ Deno.serve(async (req) => {
 
     // Process contacts sequentially to avoid Bullhorn rate limits (429)
     for (let i = startIndex; i < endIndex; i++) {
+      // Time-budget guard: bail out before edge function 150s idle timeout
+      if (Date.now() - CHUNK_START_TIME > TIME_BUDGET_MS) {
+        console.warn(`Time budget reached at contact ${i}/${contactsToExport.length}; ending chunk early`)
+        endIndex = i
+        isFinalChunk = endIndex >= contactsToExport.length
+        break
+      }
       const contact = contactsToExport[i]
       if ((i - startIndex + 1) % 20 === 0 || i === startIndex) {
         console.log(`Processing contact ${i + 1}/${contactsToExport.length}`)
