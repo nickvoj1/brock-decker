@@ -1957,15 +1957,16 @@ Deno.serve(async (req) => {
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
     // Accept optional excludedEmails array for contacts user wants to skip
-    const { runId, listName: requestedListName, classifiedContacts, excludedEmails, startIndex: reqStartIndex, chunkSize: reqChunkSize } = await req.json() as { 
+    const { runId, listName: requestedListName, classifiedContacts, excludedEmails, startIndex: reqStartIndex, chunkSize: reqChunkSize, forceRestart } = await req.json() as { 
       runId: string; 
       listName?: string;
       classifiedContacts?: ClassifiedContact[];
       excludedEmails?: string[];
       startIndex?: number;
       chunkSize?: number;
+      forceRestart?: boolean;
     }
-    const startIndex = reqStartIndex || 0
+    let startIndex = reqStartIndex || 0
     const CHUNK_SIZE = reqChunkSize || 25
     // Wall-clock budget to exit before the 150s edge timeout (leave headroom for finalization)
     const CHUNK_START_TIME = Date.now()
@@ -2050,20 +2051,32 @@ Deno.serve(async (req) => {
     const listName = requestedListName || `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
 
     if (startIndex === 0) {
-      await supabase
-        .from('enrichment_runs')
-        .update({
-          bullhorn_list_name: listName,
-          bullhorn_list_id: null,
-          bullhorn_exported_at: null,
-          bullhorn_errors: {
-            partialContactIds: [],
-            partialErrors: [],
-            lastProcessedIndex: 0,
-            totalContacts: contacts.length,
-          } as any,
-        })
-        .eq('id', runId)
+      // Auto-resume: if a previous attempt has partial progress, continue from there
+      // unless the caller explicitly asked to restart.
+      const existingPartial = (run.bullhorn_errors as any) || {}
+      const resumeIdx = Number(existingPartial?.lastProcessedIndex || 0)
+      const partialIds = Array.isArray(existingPartial?.partialContactIds) ? existingPartial.partialContactIds : []
+      const alreadyExported = !!run.bullhorn_exported_at && !!run.bullhorn_list_id
+
+      if (!forceRestart && !alreadyExported && resumeIdx > 0 && partialIds.length > 0) {
+        console.log(`Auto-resuming export from index ${resumeIdx} (${partialIds.length} contacts already processed)`)
+        startIndex = resumeIdx
+      } else {
+        await supabase
+          .from('enrichment_runs')
+          .update({
+            bullhorn_list_name: listName,
+            bullhorn_list_id: null,
+            bullhorn_exported_at: null,
+            bullhorn_errors: {
+              partialContactIds: [],
+              partialErrors: [],
+              lastProcessedIndex: 0,
+              totalContacts: contacts.length,
+            } as any,
+          })
+          .eq('id', runId)
+      }
     }
 
     // Recency filtering is now user-controlled via the "Remove Recently Contacted" button in the UI.
