@@ -1077,6 +1077,26 @@ export const INDUSTRY_TO_SECTOR: Record<string, string[]> = {
   "Non-Profit": ["Non-Profit & Social Impact"],
   "Impact Investing": ["Investment & Private Equity", "Non-Profit & Social Impact"],
   "ESG": ["Financial Services", "Sustainability"],
+
+  // IT Services & Consulting
+  "IT Services & Consulting": ["Technology", "Professional Services", "Consulting"],
+  "Computer Software": ["Technology"],
+  "Cloud Services": ["Technology"],
+  "Systems Integration": ["Technology", "Professional Services"],
+  "Computer & Network Security": ["Technology"],
+  "Internet": ["Technology"],
+  "Internet of Things (IoT)": ["Technology"],
+  "Outsourcing / Offshoring": ["Technology", "Professional Services"],
+  "Staffing & Recruiting": ["Professional Services"],
+  "Computer Hardware": ["Technology"],
+  "Computer Networking": ["Technology", "Telecommunications"],
+  "Semiconductors": ["Technology", "Industrial"],
+  "Wireless": ["Technology", "Telecommunications"],
+  "Data & Analytics": ["Technology"],
+  "Engineering Services": ["Professional Services", "Industrial"],
+  "Healthcare IT": ["Technology", "Healthcare & Life Sciences"],
+  "Defense & Aerospace IT": ["Technology", "Government & Defense"],
+  "Automotive Software": ["Technology", "Industrial"],
 };
 
 // ============== MATCHING FUNCTIONS ==============
