@@ -2055,9 +2055,9 @@ Deno.serve(async (req) => {
     const contactsToExport = contacts
 
     // Chunked processing: only process a subset per invocation
-    const endIndex = Math.min(startIndex + CHUNK_SIZE, contactsToExport.length)
+    let endIndex = Math.min(startIndex + CHUNK_SIZE, contactsToExport.length)
     const isFirstChunk = startIndex === 0
-    const isFinalChunk = endIndex >= contactsToExport.length
+    let isFinalChunk = endIndex >= contactsToExport.length
 
     console.log(`Creating/updating contacts ${startIndex + 1}-${endIndex} of ${contactsToExport.length} (chunk ${Math.floor(startIndex / CHUNK_SIZE) + 1})...`)
     const contactIds: number[] = []
