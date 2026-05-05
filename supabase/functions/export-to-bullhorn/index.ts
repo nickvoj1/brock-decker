@@ -1957,15 +1957,16 @@ Deno.serve(async (req) => {
   try {
     // Accept optional classifiedContacts array for AI-reviewed skills
     // Accept optional excludedEmails array for contacts user wants to skip
-    const { runId, listName: requestedListName, classifiedContacts, excludedEmails, startIndex: reqStartIndex, chunkSize: reqChunkSize } = await req.json() as { 
+    const { runId, listName: requestedListName, classifiedContacts, excludedEmails, startIndex: reqStartIndex, chunkSize: reqChunkSize, forceRestart } = await req.json() as { 
       runId: string; 
       listName?: string;
       classifiedContacts?: ClassifiedContact[];
       excludedEmails?: string[];
       startIndex?: number;
       chunkSize?: number;
+      forceRestart?: boolean;
     }
-    const startIndex = reqStartIndex || 0
+    let startIndex = reqStartIndex || 0
     const CHUNK_SIZE = reqChunkSize || 25
     // Wall-clock budget to exit before the 150s edge timeout (leave headroom for finalization)
     const CHUNK_START_TIME = Date.now()
