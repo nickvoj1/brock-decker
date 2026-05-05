@@ -2879,6 +2879,22 @@ function getSectorKeywords(sectors: string[]): string[] {
     'agriculture': ['agriculture', 'agri', 'farming', 'agtech', 'food'],
     'government-public': ['government', 'public sector', 'federal', 'municipal'],
     'government & public sector': ['government', 'public sector', 'federal', 'municipal'],
+    // IT / consulting sectors
+    'it-services': ['information technology', 'it services', 'managed services', 'systems integration'],
+    'it services': ['information technology', 'it services', 'managed services', 'systems integration'],
+    'it-consulting': ['it consulting', 'technology consulting', 'digital consulting', 'management consulting'],
+    'it consulting': ['it consulting', 'technology consulting', 'digital consulting'],
+    'software': ['software', 'saas', 'computer software', 'application'],
+    'software & saas': ['software', 'saas', 'computer software', 'application'],
+    'cybersecurity': ['cybersecurity', 'security', 'infosec', 'network security'],
+    'cloud': ['cloud', 'aws', 'azure', 'gcp', 'cloud infrastructure'],
+    'cloud & infrastructure': ['cloud', 'aws', 'azure', 'gcp', 'cloud infrastructure'],
+    'data-analytics': ['data', 'analytics', 'business intelligence', 'data science'],
+    'data & analytics': ['data', 'analytics', 'business intelligence', 'data science'],
+    'digital-transformation': ['digital transformation', 'digital', 'modernization', 'consulting'],
+    'digital transformation': ['digital transformation', 'digital', 'modernization'],
+    'ai-ml': ['artificial intelligence', 'machine learning', 'ai', 'ml', 'deep learning'],
+    'ai & machine learning': ['artificial intelligence', 'machine learning', 'ai', 'ml'],
   }
 
   const out: string[] = []
