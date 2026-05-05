@@ -185,6 +185,32 @@ const INDUSTRY_CATEGORIES: IndustryCategory[] = [
       { value: "actuarial", label: "Actuarial" },
     ],
   },
+  {
+    name: "IT Services & Consulting",
+    industries: [
+      { value: "it-services-consulting", label: "IT Services & Consulting" },
+      { value: "computer-software", label: "Computer Software" },
+      { value: "saas", label: "SaaS" },
+      { value: "cloud-services", label: "Cloud Services" },
+      { value: "systems-integration", label: "Systems Integration" },
+      { value: "cybersecurity", label: "Cybersecurity" },
+      { value: "computer-network-security", label: "Computer & Network Security" },
+      { value: "internet", label: "Internet" },
+      { value: "internet-of-things", label: "Internet of Things (IoT)" },
+      { value: "outsourcing-offshoring", label: "Outsourcing / Offshoring" },
+      { value: "staffing-recruiting", label: "Staffing & Recruiting" },
+      { value: "computer-hardware", label: "Computer Hardware" },
+      { value: "computer-networking", label: "Computer Networking" },
+      { value: "semiconductors", label: "Semiconductors" },
+      { value: "wireless", label: "Wireless" },
+      { value: "data-analytics", label: "Data & Analytics" },
+      { value: "ai-ml", label: "AI & Machine Learning" },
+      { value: "engineering-services", label: "Engineering Services" },
+      { value: "healthcare-it", label: "Healthcare IT" },
+      { value: "defense-aerospace-it", label: "Defense & Aerospace IT" },
+      { value: "automotive-software", label: "Automotive Software" },
+    ],
+  },
 ];
 
 // Flatten all industries for easy lookup
