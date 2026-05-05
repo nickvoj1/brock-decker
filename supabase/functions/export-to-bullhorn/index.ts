@@ -2051,20 +2051,32 @@ Deno.serve(async (req) => {
     const listName = requestedListName || `${runDate.toISOString().slice(0, 10)}_${runDate.toISOString().slice(11, 16).replace(':', '-')}_${candidateName.replace(/[^a-zA-Z0-9]/g, '_')}`
 
     if (startIndex === 0) {
-      await supabase
-        .from('enrichment_runs')
-        .update({
-          bullhorn_list_name: listName,
-          bullhorn_list_id: null,
-          bullhorn_exported_at: null,
-          bullhorn_errors: {
-            partialContactIds: [],
-            partialErrors: [],
-            lastProcessedIndex: 0,
-            totalContacts: contacts.length,
-          } as any,
-        })
-        .eq('id', runId)
+      // Auto-resume: if a previous attempt has partial progress, continue from there
+      // unless the caller explicitly asked to restart.
+      const existingPartial = (run.bullhorn_errors as any) || {}
+      const resumeIdx = Number(existingPartial?.lastProcessedIndex || 0)
+      const partialIds = Array.isArray(existingPartial?.partialContactIds) ? existingPartial.partialContactIds : []
+      const alreadyExported = !!run.bullhorn_exported_at && !!run.bullhorn_list_id
+
+      if (!forceRestart && !alreadyExported && resumeIdx > 0 && partialIds.length > 0) {
+        console.log(`Auto-resuming export from index ${resumeIdx} (${partialIds.length} contacts already processed)`)
+        startIndex = resumeIdx
+      } else {
+        await supabase
+          .from('enrichment_runs')
+          .update({
+            bullhorn_list_name: listName,
+            bullhorn_list_id: null,
+            bullhorn_exported_at: null,
+            bullhorn_errors: {
+              partialContactIds: [],
+              partialErrors: [],
+              lastProcessedIndex: 0,
+              totalContacts: contacts.length,
+            } as any,
+          })
+          .eq('id', runId)
+      }
     }
 
     // Recency filtering is now user-controlled via the "Remove Recently Contacted" button in the UI.
