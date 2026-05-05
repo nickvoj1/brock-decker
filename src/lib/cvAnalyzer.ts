@@ -907,8 +907,32 @@ export function analyzeIndustries(candidate: ParsedCandidate): IndustrySuggestio
       industryScores.set("Technology", (industryScores.get("Technology") || 0) + 2);
     }
     if (skillsText.includes("react") || skillsText.includes("typescript") || skillsText.includes("node")) {
-      industryScores.set("Technology", (industryScores.get("Technology") || 0) + 3);
+      industryScores.set("Computer Software", (industryScores.get("Computer Software") || 0) + 3);
+      industryScores.set("SaaS", (industryScores.get("SaaS") || 0) + 2);
+      industryScores.set("IT Services & Consulting", (industryScores.get("IT Services & Consulting") || 0) + 1);
       industryScores.set("FinTech", (industryScores.get("FinTech") || 0) + 1);
+    }
+    if (skillsText.includes("aws") || skillsText.includes("azure") || skillsText.includes("gcp") || skillsText.includes("kubernetes") || skillsText.includes("terraform")) {
+      industryScores.set("Cloud Services", (industryScores.get("Cloud Services") || 0) + 3);
+      industryScores.set("IT Services & Consulting", (industryScores.get("IT Services & Consulting") || 0) + 2);
+      reasoning.push("Cloud/DevOps skills suggest IT Services / Cloud");
+    }
+    if (skillsText.includes("salesforce") || skillsText.includes("sap") || skillsText.includes("oracle") || skillsText.includes("erp") || skillsText.includes("workday")) {
+      industryScores.set("IT Services & Consulting", (industryScores.get("IT Services & Consulting") || 0) + 3);
+      industryScores.set("Systems Integration", (industryScores.get("Systems Integration") || 0) + 2);
+      reasoning.push("Enterprise platform expertise suggests IT consulting / systems integration");
+    }
+    if (skillsText.includes("penetration test") || skillsText.includes("siem") || skillsText.includes("soc") || skillsText.includes("infosec") || skillsText.includes("security")) {
+      industryScores.set("Cybersecurity", (industryScores.get("Cybersecurity") || 0) + 3);
+      industryScores.set("Computer & Network Security", (industryScores.get("Computer & Network Security") || 0) + 2);
+    }
+    if (skillsText.includes("data engineering") || skillsText.includes("snowflake") || skillsText.includes("databricks") || skillsText.includes("etl") || skillsText.includes("power bi") || skillsText.includes("tableau")) {
+      industryScores.set("Data & Analytics", (industryScores.get("Data & Analytics") || 0) + 3);
+      industryScores.set("IT Services & Consulting", (industryScores.get("IT Services & Consulting") || 0) + 1);
+    }
+    if (skillsText.includes("digital transformation") || skillsText.includes("change management") || skillsText.includes("agile transformation")) {
+      industryScores.set("IT Services & Consulting", (industryScores.get("IT Services & Consulting") || 0) + 2);
+      industryScores.set("Management Consulting", (industryScores.get("Management Consulting") || 0) + 2);
     }
   }
   

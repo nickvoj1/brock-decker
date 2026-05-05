@@ -2826,6 +2826,28 @@ const INDUSTRY_TO_APOLLO_KEYWORDS: Record<string, string[]> = {
   'quantitative trading': ['quantitative trading', 'algorithmic trading', 'systematic trading'],
   'sales & trading': ['sales trading', 'trading', 'securities'],
   'equity research': ['equity research', 'investment research', 'securities analysis'],
+  // IT Services & Consulting (Apollo industry filter values)
+  'it services & consulting': ['information technology and services', 'it services', 'it consulting'],
+  'computer software': ['computer software', 'software', 'saas'],
+  'saas': ['saas', 'software as a service', 'computer software'],
+  'cloud services': ['information technology and services', 'cloud computing', 'cloud services'],
+  'systems integration': ['information technology and services', 'systems integration'],
+  'cybersecurity': ['computer and network security', 'cybersecurity', 'information security'],
+  'computer & network security': ['computer and network security', 'cybersecurity'],
+  'internet': ['internet'],
+  'internet of things (iot)': ['internet', 'iot', 'connected devices'],
+  'outsourcing / offshoring': ['outsourcing/offshoring', 'outsourcing', 'managed services'],
+  'staffing & recruiting': ['staffing and recruiting', 'recruiting', 'staffing'],
+  'computer hardware': ['computer hardware'],
+  'computer networking': ['computer networking', 'networking'],
+  'semiconductors': ['semiconductors'],
+  'wireless': ['wireless', 'telecommunications'],
+  'data & analytics': ['information technology and services', 'data analytics', 'business intelligence'],
+  'ai & machine learning': ['computer software', 'artificial intelligence', 'machine learning'],
+  'engineering services': ['mechanical or industrial engineering', 'engineering services'],
+  'healthcare it': ['hospital and health care', 'health information technology', 'healthcare it'],
+  'defense & aerospace it': ['defense and space', 'aerospace', 'information technology and services'],
+  'automotive software': ['automotive', 'computer software'],
 }
 
 function getIndustryApolloKeywords(industry: string): string[] {
@@ -2857,6 +2879,22 @@ function getSectorKeywords(sectors: string[]): string[] {
     'agriculture': ['agriculture', 'agri', 'farming', 'agtech', 'food'],
     'government-public': ['government', 'public sector', 'federal', 'municipal'],
     'government & public sector': ['government', 'public sector', 'federal', 'municipal'],
+    // IT / consulting sectors
+    'it-services': ['information technology', 'it services', 'managed services', 'systems integration'],
+    'it services': ['information technology', 'it services', 'managed services', 'systems integration'],
+    'it-consulting': ['it consulting', 'technology consulting', 'digital consulting', 'management consulting'],
+    'it consulting': ['it consulting', 'technology consulting', 'digital consulting'],
+    'software': ['software', 'saas', 'computer software', 'application'],
+    'software & saas': ['software', 'saas', 'computer software', 'application'],
+    'cybersecurity': ['cybersecurity', 'security', 'infosec', 'network security'],
+    'cloud': ['cloud', 'aws', 'azure', 'gcp', 'cloud infrastructure'],
+    'cloud & infrastructure': ['cloud', 'aws', 'azure', 'gcp', 'cloud infrastructure'],
+    'data-analytics': ['data', 'analytics', 'business intelligence', 'data science'],
+    'data & analytics': ['data', 'analytics', 'business intelligence', 'data science'],
+    'digital-transformation': ['digital transformation', 'digital', 'modernization', 'consulting'],
+    'digital transformation': ['digital transformation', 'digital', 'modernization'],
+    'ai-ml': ['artificial intelligence', 'machine learning', 'ai', 'ml', 'deep learning'],
+    'ai & machine learning': ['artificial intelligence', 'machine learning', 'ai', 'ml'],
   }
 
   const out: string[] = []
