@@ -50,6 +50,15 @@ const INDUSTRY_SECTORS = [
   { value: "telecommunications", label: "Telecommunications" },
   { value: "manufacturing", label: "Manufacturing" },
   { value: "agriculture", label: "Agriculture" },
+  // IT services / consulting / tech sectors
+  { value: "it-services", label: "IT Services" },
+  { value: "it-consulting", label: "IT Consulting" },
+  { value: "software", label: "Software & SaaS" },
+  { value: "cybersecurity", label: "Cybersecurity" },
+  { value: "cloud", label: "Cloud & Infrastructure" },
+  { value: "data-analytics", label: "Data & Analytics" },
+  { value: "digital-transformation", label: "Digital Transformation" },
+  { value: "ai-ml", label: "AI & Machine Learning" },
 ];
 
 const INDUSTRY_CATEGORIES: IndustryCategory[] = [
