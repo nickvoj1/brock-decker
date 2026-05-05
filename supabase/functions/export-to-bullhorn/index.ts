@@ -2069,6 +2069,13 @@ Deno.serve(async (req) => {
 
     // Process contacts sequentially to avoid Bullhorn rate limits (429)
     for (let i = startIndex; i < endIndex; i++) {
+      // Time-budget guard: bail out before edge function 150s idle timeout
+      if (Date.now() - CHUNK_START_TIME > TIME_BUDGET_MS) {
+        console.warn(`Time budget reached at contact ${i}/${contactsToExport.length}; ending chunk early`)
+        endIndex = i
+        isFinalChunk = endIndex >= contactsToExport.length
+        break
+      }
       const contact = contactsToExport[i]
       if ((i - startIndex + 1) % 20 === 0 || i === startIndex) {
         console.log(`Processing contact ${i + 1}/${contactsToExport.length}`)
