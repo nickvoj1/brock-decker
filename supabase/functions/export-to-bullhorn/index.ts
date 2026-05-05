@@ -1966,7 +1966,10 @@ Deno.serve(async (req) => {
       chunkSize?: number;
     }
     const startIndex = reqStartIndex || 0
-    const CHUNK_SIZE = reqChunkSize || 150
+    const CHUNK_SIZE = reqChunkSize || 50
+    // Wall-clock budget to exit before the 150s edge timeout (leave headroom for finalization)
+    const CHUNK_START_TIME = Date.now()
+    const TIME_BUDGET_MS = 110_000
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
