@@ -83,12 +83,11 @@ function normalizeLocationExpression(value: string): string {
 }
 
 function mapTimeRange(postedAfter: string): string {
+  // Apify actor only accepts: "1h", "24h", "7d", "6m"
   const v = String(postedAfter || "").toLowerCase();
   if (v === "1hour" || v === "1h") return "1h";
-  if (v === "24hours" || v === "24h") return "24h";
-  if (v === "14days" || v === "14d" || v === "2weeks") return "14d";
-  if (v === "30days" || v === "30d") return "30d";
-  if (v === "6m") return "6m";
+  if (v === "24hours" || v === "24h" || v === "1day" || v === "1d") return "24h";
+  if (v === "14days" || v === "14d" || v === "2weeks" || v === "30days" || v === "30d" || v === "6m" || v === "6months") return "6m";
   return "7d";
 }
 
