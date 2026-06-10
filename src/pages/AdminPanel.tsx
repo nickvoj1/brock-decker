@@ -366,7 +366,15 @@ export default function AdminPanel() {
             <TabsTrigger value="bullhorn" className="gap-2">
               <Database className="h-4 w-4" /> Bullhorn Sync
             </TabsTrigger>
+            <TabsTrigger value="tokens" className="gap-2">
+              <KeyRound className="h-4 w-4" /> API Tokens
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="tokens">
+            <ApiTokensPanel profileName={ADMIN_PROFILE} />
+          </TabsContent>
+
 
           <TabsContent value="runs">
             <Card>
