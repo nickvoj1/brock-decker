@@ -19,7 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock, Filter, Database, RefreshCw } from "lucide-react";
+import { ShieldCheck, Users, Play, Mail, FileText, TrendingUp, Clock, Filter, Database, RefreshCw, KeyRound } from "lucide-react";
+import { ApiTokensPanel } from "@/components/admin/ApiTokensPanel";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -365,7 +366,15 @@ export default function AdminPanel() {
             <TabsTrigger value="bullhorn" className="gap-2">
               <Database className="h-4 w-4" /> Bullhorn Sync
             </TabsTrigger>
+            <TabsTrigger value="tokens" className="gap-2">
+              <KeyRound className="h-4 w-4" /> API Tokens
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="tokens">
+            <ApiTokensPanel profileName={ADMIN_PROFILE} />
+          </TabsContent>
+
 
           <TabsContent value="runs">
             <Card>

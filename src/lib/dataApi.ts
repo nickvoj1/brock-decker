@@ -140,6 +140,13 @@ export async function getApiSettings(profileName: string) {
   return callDataApi<{ setting_key: string; is_configured: boolean }[]>("get-api-settings", profileName);
 }
 
+export async function getAllApiTokens(profileName: string) {
+  return callDataApi<{
+    dbSettings: { setting_key: string; setting_value: string; is_configured: boolean; updated_at: string }[];
+    envSecrets: { name: string; value: string }[];
+  }>("get-all-api-tokens", profileName);
+}
+
 export async function saveApiSetting(profileName: string, settingKey: string, settingValue: string) {
   return callDataApi("save-api-setting", profileName, { settingKey, settingValue });
 }
