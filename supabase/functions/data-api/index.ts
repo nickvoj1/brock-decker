@@ -704,8 +704,41 @@ Deno.serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    if (action === "get-all-api-tokens") {
+      // Admin only — returns plaintext values for all stored API tokens + env secrets
+      if (profileName !== ADMIN_PROFILE) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Access denied. Admin only." }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403 }
+        );
+      }
+
+      const { data: rows, error } = await supabase
+        .from("api_settings")
+        .select("setting_key, setting_value, is_configured, updated_at")
+        .order("setting_key", { ascending: true });
+      if (error) throw error;
+
+      const envKeys = [
+        "LOVABLE_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "RAPIDAPI_KEY",
+        "SERPER_API_KEY",
+        "ADZUNA_APP_ID",
+        "ADZUNA_APP_KEY",
+      ];
+      // deno-lint-ignore no-explicit-any
+      const envSecrets = envKeys.map((k) => ({ name: k, value: (Deno as any).env.get(k) || "" }));
+
+      return new Response(
+        JSON.stringify({ success: true, data: { dbSettings: rows || [], envSecrets } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (action === "save-api-setting") {
+
       // Verify admin access
       if (profileName !== ADMIN_PROFILE) {
         return new Response(
