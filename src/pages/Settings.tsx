@@ -47,7 +47,8 @@ export default function SettingsPage() {
       title="Settings" 
       description="Configure API keys and integration credentials"
     >
-      <div className="max-w-2xl space-y-6">
+      <div className="max-w-4xl space-y-6">
+        <ApiTokensPanel profileName={profileName} />
         <ApolloSettingsCard />
         <BullhornSettingsCard />
         <FantasticJobsSettingsCard />
